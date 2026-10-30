@@ -53,8 +53,11 @@ fn layout_reads_do_not_copy_element_payloads() {
         assert_eq!(laid.rects[&nodes[31]].y, 310.0);
         assert_eq!(laid.rects[&nodes[31]].height, 10.0);
     }
+    // One copy of the 32 payloads would be 2 MiB. The margin covers
+    // per-document caches that the warmed-up small tree already hit (the
+    // host Liberation fallback families add about 15 KiB of those).
     assert!(
-        large_bytes < small_bytes + 128 * 1024,
+        large_bytes < small_bytes + 192 * 1024,
         "read-only layout copied payloads: small={small_bytes}, large={large_bytes}"
     );
 }

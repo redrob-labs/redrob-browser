@@ -1175,14 +1175,13 @@ fn long_text_run_wraps_across_multiple_lines() {
     // Tightest element enclosing the text: the 100px div itself.
     let mut div_rect: Option<obscura_render::Rect> = None;
     for (id, rect) in &layout.rects {
-        if tree.text_content(*id).contains("several lines") {
-            if div_rect
+        if tree.text_content(*id).contains("several lines")
+            && div_rect
                 .as_ref()
                 .map(|d| rect.width * rect.height < d.width * d.height)
                 .unwrap_or(true)
-            {
-                div_rect = Some(*rect);
-            }
+        {
+            div_rect = Some(*rect);
         }
     }
     let div_rect = div_rect.expect("text container laid out");
@@ -1983,10 +1982,15 @@ fn text_alignment_does_not_shrink_block_children_or_wrap_inline_block_rows() {
         (row.width - 900.0).abs() < 0.01,
         "text-align must not shrink-wrap an auto-width block child: {row:?}"
     );
+    // Chrome: one line; "Why Vue" sits on its text baseline (y=26) while the
+    // empty inline-blocks sit on their bottom edges (y=0), x 230/340/450/560.
     assert!(
         items
-            .windows(2)
-            .all(|pair| (pair[0].y - pair[1].y).abs() < 0.01),
+            .iter()
+            .zip([230.0, 340.0, 450.0, 560.0])
+            .all(|(item, x)| (item.x - x).abs() < 0.5)
+            && (items[0].y - 26.0).abs() < 0.5
+            && items[1..].iter().all(|item| item.y.abs() < 0.01),
         "inline-block items should share one line when the block has room: {items:?}"
     );
     assert!(
@@ -2033,8 +2037,12 @@ fn non_replaced_inline_ignores_used_width_height_and_min_max_sizes() {
         token.height < 40.0,
         "height/min-height/max-height do not apply to a non-replaced inline: {token:?}"
     );
+    // Chrome: same line; the monospace font box is 18px and the serif one
+    // 17px, so their tops are y=2 and y=1 (after at x=76.69).
     assert!(
-        after.x >= token.x + token.width - 0.01 && (after.y - token.y).abs() < 0.01,
+        after.x >= token.x + token.width - 0.01
+            && (token.y - 2.0).abs() < 0.01
+            && (after.y - 1.0).abs() < 0.01,
         "the following inline must remain on the same line: {token:?} {after:?}"
     );
 }
@@ -2238,7 +2246,9 @@ fn inline_block_flex_items_keep_block_inner_flow() {
         (chips.x - 0.0).abs() < 0.01
             && (chips.y - 140.0).abs() < 0.01
             && (chips.width - 90.0).abs() < 0.01
-            && (chips.height - 20.0).abs() < 0.01
+            // Chrome: 24px (the line box holds the inline-block items on
+            // the baseline plus the strut's descent).
+            && (chips.height - 24.0).abs() < 0.01
             && (alpha.x - 0.0).abs() < 0.01
             && (beta.x - 30.0).abs() < 0.01
             && (gamma.x - 60.0).abs() < 0.01,
@@ -3792,7 +3802,7 @@ fn percentage_max_replaced_items_shrink_in_a_flex_row() {
     let columns =
         ["c1", "c2", "c3", "c4", "c5"].map(|id| layout.rects[&tree.get_element_by_id(id).unwrap()]);
     let images = ids.map(|id| layout.rects[&id]);
-    let expected_widths: [f32; 5] = [233.328125, 154.0, 385.03125, 154.015625, 225.625];
+    let expected_widths: [f32; 5] = [233.328_12, 154.0, 385.031_25, 154.015_63, 225.625];
 
     assert!((row.width - 1184.0).abs() < 0.01, "{row:?}");
     assert!(
@@ -3861,7 +3871,7 @@ fn functional_percentage_max_replaced_items_shrink_in_a_flex_row() {
     let columns =
         ["c1", "c2", "c3", "c4", "c5"].map(|id| layout.rects[&tree.get_element_by_id(id).unwrap()]);
     let images = ids.map(|id| layout.rects[&id]);
-    let expected_widths: [f32; 5] = [233.328125, 154.0, 385.03125, 154.015625, 225.625];
+    let expected_widths: [f32; 5] = [233.328_12, 154.0, 385.031_25, 154.015_63, 225.625];
 
     for (index, expected) in expected_widths.into_iter().enumerate() {
         let expected = expected.round();
@@ -4101,6 +4111,7 @@ fn negative_letter_spacing_changes_intrinsic_line_breaks() {
             line-height:40px;
             font-weight:500;
             padding-inline:8px;
+            font-family:Arial;
           }
           #tight { letter-spacing:var(--tracking-tighter) }
           #reset { letter-spacing:normal }
@@ -4375,7 +4386,11 @@ fn positioned_counter_inside_nested_inline_code_uses_the_code_gutter() {
             .flat_map(|y| x_range.clone().map(move |x| (x, y)))
             .filter(|&(x, y)| {
                 let pixel = pixmap.pixel(x, y).expect("inside pixmap");
-                pixel.red() > 160 && pixel.green() < 100 && pixel.blue() < 100
+                // Red counter ink over the black gutter keeps green and blue
+                // at zero at any coverage. The LCD colour fringe of the
+                // pink source text is red-leaning but keeps a fraction of
+                // pink's green and blue, so it is not counter ink.
+                pixel.red() > 160 && pixel.green() < 24 && pixel.blue() < 24
             })
             .count()
     };
@@ -4504,14 +4519,16 @@ fn percentage_height_inside_floated_and_inline_block_controls_uses_content_box()
 
     assert_eq!(rect("floated").height, 44.0);
     assert_eq!(rect("inline").height, 44.0);
+    // Chrome: 38px. The buttons' 2px UA borders and 1px padding come off
+    // the 44px border box on both axes of the percentage basis.
     assert_eq!(
         rect("float-icon").height,
-        42.0,
+        38.0,
         "a floated containing block retains its definite content-box basis"
     );
     assert_eq!(
         rect("inline-icon").height,
-        42.0,
+        38.0,
         "border-box padding must not leak into the child percentage basis"
     );
 }
@@ -5121,4 +5138,82 @@ fn float_ending_at_rounded_segment_boundary_does_not_panic() {
         place(&mut context, 400.3333, FloatDirection::Left).y,
         1859.0
     );
+}
+
+#[test]
+fn deeply_nested_inline_spans_and_decorated_wrappers_lay_out() {
+    // 400 nested inline spans around text (one inline formatting context),
+    // and 400 nested spans that each hold text and, innermost, a block
+    // (block-in-inline), on the default test-thread stack.
+    for (open_tag, inner) in [
+        ("<span>", "<b id=\"deep\">deep</b>"),
+        (
+            "<span>t ",
+            "<div id=\"deep\" style=\"width:50px\">deep</div>",
+        ),
+    ] {
+        let open = open_tag.repeat(400);
+        let close = "</span>".repeat(400);
+        let tree = parse_html(&format!(
+            "<style>html,body{{margin:0;font:16px/18px monospace}}</style><div>{open}{inner}{close}</div>"
+        ));
+        let layout = layout_dom(&tree, (400.0, 200.0));
+        let rect = layout.rects[&tree.get_element_by_id("deep").unwrap()];
+        assert!(
+            rect.width > 0.0 && rect.height > 0.0,
+            "{open_tag}: {rect:?}"
+        );
+    }
+}
+
+#[test]
+fn percentage_height_inside_display_contents_flex_item_resolves() {
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0">
+        <div style="height:900px;display:flex;flex-flow:column;width:100%;position:relative">
+          <div style="display:contents">
+            <div id=c style="flex:none;width:100%;height:70%;min-height:650px;position:relative">
+              <div id=x style="height:100%;width:100%;display:flex;position:relative"><div style="height:50px"></div></div>
+            </div>
+          </div>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (1280.0, 800.0));
+    let c = tree.get_element_by_id("c").unwrap();
+    let x = tree.get_element_by_id("x").unwrap();
+    assert_eq!(layout.rects[&c].height, 650.0);
+    assert_eq!(
+        layout.rects[&x].height, 650.0,
+        "height:100% of a flex item reached through display:contents"
+    );
+}
+
+#[test]
+fn percentage_height_inside_inset_abspos_box_of_an_aspect_ratio_box() {
+    // Framer image fills: an aspect-ratio box, an absolutely positioned
+    // inset:0 layer, and an <img> at height:100% of that layer.
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0">
+        <div style="width:330px;aspect-ratio:1.65 / 1;position:relative">
+          <div style="position:absolute;top:0;right:0;bottom:0;left:0">
+            <div id=fill style="display:block;width:100%;height:100%"></div>
+          </div>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (800.0, 600.0));
+    let fill = tree.get_element_by_id("fill").unwrap();
+    assert_eq!(layout.rects[&fill].height, 200.0);
+}
+
+#[test]
+fn webkit_line_clamp_counts_lines_of_a_block_descendant() {
+    let tree = parse_html(
+        r#"<!doctype html><html><body style="margin:0;font:16px/24px sans-serif">
+        <div style="width:120px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden">
+          <p id=p style="margin:0">one two three four five six seven eight nine ten eleven twelve</p>
+        </div></body></html>"#,
+    );
+    let layout = layout_dom(&tree, (800.0, 600.0));
+    let p = tree.get_element_by_id("p").unwrap();
+    assert_eq!(layout.rects[&p].height, 48.0, "two clamped lines");
 }

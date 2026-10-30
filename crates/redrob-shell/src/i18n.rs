@@ -170,6 +170,7 @@ fn ko(en: &str) -> Option<&'static str> {
         "Prompts typed after / in the address bar go here. Only this computer is allowed." => {
             "주소창에서 / 뒤에 입력한 요청을 이 주소로 보내요. 이 컴퓨터만 쓸 수 있어요."
         }
+        "New window" => "새 창",
         "New incognito window" => "새 시크릿 창",
         "Move to new window" => "새 창으로 옮기기",
         "Could not open a new window: {0}" => "새 창을 열지 못했어요: {0}",
@@ -305,6 +306,7 @@ fn ko(en: &str) -> Option<&'static str> {
         }
         "the new app's signature did not verify" => "새 앱의 서명을 확인하지 못했어요",
         // Media
+        "This page cannot be drawn: {0}" => "이 페이지를 그릴 수 없어요: {0}",
         "Play" => "재생",
         "Pause" => "일시정지",
         // Protected video

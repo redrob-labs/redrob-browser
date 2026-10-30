@@ -9,6 +9,7 @@ pub mod indexed_db;
 pub mod markdown;
 pub mod module_loader;
 pub mod ops;
+pub mod parser_script;
 pub mod runtime;
 pub mod v8_flags;
 mod write_stream;
@@ -33,3 +34,5 @@ pub use obscura_render::{
     CaptureError, CaptureRegion, CssMediaType, ImageRequestProfile, Rect, RenderResourceCache,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
+#[cfg(feature = "render")]
+pub use obscura_render::{redrob_scene, SceneFrame};

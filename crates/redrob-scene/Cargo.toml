@@ -1,0 +1,11 @@
+[package]
+name = "redrob-scene"
+description = "Frame protocol between the Redrob Browser engine and its GPU compositor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+bincode = { workspace = true }

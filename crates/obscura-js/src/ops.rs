@@ -664,6 +664,16 @@ pub struct ObscuraState {
     /// Cheap native signal that the current parser script wrote another
     /// script. This avoids polling V8 after every ordinary parser script.
     pub(crate) document_write_inserted_script: Cell<bool>,
+    /// The document's streaming parser while the main document is being
+    /// parsed. `document.write` from a parser-inserted script feeds it.
+    pub(crate) html_parser: RefCell<Option<Rc<obscura_dom::StreamingParser>>>,
+    /// HTML's script nesting level: parser-inserted scripts running now.
+    pub(crate) parser_script_depth: Cell<u32>,
+    /// Non-inline scripts written into the parser, in order, for the page
+    /// driver to prepare once the writing script returns.
+    pub(crate) parser_written_scripts: RefCell<Vec<NodeId>>,
+    /// A written external classic script blocks the parser.
+    pub(crate) parser_blocking_written: Cell<bool>,
 }
 
 /// A frame document waiting to be given a realm.
@@ -854,6 +864,10 @@ impl ObscuraState {
             already_started_scripts: RefCell::new(HashSet::new()),
             write_stream: RefCell::new(None),
             document_write_inserted_script: Cell::new(false),
+            html_parser: RefCell::new(None),
+            parser_script_depth: Cell::new(0),
+            parser_written_scripts: RefCell::new(Vec::new()),
+            parser_blocking_written: Cell::new(false),
         }
     }
     #[cfg(feature = "render")]
@@ -1321,6 +1335,25 @@ impl RealmStates {
         {
             self.forget_frame(id);
         }
+    }
+
+    /// The live child documents `parent`'s current document owns, with the
+    /// node of the element (`<iframe>`) that holds each.
+    #[cfg(feature = "render")]
+    pub(crate) fn child_frames(&self, parent: &SharedState) -> Vec<(NodeId, SharedState)> {
+        let generation = parent.borrow().document_generation;
+        self.entries
+            .iter()
+            .filter_map(|(_, frame_id, state)| {
+                let timers = self.frame_timers.get(frame_id)?;
+                let (owner, node, owner_generation) = timers.owner.as_ref()?;
+                let owner = owner.upgrade()?;
+                (Rc::ptr_eq(&owner, parent)
+                    && *owner_generation == generation
+                    && !timers.cancel.is_canceled())
+                .then(|| (*node, state.clone()))
+            })
+            .collect()
     }
 
     fn own_frame(&mut self, frame_id: u32, parent: &SharedState, node: NodeId) {
@@ -2000,7 +2033,20 @@ fn render_timing_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_RENDER_TIMING").is_some())
 }
 
-#[cfg(feature = "render")]
+/// The document parser inserted nodes natively, outside the mutation ops
+/// that normally invalidate render state.
+pub(crate) fn note_parser_dom_progress(state: &mut ObscuraState) {
+    state.activity_generation = state.activity_generation.wrapping_add(1);
+    #[cfg(feature = "render")]
+    {
+        state.prepared_render = None;
+        state.pending_style_mutations.clear();
+        state.style_query_cache = None;
+        state.resolved_scroll = None;
+        state.base_url_cache.get_mut().take();
+    }
+}
+
 fn is_render_mutation_command(cmd: &str) -> bool {
     matches!(
         cmd,
@@ -2365,6 +2411,38 @@ fn op_dom(
 }
 
 fn op_dom_inner(shared: SharedState, cmd: String, arg1: String, arg2: String) -> String {
+    // document.write while a parser-inserted script runs: the text goes into
+    // the document parser at the insertion point. Returns null when the
+    // parser is not paused at a script, [] when the written text is used up,
+    // or [nid] for an inline script it closed, which the caller runs before
+    // continuing with "parser_write_continue".
+    if cmd == "parser_write" || cmd == "parser_write_continue" {
+        let result = {
+            let gs = shared.borrow();
+            crate::parser_script::parser_write(&gs, &arg2, cmd == "parser_write_continue")
+        };
+        return match result {
+            Err(()) => "null".into(),
+            Ok(step) => {
+                note_parser_dom_progress(&mut shared.borrow_mut());
+                step.map_or_else(|| "[]".into(), |node| format!("[{}]", node.index()))
+            }
+        };
+    }
+    // Nodes the document parser inserted since the last call, as a flat
+    // [parent, node, ...] list.
+    if cmd == "parser_take_insertions" {
+        let gs = shared.borrow();
+        let flat: Vec<usize> = gs
+            .dom
+            .as_ref()
+            .map(|dom| dom.take_parser_insertions())
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|(parent, node)| [parent.index(), node.index()])
+            .collect();
+        return serde_json::to_string(&flat).unwrap_or("[]".into());
+    }
     if cmd == "prefers_reduced_motion" {
         return shared.borrow().media_preferences.get().0.to_string();
     }
@@ -8206,6 +8284,8 @@ fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
 }
 
 pub fn build_extension() -> Extension {
+    // Render-only ops are pushed below behind cfg(feature = "render").
+    #[cfg_attr(not(feature = "render"), allow(unused_mut))]
     let mut ops = vec![
         op_dom(),
         op_script_mark_started(),
@@ -8277,10 +8357,17 @@ pub fn build_extension() -> Extension {
         ops.push(op_layout_geometry());
         ops.push(op_layout_box_metrics());
         ops.push(op_layout_hit_test());
+        ops.push(op_layout_hit_test_all());
+        ops.push(op_video_frame_metadata());
         ops.push(op_layout_caret());
         ops.push(op_layout_caret_rect());
+        ops.push(op_layout_text_rects());
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
+        ops.push(op_measure_text());
+        ops.push(op_text_run_metrics());
+        ops.push(op_svg_image_natural_size());
+        ops.push(op_font_face_states());
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
         ops.push(op_css_supports());
@@ -8291,6 +8378,8 @@ pub fn build_extension() -> Extension {
         ops.push(op_scroll_to());
         ops.push(op_waapi_create());
         ops.push(op_waapi_control());
+        ops.push(op_css_animations());
+        ops.push(op_css_animation_control());
     }
     Extension {
         name: "obscura_dom",
@@ -8465,6 +8554,59 @@ fn op_waapi_control(state: &OpState, id: f64, #[string] action: &str, value: f64
     changed
 }
 
+/// `[[nid, animation-name, paused, currentTime], ...]` of the document's
+/// running CSS animations (document.getAnimations()).
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_css_animations(state: &OpState) -> String {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    // Instances exist once a style flush has sampled them. Build a first
+    // layout when there is none, but never flush pending style work here:
+    // getComputedStyle asks for the element's running animations on every
+    // read.
+    if gs.prepared_render.is_none() {
+        let _ = ensure_prepared_render(&mut gs);
+    }
+    let now = waapi_document_time_ms(&gs);
+    let rows: Vec<_> = gs
+        .animation_timeline
+        .css_animations(now)
+        .into_iter()
+        .map(|(node, name, paused, current)| {
+            serde_json::json!([node.index(), name, paused, current])
+        })
+        .collect();
+    serde_json::Value::Array(rows).to_string()
+}
+
+#[cfg(feature = "render")]
+#[op2(fast)]
+fn op_css_animation_control(state: &OpState, nid: u32, #[string] action: &str, value: f64) -> bool {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    let node = NodeId::new(nid);
+    let now = waapi_document_time_ms(&gs);
+    let changed = gs
+        .animation_timeline
+        .control_css_animation(node, action, value as f32, now);
+    if changed {
+        if gs.prepared_render.is_some()
+            && !queue_retained_style_mutation(
+                &mut gs.pending_style_mutations,
+                obscura_render::RetainedStyleMutation::Animation { node },
+            )
+        {
+            gs.prepared_render = None;
+            gs.pending_style_mutations.clear();
+        }
+        gs.resolved_scroll = None;
+        gs.activity_generation = gs.activity_generation.wrapping_add(1);
+    }
+    changed
+}
+
 // Rendering and JS URL reflection share one document-generation cache. Geometry
 // and image getters must not run a whole-document selector on every read.
 pub(crate) fn document_base_url(state: &ObscuraState) -> Option<String> {
@@ -8568,9 +8710,15 @@ fn ensure_prepared_render_with_base_url(
     let incompatible = state.prepared_render.as_ref().is_some_and(|prepared| {
         prepared.viewport() != viewport || prepared.base_url() != base_url.as_deref()
     });
+    // Scrolling a deferred `loading=lazy` image within the lazy-load
+    // distance loads it, which changes layout.
+    let lazy_image_due = state
+        .render_resources
+        .note_viewport_bottom(state.scroll_offset.1 + viewport.1);
     let needs_rebuild = state.prepared_render.as_ref().map_or(true, |prepared| {
         incompatible || prepared.animation_sample() != animation_sample
-    }) || !state.pending_style_mutations.is_empty();
+    }) || !state.pending_style_mutations.is_empty()
+        || lazy_image_due;
     if needs_rebuild {
         if let Some(dom) = state.dom.as_ref() {
             state.animation_timeline.materialize_start_candidates(dom);
@@ -8680,8 +8828,19 @@ fn document_base_url_for_javascript_task(state: &ObscuraState) -> Option<String>
 #[cfg(feature = "render")]
 fn ensure_prepared_geometry(state: &mut ObscuraState) -> Option<&obscura_render::PreparedRender> {
     let base_url = document_base_url_for_javascript_task(state);
-    let reusable = state.pending_style_mutations.is_empty()
-        && !state.animation_timeline.has_pending_start_candidates()
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
+    let reusable = (state.pending_style_mutations.is_empty() || hidden_only)
+        && (!state.animation_timeline.has_pending_start_candidates() || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
@@ -8722,15 +8881,27 @@ fn ensure_prepared_box_metrics(
                         )
             )
         });
+    // A selector-only change inside a display:none subtree keeps every box.
+    // Its animation start candidates are hidden too, so they start nothing.
+    let hidden_only = !state.pending_style_mutations.is_empty()
+        && match (state.prepared_render.as_ref(), state.dom.as_ref()) {
+            (Some(prepared), Some(dom)) => prepared.geometry_survives_hidden_mutations(
+                dom,
+                &mut state.stylesheet_cache,
+                &state.pending_style_mutations,
+            ),
+            _ => false,
+        };
     let reusable = (!state.animation_timeline.has_pending_start_candidates()
-        || paint_only_inline_styles)
+        || paint_only_inline_styles
+        || hidden_only)
         && state.prepared_render.as_ref().is_some_and(|prepared| {
             prepared.viewport() == state.viewport
                 && prepared.base_url() == base_url.as_deref()
                 && (prepared.animation_sample() == state.animation_sample
                     || prepared.can_reuse_geometry_for_animation_sample(state.animation_sample))
         })
-        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles);
+        && (state.pending_style_mutations.is_empty() || paint_only_inline_styles || hidden_only);
     if reusable {
         return state.prepared_render.as_ref();
     }
@@ -9323,6 +9494,62 @@ fn op_layout_geometry(state: &OpState, #[string] nid_str: String, frame_id: u32)
     String::new()
 }
 
+/// Client rects of the UTF-16 range `start..end` of a text node, as a JSON
+/// array of `{x, y, width, height}` in viewport CSS pixels (empty string when
+/// the text has no layout). Feature-gated.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_layout_text_rects(
+    state: &OpState,
+    #[string] nid_str: String,
+    start: u32,
+    end: u32,
+    frame_id: u32,
+) -> String {
+    let shared = frame_state(state, frame_id);
+    let nid: u32 = nid_str.parse().unwrap_or(0);
+    let nid = obscura_dom::tree::NodeId::new(nid);
+    let mut gs = shared.borrow_mut();
+    sample_live_document_animations(&mut gs);
+    if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
+        return String::new();
+    }
+    let gs = &*gs;
+    let Some((_, scroll)) = gs.resolved_scroll.as_ref() else {
+        return String::new();
+    };
+    let Some(prepared) = gs.prepared_render.as_ref() else {
+        return String::new();
+    };
+    let Some(dom) = gs.dom.as_ref() else {
+        return String::new();
+    };
+    let Some(rects) = prepared.text_range_client_rects_with_scroll(
+        dom,
+        nid,
+        start as usize,
+        end as usize,
+        scroll,
+    ) else {
+        return String::new();
+    };
+    serde_json::Value::Array(
+        rects
+            .into_iter()
+            .map(|rect| {
+                serde_json::json!({
+                    "x": rect.x,
+                    "y": rect.y,
+                    "width": rect.width,
+                    "height": rect.height,
+                })
+            })
+            .collect(),
+    )
+    .to_string()
+}
+
 /// Untransformed padding- and border-box sizes for CSSOM View. Keeping this
 /// separate from visual geometry is both spec-correct and lets transform-only
 /// style writes retain layout until a visual consumer actually needs them.
@@ -9375,6 +9602,82 @@ fn op_layout_hit_test(state: &OpState, x: f64, y: f64, frame_id: u32) -> i32 {
     prepared
         .hit_test(dom, scroll, x as f32, y as f32)
         .map_or(-1, |id| id.index() as i32)
+}
+
+/// Size, duration and audio presence of `<video>` `nid` at `time` seconds,
+/// as JSON, or "" until its frame decodes (docs/MEDIA.md). Records `time` as
+/// the position captures paint.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_video_frame_metadata(state: &OpState, nid: u32, time: f64, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    let node = NodeId::new(nid);
+    let base = document_base_url(&gs);
+    let Some(url) = gs
+        .dom
+        .as_ref()
+        .and_then(|dom| obscura_render::video_media_url(dom, node, base.as_deref()))
+    else {
+        return String::new();
+    };
+    let time = if time.is_finite() { time.max(0.0) } else { 0.0 };
+    if (gs.render_resources.video_time(node) - time).abs() > 1e-6 {
+        gs.render_resources.set_video_time(node, time);
+        // The painted frame follows the position.
+        gs.prepared_render = None;
+        gs.resolved_scroll = None;
+    }
+    match gs.render_resources.video_frame(&url, time) {
+        Some(frame) => serde_json::json!({
+            "width": frame.width,
+            "height": frame.height,
+            "duration": if frame.duration.is_finite() { serde_json::json!(frame.duration) } else { serde_json::Value::Null },
+            "hasAudio": frame.has_audio,
+        })
+        .to_string(),
+        // No decoder (or not decodable): the container header still gives
+        // the natural size, so metadata is known (HAVE_METADATA).
+        None => match gs.render_resources.video_header_dimensions(&url) {
+            Some((width, height)) => serde_json::json!({
+                "width": width,
+                "height": height,
+                "duration": serde_json::Value::Null,
+                "hasAudio": false,
+                "metadataOnly": true,
+            })
+            .to_string(),
+            None => String::new(),
+        },
+    }
+}
+
+/// Every rendered element containing the point, topmost first, as a JSON
+/// array of native node ids (`document.elementsFromPoint`).
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_layout_hit_test_all(state: &OpState, x: f64, y: f64, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    sample_live_document_animations(&mut gs);
+    if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
+        return "[]".to_string();
+    }
+    let (Some((_, scroll)), Some(prepared), Some(dom)) = (
+        gs.resolved_scroll.as_ref(),
+        gs.prepared_render.as_ref(),
+        gs.dom.as_ref(),
+    ) else {
+        return "[]".to_string();
+    };
+    let ids: Vec<usize> = prepared
+        .hit_test_all(dom, scroll, x as f32, y as f32, usize::MAX)
+        .into_iter()
+        .map(|id| id.index())
+        .collect();
+    serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string())
 }
 
 #[cfg(feature = "render")]
@@ -9508,6 +9811,153 @@ fn op_resize_observer_measurements(
 /// a separate retained-layout rebuild.
 ///
 /// Results are index-aligned with the input. A `null` entry means that the node
+/// FontFace status of CSS-connected faces from what the renderer did:
+/// `[{"family", "urls": [absolute...]}]` -> `["loaded"|"loading"|"error"|
+/// "unloaded", ...]`. A face is loaded when the renderer holds bytes for
+/// one of its sources and the last layout used its family (Chrome loads a
+/// face only when text needs it), loading while a source is in flight,
+/// error when every source failed.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_font_face_states(state: &OpState, #[string] faces: String, frame_id: u32) -> String {
+    #[derive(serde::Deserialize)]
+    struct Face {
+        family: String,
+        urls: Vec<String>,
+    }
+    let Ok(faces) = serde_json::from_str::<Vec<Face>>(&faces) else {
+        return "[]".into();
+    };
+    let shared = frame_state(state, frame_id);
+    let state = shared.borrow();
+    let normalize = |family: &str| {
+        family
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .trim()
+            .to_ascii_lowercase()
+    };
+    let used: std::collections::HashSet<String> = state
+        .prepared_render
+        .as_ref()
+        .map(|prepared| {
+            let mut used = std::collections::HashSet::new();
+            // The first declared web font family of each element's list:
+            // later families are only fallbacks Chrome loads on demand.
+            let declared: std::collections::HashSet<String> =
+                faces.iter().map(|face| normalize(&face.family)).collect();
+            for style in prepared.layout().styles.values() {
+                if let Some(families) = style.font_family.as_deref() {
+                    if let Some(family) = families
+                        .split(',')
+                        .map(normalize)
+                        .find(|family| declared.contains(family))
+                    {
+                        used.insert(family);
+                    }
+                }
+            }
+            used
+        })
+        .unwrap_or_default();
+    let in_flight = |url: &str| {
+        state
+            .render_resource_in_flight
+            .iter()
+            .any(|(pending, _, is_font)| *is_font && pending == url)
+    };
+    let statuses: Vec<&str> = faces
+        .iter()
+        .map(|face| {
+            if face.urls.iter().any(|url| in_flight(url)) {
+                return "loading";
+            }
+            let loaded = face
+                .urls
+                .iter()
+                .any(|url| state.render_resources.has_cached_bytes(url));
+            if loaded {
+                return if used.contains(&normalize(&face.family)) {
+                    "loaded"
+                } else {
+                    "unloaded"
+                };
+            }
+            let failed = !face.urls.is_empty()
+                && face
+                    .urls
+                    .iter()
+                    .all(|url| state.render_resources.has_live_outcome(url));
+            if failed && used.contains(&normalize(&face.family)) {
+                "error"
+            } else {
+                "unloaded"
+            }
+        })
+        .collect();
+    serde_json::to_string(&statuses).unwrap_or_else(|_| "[]".into())
+}
+
+/// Advance width of `text` in the canvas `font` shorthand, measured with the
+/// renderer's fonts (CanvasRenderingContext2D.measureText).
+#[cfg(feature = "render")]
+#[op2(fast)]
+fn op_measure_text(#[string] text: String, #[string] font: String) -> f64 {
+    obscura_render::measure_text_with_font_shorthand(&text, &font).map_or(-1.0, f64::from)
+}
+
+/// `[width, height]` of the cached image an SVG `<image>` names, or `null`
+/// while its bytes are not loaded.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_svg_image_natural_size(state: &OpState, #[string] href: String, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    let base_url = document_base_url(&gs);
+    obscura_render::cached_image_natural_size(&href, base_url.as_deref(), &mut gs.render_resources)
+        .map_or_else(
+            || "null".to_string(),
+            |(width, height)| serde_json::json!([width, height]).to_string(),
+        )
+}
+
+/// `[width, ascent, descent]` of `text` in the document's fonts (web fonts
+/// included) at `size` px, or `null`.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_text_run_metrics(
+    state: &OpState,
+    #[string] text: String,
+    #[string] family: String,
+    #[string] weight: String,
+    italic: bool,
+    size: f64,
+    frame_id: u32,
+) -> String {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let shared = frame_state(state, frame_id);
+        let mut gs = shared.borrow_mut();
+        ensure_prepared_render(&mut gs)?;
+        let gs = &mut *gs;
+        let dom = gs.dom.as_ref()?;
+        let (width, ascent, descent) = gs.prepared_render.as_mut()?.measure_text_run(
+            dom,
+            &text,
+            &family,
+            &weight,
+            italic,
+            size as f32,
+        )?;
+        Some(serde_json::json!([width, ascent, descent]).to_string())
+    }))
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "null".into())
+}
+
 /// currently generates no layout box (for example, it is detached or hidden).
 #[cfg(feature = "render")]
 #[op2]
@@ -9652,9 +10102,16 @@ fn op_computed_style(
         pseudo.as_str(),
         ":before" | "::before" | ":after" | "::after"
     ) {
-        let Some((content, display)) =
-            prepared.computed_pseudo_content(nid, pseudo.ends_with("before"))
-        else {
+        let before = pseudo.ends_with("before");
+        // A generated box: its full computed style, geometry included.
+        if let Some(snapshot) = prepared.computed_pseudo_style(nid, before) {
+            let object: serde_json::Map<String, serde_json::Value> = snapshot
+                .into_iter()
+                .map(|(name, value)| (name.to_string(), serde_json::Value::String(value)))
+                .collect();
+            return serde_json::json!([true, object]).to_string();
+        }
+        let Some((content, display)) = prepared.computed_pseudo_content(nid, before) else {
             return String::new();
         };
         let content = content.map_or_else(

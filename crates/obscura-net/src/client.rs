@@ -207,6 +207,11 @@ pub struct ResourceRequest {
     /// Hard limit for the decoded response body retained by this request.
     /// Callers can lower it for especially constrained resource consumers.
     pub max_response_bytes: usize,
+    /// Ask for only the first bytes of the resource (`Range: bytes=0-N`):
+    /// a container header read. The body is then cut at
+    /// `max_response_bytes` instead of failing, and the rest of a server's
+    /// full (200) response is not read: dropping it cancels the transfer.
+    pub prefix_bytes: Option<usize>,
 }
 
 impl ResourceRequest {
@@ -218,6 +223,7 @@ impl ResourceRequest {
             mode: RequestMode::Navigate,
             credentials: RequestCredentials::Include,
             max_response_bytes: 64 * 1024 * 1024,
+            prefix_bytes: None,
         }
     }
 
@@ -254,6 +260,7 @@ impl ResourceRequest {
                 | ResourceType::Xhr
                 | ResourceType::Fetch => 64 * 1024 * 1024,
             },
+            prefix_bytes: None,
         }
     }
 
@@ -275,6 +282,7 @@ impl ResourceRequest {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(32 * 1024 * 1024),
+            prefix_bytes: None,
         }
     }
 
@@ -834,12 +842,18 @@ fn reject_oversized_content_length(
     Ok(())
 }
 
-async fn read_reqwest_body_limited(
+/// Read at most `limit` body bytes. With `truncate` the body is cut there
+/// and the response dropped (cancelling the rest of the transfer) instead
+/// of failing the request.
+async fn read_reqwest_body_bounded(
     mut response: reqwest::Response,
     url: &Url,
     limit: usize,
+    truncate: bool,
 ) -> Result<Vec<u8>, ObscuraNetError> {
-    reject_oversized_content_length(response.headers(), url, limit)?;
+    if !truncate {
+        reject_oversized_content_length(response.headers(), url, limit)?;
+    }
     let capacity = response
         .content_length()
         .and_then(|length| usize::try_from(length).ok())
@@ -850,6 +864,11 @@ async fn read_reqwest_body_limited(
         ObscuraNetError::Network(format!("Failed to read body: {}", error_chain(&error)))
     })? {
         if chunk.len() > limit.saturating_sub(body.len()) {
+            if truncate {
+                let room = limit.saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..room]);
+                return Ok(body);
+            }
             return Err(response_too_large(url, limit));
         }
         body.extend_from_slice(&chunk);
@@ -1219,6 +1238,7 @@ impl ObscuraHttpClient {
     ) -> Option<ResourceCacheKey> {
         if *method != Method::GET
             || body.is_some()
+            || request.prefix_bytes.is_some()
             || request.resource_type == ResourceType::Document
             || !matches!(url.scheme(), "http" | "https")
             || self.interceptor.read().await.is_some()
@@ -1610,6 +1630,13 @@ impl ObscuraHttpClient {
                 headers.remove(reqwest::header::ORIGIN);
             }
 
+            if let Some(prefix) = request.prefix_bytes {
+                if let Ok(value) =
+                    HeaderValue::from_str(&format!("bytes=0-{}", prefix.saturating_sub(1)))
+                {
+                    headers.insert(reqwest::header::RANGE, value);
+                }
+            }
             let mut req_builder = self
                 .get_client()
                 .await
@@ -1683,8 +1710,13 @@ impl ObscuraHttpClient {
                 }
             }
 
-            let body_bytes =
-                read_reqwest_body_limited(resp, &current_url, request.max_response_bytes).await?;
+            let body_bytes = read_reqwest_body_bounded(
+                resp,
+                &current_url,
+                request.prefix_bytes.unwrap_or(request.max_response_bytes),
+                request.prefix_bytes.is_some(),
+            )
+            .await?;
             drop(in_flight);
             tracing::debug!(
                 target: "obscura_net::timing",
@@ -2478,6 +2510,64 @@ mod ssrf_tests {
             started_rx,
             requests,
         )
+    }
+
+    /// One connection per entry: honour `Range` (206) when `ranges`, else
+    /// answer the whole 1 MiB body (200). Records each request head.
+    async fn range_fixture(ranges: bool) -> (Url, Arc<std::sync::Mutex<Vec<String>>>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let heads = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = heads.clone();
+        tokio::spawn(async move {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request = [0u8; 4096];
+            let n = stream.read(&mut request).await.unwrap_or(0);
+            let head = String::from_utf8_lossy(&request[..n]).to_ascii_lowercase();
+            seen.lock().unwrap().push(head.clone());
+            let full = vec![b'v'; 1 << 20];
+            let response = if ranges && head.contains("range: bytes=0-99") {
+                let mut r = b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-99/1048576\r\nContent-Length: 100\r\nConnection: close\r\n\r\n".to_vec();
+                r.extend_from_slice(&full[..100]);
+                r
+            } else {
+                let mut r = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    full.len()
+                )
+                .into_bytes();
+                r.extend_from_slice(&full);
+                r
+            };
+            let _ = stream.write_all(&response).await;
+            let _ = stream.shutdown().await;
+        });
+        (
+            Url::parse(&format!("http://{address}/v.mp4")).unwrap(),
+            heads,
+        )
+    }
+
+    #[tokio::test]
+    async fn prefix_reads_send_a_range_and_bound_a_full_response() {
+        for ranges in [true, false] {
+            let (target, heads) = range_fixture(ranges).await;
+            let client =
+                ObscuraHttpClient::with_full_options(Arc::new(CookieJar::new()), None, true);
+            let mut request = ResourceRequest::subresource(ResourceType::Other, &target);
+            request.prefix_bytes = Some(100);
+            let response = client
+                .fetch_resource_with_callbacks(&target, request, None)
+                .await
+                .expect("prefix read");
+            assert_eq!(response.status, if ranges { 206 } else { 200 });
+            // A server that ignores Range is read only up to the prefix.
+            assert_eq!(response.body.len(), 100);
+            assert!(heads.lock().unwrap()[0].contains("range: bytes=0-99"));
+        }
     }
 
     #[tokio::test]

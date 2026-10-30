@@ -2,6 +2,7 @@ use html5ever::{LocalName, Namespace, Prefix, QualName};
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -244,7 +245,9 @@ impl Node {
 }
 
 pub struct DomTree {
-    inner: RefCell<DomTreeInner>,
+    /// Shared so the streaming HTML parser's tree sink and the script runtime
+    /// address one live document while parsing pauses at `</script>`.
+    inner: Rc<RefCell<DomTreeInner>>,
 }
 
 /// Host-fetched author CSS kept outside the page-visible DOM.
@@ -288,6 +291,9 @@ pub(crate) struct DomTreeInner {
     // Whether the document was parsed in (full) quirks mode. In quirks mode CSS
     // class and id selectors match ASCII-case-insensitively.
     pub(crate) quirks: bool,
+    /// Nodes the streaming parser inserted since the last drain, as
+    /// (parent, node). `None` when no streaming parse is recording.
+    pub(crate) parser_insertions: Option<Vec<(NodeId, NodeId)>>,
 }
 
 impl DomTree {
@@ -303,7 +309,7 @@ impl DomTree {
             data: NodeData::Document,
         };
         DomTree {
-            inner: RefCell::new(DomTreeInner {
+            inner: Rc::new(RefCell::new(DomTreeInner {
                 nodes: vec![Some(doc_node)],
                 free_list: Vec::new(),
                 document: NodeId(0),
@@ -316,8 +322,58 @@ impl DomTree {
                 shadow_roots_by_host: HashMap::new(),
                 allow_declarative_shadow_roots: false,
                 quirks: false,
-            }),
+                parser_insertions: None,
+            })),
         }
+    }
+
+    /// A second handle to this same document. Both handles see every change.
+    pub fn shared_handle(&self) -> DomTree {
+        DomTree {
+            inner: Rc::clone(&self.inner),
+        }
+    }
+
+    /// Whether two handles address the same document.
+    pub fn same_tree(&self, other: &DomTree) -> bool {
+        Rc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    pub(crate) fn record_parser_insertion(&self, parent: NodeId, node: NodeId) {
+        if let Some(log) = self.inner.borrow_mut().parser_insertions.as_mut() {
+            log.push((parent, node));
+        }
+    }
+
+    pub(crate) fn set_parser_insertion_log(&self, enabled: bool) {
+        self.inner.borrow_mut().parser_insertions = enabled.then(Vec::new);
+    }
+
+    pub fn has_parser_insertions(&self) -> bool {
+        self.inner
+            .borrow()
+            .parser_insertions
+            .as_ref()
+            .is_some_and(|log| !log.is_empty())
+    }
+
+    /// The nodes the streaming parser inserted since the last drain.
+    pub fn parser_insertions(&self) -> Vec<(NodeId, NodeId)> {
+        self.inner
+            .borrow()
+            .parser_insertions
+            .clone()
+            .unwrap_or_default()
+    }
+
+    /// Take the nodes the streaming parser inserted since the last call.
+    pub fn take_parser_insertions(&self) -> Vec<(NodeId, NodeId)> {
+        self.inner
+            .borrow_mut()
+            .parser_insertions
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
     }
 
     pub fn document(&self) -> NodeId {

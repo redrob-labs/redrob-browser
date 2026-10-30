@@ -17,9 +17,72 @@
 use taffy::prelude::*;
 
 pub mod css;
+pub mod video_header;
+
+/// Opt-in layout profiling counters, printed with `OBSCURA_RENDER_TIMING`.
+#[doc(hidden)]
+pub mod prof {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::OnceLock;
+
+    pub const ENGINE_NEW: usize = 0;
+    pub const PUSH_ITEM: usize = 1;
+    pub const MEASURE_MISS: usize = 2;
+    pub const MEASURE_HIT: usize = 3;
+    pub const ITEM_REUSE: usize = 4;
+    pub const SHEET_SOURCES: usize = 5;
+    pub const RETAIN_CHECKS: usize = 6;
+    pub const STYLE_PLAN: usize = 7;
+    const NAMES: [&str; 8] = [
+        "finalize_relayout",
+        "push_item",
+        "finalize",
+        "measure_hit",
+        "item_reuse",
+        "sheet_sources",
+        "retain_checks",
+        "style_plan",
+    ];
+    static NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    static COUNTS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+
+    pub fn enabled() -> bool {
+        static ON: OnceLock<bool> = OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("OBSCURA_RENDER_TIMING").is_some())
+    }
+
+    pub fn start() -> Option<std::time::Instant> {
+        enabled().then(std::time::Instant::now)
+    }
+
+    pub fn stop(slot: usize, started: Option<std::time::Instant>) {
+        if let Some(started) = started {
+            NANOS[slot].fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            COUNTS[slot].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn count(slot: usize) {
+        if enabled() {
+            COUNTS[slot].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Format and reset every counter.
+    pub fn take() -> String {
+        let mut out = String::new();
+        for (index, name) in NAMES.iter().enumerate() {
+            let nanos = NANOS[index].swap(0, Ordering::Relaxed);
+            let count = COUNTS[index].swap(0, Ordering::Relaxed);
+            out.push_str(&format!(" {name}={:.1}ms/{count}", nanos as f64 / 1e6));
+        }
+        out
+    }
+}
 pub use css::{CssMediaType, Stylesheet, StylesheetCache};
 
 pub mod style;
+pub use redrob_scene::Cursor;
 pub use style::compute_style;
 
 pub mod border;
@@ -29,6 +92,7 @@ pub use border::{
 };
 
 pub mod dom;
+pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,
     DomLayout, RetainedStyleMutation, StickyLayout, TreeStyleMutation,
@@ -103,12 +167,19 @@ pub mod canvas;
 pub mod display_list;
 #[cfg(feature = "display-list")]
 pub use paint::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces;
+pub use paint::{video_media_url, VideoFrameEntry};
 #[cfg(feature = "paint")]
 mod paint;
+#[cfg(feature = "scene")]
+pub use paint::scene::{
+    build_scene_prepared, SceneFontData, SceneFontInstance, SceneFontResource, SceneFrame,
+    SceneImageResource, SceneStats,
+};
 #[cfg(feature = "paint")]
 pub use paint::{
-    image_intrinsic_dimensions, paint_dom, paint_dom_scrolled,
-    paint_dom_scrolled_at_animation_time, paint_dom_scrolled_at_animation_time_with_surface_color,
+    cached_image_natural_size, image_intrinsic_dimensions, measure_text_with_font_shorthand,
+    paint_dom, paint_dom_scrolled, paint_dom_scrolled_at_animation_time,
+    paint_dom_scrolled_at_animation_time_with_surface_color,
     paint_dom_scrolled_at_animation_time_with_surface_color_and_resources, paint_prepared,
     paint_prepared_region_with_scroll, paint_prepared_region_with_scroll_and_surface_color,
     paint_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces,
@@ -137,301 +208,18 @@ pub use paint::{
     RenderResourceCache, RenderResourceLoader, ResolvedScrollState, SelectedImage,
     MAX_CAPTURE_DIMENSION, MAX_CAPTURE_PIXELS,
 };
+#[cfg(feature = "scene")]
+pub use redrob_scene;
 #[cfg(feature = "paint")]
 pub use tiny_skia::Pixmap;
 
-// Real inline text layout (cosmic-text) lives behind the paint feature; the
-// layout-only build keeps the lighter word-split geometry. The stub lets
-// `dom.rs` name `inline::TextEngine` and call `try_build` unconditionally.
-#[cfg(feature = "paint")]
+// Replaced-element sizing; inline formatting contexts are `ifc`.
 pub mod inline;
-#[cfg(feature = "paint")]
-pub use inline::configure_font_directories;
+pub use ifc::fonts::configure_font_directories;
 
-#[cfg(not(feature = "paint"))]
-pub mod inline {
-    use obscura_dom::tree::{DomTree, NodeId};
-    use std::collections::HashMap;
-
-    #[derive(Clone)]
-    pub(crate) struct WebFont {
-        pub data: std::sync::Arc<Vec<u8>>,
-        pub family: Option<String>,
-        pub weight: Option<(u16, u16)>,
-        pub italic: Option<bool>,
-    }
-
-    #[derive(Default)]
-    pub struct TextEngine {
-        controls: Vec<(taffy::Size<f32>, bool)>,
-    }
-
-    pub(crate) fn text_may_need_emoji_font(_text: &str) -> bool {
-        false
-    }
-
-    impl TextEngine {
-        pub fn new() -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn new_with_web_fonts(_fonts: &[WebFont]) -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn new_with_web_fonts_and_emoji(_fonts: &[WebFont], _load_emoji: bool) -> Self {
-            Self::default()
-        }
-
-        pub(crate) fn register_native_control(
-            &mut self,
-            width: f32,
-            height: f32,
-            style: &crate::LayoutStyle,
-        ) -> usize {
-            let index = self.controls.len();
-            let zero_min_content = matches!(style.width, crate::Dimension::Percent(_))
-                || matches!(style.max_width, crate::Dimension::Percent(_))
-                || [0, 4].into_iter().any(|index| {
-                    style.size_expressions[index]
-                        .as_deref()
-                        .is_some_and(|expression| expression.contains('%'))
-                });
-            self.controls
-                .push((taffy::Size { width, height }, zero_min_content));
-            (1usize << (usize::BITS - 1)) | index
-        }
-
-        pub fn measure_taffy(
-            &mut self,
-            index: usize,
-            known: taffy::Size<Option<f32>>,
-            available: taffy::Size<taffy::AvailableSpace>,
-        ) -> taffy::Size<f32> {
-            let bit = 1usize << (usize::BITS - 1);
-            if index & bit == 0 {
-                return taffy::Size::ZERO;
-            }
-            let (intrinsic, zero_min_content) = self.controls[index & !bit];
-            taffy::Size {
-                width: known.width.unwrap_or_else(|| {
-                    if zero_min_content
-                        && matches!(available.width, taffy::AvailableSpace::MinContent)
-                    {
-                        0.0
-                    } else {
-                        intrinsic.width
-                    }
-                }),
-                height: known.height.unwrap_or(intrinsic.height),
-            }
-        }
-
-        pub fn register_replaced(
-            &mut self,
-            _width: f32,
-            _height: f32,
-            _style: &crate::LayoutStyle,
-        ) -> usize {
-            0
-        }
-
-        pub(crate) fn register_replaced_intrinsic(
-            &mut self,
-            _intrinsic: crate::ReplacedIntrinsic,
-            _style: &crate::LayoutStyle,
-        ) -> usize {
-            0
-        }
-        /// Layout-only builds have no shaper, so no container is ever treated
-        /// as a cosmic-text inline formatting context: the word-split path
-        /// handles text geometry for `getBoundingClientRect`.
-        pub fn try_build(
-            &mut self,
-            _tree: &DomTree,
-            _id: NodeId,
-            _styles: &HashMap<NodeId, crate::LayoutStyle>,
-        ) -> Option<usize> {
-            None
-        }
-        /// See `try_build`: inline runs likewise fall back to word-split
-        /// geometry in layout-only builds.
-        pub fn try_build_run(
-            &mut self,
-            _tree: &DomTree,
-            _parent: NodeId,
-            _run: &[NodeId],
-            _styles: &HashMap<NodeId, crate::LayoutStyle>,
-        ) -> Option<usize> {
-            None
-        }
-
-        /// Layout-only builds do not load page fonts. Preserve the same
-        /// line-vs-fragment contract with deterministic bundled metrics.
-        pub(crate) fn inline_font_box_height(&self, style: &crate::LayoutStyle) -> f32 {
-            style.font_size.unwrap_or(16.0)
-        }
-
-        pub(crate) fn selected_line_height(&self, style: &crate::LayoutStyle) -> f32 {
-            match style.line_height.unwrap_or(crate::LineHeight::Normal) {
-                crate::LineHeight::Normal => style.font_size.unwrap_or(16.0) * 1.2,
-                crate::LineHeight::Ratio(value) => style.font_size.unwrap_or(16.0) * value,
-                crate::LineHeight::Px(value) => value,
-                crate::LineHeight::Relative(crate::Dimension::Percent(value)) => {
-                    style.font_size.unwrap_or(16.0) * value
-                }
-                crate::LineHeight::Relative(crate::Dimension::Px(value)) => value,
-                crate::LineHeight::Relative(_) => style.font_size.unwrap_or(16.0),
-            }
-        }
-
-        pub(crate) fn push_generated_text(
-            &mut self,
-            _text: &str,
-            _style: &crate::LayoutStyle,
-        ) -> Option<usize> {
-            None
-        }
-
-        pub(crate) fn measure_word(&mut self, _idx: usize) -> (f32, f32) {
-            (0.0, 0.0)
-        }
-    }
-
-    pub(crate) fn used_line_height(style: &crate::LayoutStyle) -> f32 {
-        TextEngine::new().selected_line_height(style)
-    }
-
-    pub(crate) fn is_replaced(local: &str) -> bool {
-        matches!(
-            local,
-            "img"
-                | "svg"
-                | "canvas"
-                | "video"
-                | "audio"
-                | "iframe"
-                | "embed"
-                | "object"
-                | "input"
-                | "textarea"
-                | "select"
-                | "button"
-                | "progress"
-                | "meter"
-        )
-    }
-
-    pub(crate) fn has_replaced_sizing(local: &str) -> bool {
-        matches!(
-            local,
-            "img"
-                | "canvas"
-                | "video"
-                | "audio"
-                | "iframe"
-                | "embed"
-                | "object"
-                | "progress"
-                | "meter"
-        )
-    }
-
-    pub(crate) fn default_replaced_intrinsic_size(
-        local: &str,
-        font_size: f32,
-        has_controls: bool,
-        has_resource: bool,
-    ) -> Option<(f32, f32)> {
-        match local {
-            "canvas" | "video" | "iframe" | "object" => Some((300.0, 150.0)),
-            "embed" if has_resource => Some((300.0, 150.0)),
-            "audio" if has_controls => Some((300.0, 54.0)),
-            "progress" => Some((font_size * 10.0, font_size)),
-            "meter" => Some((font_size * 5.0, font_size)),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn constrained_auto_replaced_size(
-        width: f32,
-        height: f32,
-        style: &crate::LayoutStyle,
-    ) -> taffy::Size<f32> {
-        let px = |dimension| match dimension {
-            crate::Dimension::Px(value) => Some(value.max(0.0)),
-            _ => None,
-        };
-        let ratio = style
-            .aspect_ratio
-            .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
-            .unwrap_or_else(|| {
-                if width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0 {
-                    width / height
-                } else {
-                    2.0
-                }
-            });
-        let preferred_width = px(style.width);
-        let preferred_height = px(style.height);
-        let min_width = px(style.min_width).unwrap_or(0.0);
-        let min_height = px(style.min_height).unwrap_or(0.0);
-        let max_width = px(style.max_width).unwrap_or(f32::INFINITY).max(min_width);
-        let max_height = px(style.max_height)
-            .unwrap_or(f32::INFINITY)
-            .max(min_height);
-
-        let (width, height) = match (preferred_width, preferred_height) {
-            (Some(width), Some(height)) => (
-                width.min(max_width).max(min_width),
-                height.min(max_height).max(min_height),
-            ),
-            (Some(width), None) => {
-                let width = width.min(max_width).max(min_width);
-                (width, (width / ratio).min(max_height).max(min_height))
-            }
-            (None, Some(height)) => {
-                let height = height.min(max_height).max(min_height);
-                ((height * ratio).min(max_width).max(min_width), height)
-            }
-            (None, None) => {
-                let height_at_max_width = (max_width / ratio).max(min_height);
-                let height_at_min_width = (min_width / ratio).min(max_height);
-                let width_at_max_height = (max_height * ratio).max(min_width);
-                let width_at_min_height = (min_height * ratio).min(max_width);
-                if width > max_width {
-                    if height > max_height {
-                        if max_width * height <= max_height * width {
-                            (max_width, height_at_max_width)
-                        } else {
-                            (width_at_max_height, max_height)
-                        }
-                    } else {
-                        (max_width, height_at_max_width)
-                    }
-                } else if width < min_width {
-                    if height < min_height {
-                        if min_width * height <= min_height * width {
-                            (width_at_min_height, min_height)
-                        } else {
-                            (min_width, height_at_min_width)
-                        }
-                    } else {
-                        (min_width, height_at_min_width)
-                    }
-                } else if height > max_height {
-                    (width_at_max_height, max_height)
-                } else if height < min_height {
-                    (width_at_min_height, min_height)
-                } else {
-                    (width, height)
-                }
-            }
-        };
-
-        taffy::Size { width, height }
-    }
-}
+/// Inset of a closed select's label from its padding edge (Chromium's menu
+/// list inner padding).
+pub(crate) const SELECT_INLINE_START: f32 = 4.0;
 
 /// An axis-aligned rectangle in CSS pixels, relative to the containing block.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -461,6 +249,335 @@ pub struct Affine2 {
 impl Default for Affine2 {
     fn default() -> Self {
         Self::IDENTITY
+    }
+}
+
+/// A 4x4 CSS transform in CSS pixel document coordinates, applied to
+/// column vectors: `m[row][col]`, `p' = M * (x, y, z, 1)`. CSS
+/// `matrix3d(a1, b1, c1, d1, a2, ...)` lists it column by column.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mat4 {
+    pub m: [[f32; 4]; 4],
+}
+
+impl Default for Mat4 {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+impl Mat4 {
+    pub const IDENTITY: Self = Self {
+        m: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+
+    /// `self(other(point))`.
+    pub fn then(self, other: Self) -> Self {
+        let mut m = [[0.0f32; 4]; 4];
+        for (row, out) in m.iter_mut().enumerate() {
+            for (col, cell) in out.iter_mut().enumerate() {
+                *cell = (0..4).map(|k| self.m[row][k] * other.m[k][col]).sum();
+            }
+        }
+        Self { m }
+    }
+
+    pub fn translate(x: f32, y: f32, z: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[0][3] = x;
+        out.m[1][3] = y;
+        out.m[2][3] = z;
+        out
+    }
+
+    pub fn scale(x: f32, y: f32, z: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[0][0] = x;
+        out.m[1][1] = y;
+        out.m[2][2] = z;
+        out
+    }
+
+    /// CSS Transforms 2 `rotate3d()`: the axis is normalized; a zero axis
+    /// is no rotation.
+    pub fn rotate3d(x: f32, y: f32, z: f32, degrees: f32) -> Self {
+        let length = (x * x + y * y + z * z).sqrt();
+        if !length.is_finite() || length == 0.0 {
+            return Self::IDENTITY;
+        }
+        let (x, y, z) = (x / length, y / length, z / length);
+        // Exact at multiples of 90deg, as Chromium's SinCosDegrees.
+        let (sin, cos) = {
+            let turns = (degrees as f64) / 90.0;
+            if turns.fract() == 0.0 {
+                match (turns as i64).rem_euclid(4) {
+                    0 => (0.0, 1.0),
+                    1 => (1.0, 0.0),
+                    2 => (0.0, -1.0),
+                    _ => (-1.0, 0.0),
+                }
+            } else {
+                let (sin, cos) = (degrees as f64).to_radians().sin_cos();
+                (sin as f32, cos as f32)
+            }
+        };
+        let t = 1.0 - cos;
+        Self {
+            m: [
+                [
+                    cos + x * x * t,
+                    x * y * t - z * sin,
+                    x * z * t + y * sin,
+                    0.0,
+                ],
+                [
+                    y * x * t + z * sin,
+                    cos + y * y * t,
+                    y * z * t - x * sin,
+                    0.0,
+                ],
+                [
+                    z * x * t - y * sin,
+                    z * y * t + x * sin,
+                    cos + z * z * t,
+                    0.0,
+                ],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    /// `perspective(d)`; `d` below 1px is clamped to 1px (CSS Transforms 2).
+    pub fn perspective(distance: f32) -> Self {
+        let mut out = Self::IDENTITY;
+        out.m[3][2] = -1.0 / distance.max(1.0);
+        out
+    }
+
+    pub fn from_affine(a: Affine2) -> Self {
+        Self {
+            m: [
+                [a.a, a.c, 0.0, a.e],
+                [a.b, a.d, 0.0, a.f],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+
+    /// From CSS `matrix3d()` arguments (column-major).
+    pub fn from_css(values: &[f32; 16]) -> Self {
+        let mut m = [[0.0f32; 4]; 4];
+        for col in 0..4 {
+            for row in 0..4 {
+                m[row][col] = values[col * 4 + row];
+            }
+        }
+        Self { m }
+    }
+
+    /// CSS `matrix3d()` arguments (column-major).
+    pub fn to_css(self) -> [f32; 16] {
+        let mut out = [0.0f32; 16];
+        for col in 0..4 {
+            for row in 0..4 {
+                out[col * 4 + row] = self.m[row][col];
+            }
+        }
+        out
+    }
+
+    pub fn around(self, x: f32, y: f32, z: f32) -> Self {
+        Self::translate(x, y, z)
+            .then(self)
+            .then(Self::translate(-x, -y, -z))
+    }
+
+    /// Whether this is a 2D affine transform (CSS "is 2D").
+    pub fn is_2d(&self) -> bool {
+        let m = &self.m;
+        m[0][2] == 0.0
+            && m[1][2] == 0.0
+            && m[2][0] == 0.0
+            && m[2][1] == 0.0
+            && m[2][2] == 1.0
+            && m[2][3] == 0.0
+            && m[3][0] == 0.0
+            && m[3][1] == 0.0
+            && m[3][2] == 0.0
+            && m[3][3] == 1.0
+    }
+
+    pub fn is_identity(&self) -> bool {
+        *self == Self::IDENTITY
+    }
+
+    /// The 2D part (`a b c d e f`), exact for a 2D matrix.
+    pub fn to_affine(self) -> Affine2 {
+        Affine2 {
+            a: self.m[0][0],
+            b: self.m[1][0],
+            c: self.m[0][1],
+            d: self.m[1][1],
+            e: self.m[0][3],
+            f: self.m[1][3],
+        }
+    }
+
+    /// Flatten into the plane z = 0, as a box that does not preserve 3D
+    /// does for its content (CSS Transforms 2 "flatten"). The result maps a
+    /// plane point straight to its projection.
+    pub fn flatten(self) -> Self {
+        let mut out = self;
+        for row in 0..4 {
+            out.m[row][2] = if row == 2 { 1.0 } else { 0.0 };
+        }
+        for col in 0..4 {
+            out.m[2][col] = if col == 2 { 1.0 } else { 0.0 };
+        }
+        out
+    }
+
+    /// Project the plane point `(x, y, 0)`: the viewport point and its
+    /// depth, or `None` behind the viewer.
+    pub fn project(self, x: f32, y: f32) -> Option<(f32, f32, f32)> {
+        let m = &self.m;
+        let w = m[3][0] * x + m[3][1] * y + m[3][3];
+        if !w.is_finite() || w <= 1.0e-6 {
+            return None;
+        }
+        Some((
+            (m[0][0] * x + m[0][1] * y + m[0][3]) / w,
+            (m[1][0] * x + m[1][1] * y + m[1][3]) / w,
+            (m[2][0] * x + m[2][1] * y + m[2][3]) / w,
+        ))
+    }
+
+    /// Bounds of `rect`'s projected corners (`None` when part of it lies
+    /// behind the viewer).
+    pub fn map_rect(self, rect: Rect) -> Option<Rect> {
+        let corners = [
+            self.project(rect.x, rect.y)?,
+            self.project(rect.x + rect.width, rect.y)?,
+            self.project(rect.x, rect.y + rect.height)?,
+            self.project(rect.x + rect.width, rect.y + rect.height)?,
+        ];
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for (x, y, _) in corners {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        Some(Rect {
+            x: x0,
+            y: y0,
+            width: x1 - x0,
+            height: y1 - y0,
+        })
+    }
+
+    /// The plane point that projects to viewport point `(x, y)`: inverts
+    /// the homography of the flattened matrix.
+    pub fn unproject(self, x: f32, y: f32) -> Option<(f32, f32)> {
+        let m = &self.m;
+        // h maps (px, py, 1) -> (X w, Y w, w).
+        let h = [
+            [m[0][0] as f64, m[0][1] as f64, m[0][3] as f64],
+            [m[1][0] as f64, m[1][1] as f64, m[1][3] as f64],
+            [m[3][0] as f64, m[3][1] as f64, m[3][3] as f64],
+        ];
+        let det = h[0][0] * (h[1][1] * h[2][2] - h[1][2] * h[2][1])
+            - h[0][1] * (h[1][0] * h[2][2] - h[1][2] * h[2][0])
+            + h[0][2] * (h[1][0] * h[2][1] - h[1][1] * h[2][0]);
+        if !det.is_finite() || det.abs() < 1.0e-12 {
+            return None;
+        }
+        let inv = [
+            [
+                (h[1][1] * h[2][2] - h[1][2] * h[2][1]) / det,
+                (h[0][2] * h[2][1] - h[0][1] * h[2][2]) / det,
+                (h[0][1] * h[1][2] - h[0][2] * h[1][1]) / det,
+            ],
+            [
+                (h[1][2] * h[2][0] - h[1][0] * h[2][2]) / det,
+                (h[0][0] * h[2][2] - h[0][2] * h[2][0]) / det,
+                (h[0][2] * h[1][0] - h[0][0] * h[1][2]) / det,
+            ],
+            [
+                (h[1][0] * h[2][1] - h[1][1] * h[2][0]) / det,
+                (h[0][1] * h[2][0] - h[0][0] * h[2][1]) / det,
+                (h[0][0] * h[1][1] - h[0][1] * h[1][0]) / det,
+            ],
+        ];
+        let (x, y) = (x as f64, y as f64);
+        let w = inv[2][0] * x + inv[2][1] * y + inv[2][2];
+        if w.abs() < 1.0e-12 {
+            return None;
+        }
+        Some((
+            ((inv[0][0] * x + inv[0][1] * y + inv[0][2]) / w) as f32,
+            ((inv[1][0] * x + inv[1][1] * y + inv[1][2]) / w) as f32,
+        ))
+    }
+
+    /// Whether the plane's back faces the viewer (CSS `backface-visibility`):
+    /// the z component of the transformed normal, through the inverse's
+    /// (3, 3) cofactor sign as Chromium does, is negative.
+    pub fn is_back_face_visible(&self) -> bool {
+        let m = &self.m;
+        // Cofactor of m[2][2] over the full 4x4 (z row/column removed).
+        let a = [
+            [m[0][0], m[0][1], m[0][3]],
+            [m[1][0], m[1][1], m[1][3]],
+            [m[3][0], m[3][1], m[3][3]],
+        ];
+        let cofactor = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+            - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+        let det = self.determinant();
+        det != 0.0 && cofactor / det < 0.0
+    }
+
+    pub fn determinant(&self) -> f32 {
+        let m = self.m.map(|row| row.map(f64::from));
+        let minor = |r: [usize; 3], c: [usize; 3]| {
+            m[r[0]][c[0]] * (m[r[1]][c[1]] * m[r[2]][c[2]] - m[r[1]][c[2]] * m[r[2]][c[1]])
+                - m[r[0]][c[1]] * (m[r[1]][c[0]] * m[r[2]][c[2]] - m[r[1]][c[2]] * m[r[2]][c[0]])
+                + m[r[0]][c[2]] * (m[r[1]][c[0]] * m[r[2]][c[1]] - m[r[1]][c[1]] * m[r[2]][c[0]])
+        };
+        let rows = [1, 2, 3];
+        (m[0][0] * minor(rows, [1, 2, 3]) - m[0][1] * minor(rows, [0, 2, 3])
+            + m[0][2] * minor(rows, [0, 1, 3])
+            - m[0][3] * minor(rows, [0, 1, 2])) as f32
+    }
+
+    /// The affine map through three projected corners of `rect`: the best
+    /// 2D stand-in a 2D painter can use for a projective transform.
+    pub fn affine_fit(self, rect: Rect) -> Option<Affine2> {
+        if rect.width <= 0.0 || rect.height <= 0.0 {
+            return Some(self.flatten().to_affine());
+        }
+        let (x0, y0, _) = self.project(rect.x, rect.y)?;
+        let (x1, y1, _) = self.project(rect.x + rect.width, rect.y)?;
+        let (x2, y2, _) = self.project(rect.x, rect.y + rect.height)?;
+        let a = (x1 - x0) / rect.width;
+        let b = (y1 - y0) / rect.width;
+        let c = (x2 - x0) / rect.height;
+        let d = (y2 - y0) / rect.height;
+        Some(Affine2 {
+            a,
+            b,
+            c,
+            d,
+            e: x0 - a * rect.x - c * rect.y,
+            f: y0 - b * rect.x - d * rect.y,
+        })
     }
 }
 
@@ -627,6 +744,15 @@ pub enum TransformOp {
     Rotate(f32),
     Skew(f32, f32),
     Matrix(Affine2),
+    /// `translate3d()` / `translateZ()`: the Z part is a length (no %).
+    Translate3d(TransformLength, TransformLength, TransformLength),
+    /// `scale3d()` / `scaleZ()`.
+    Scale3d(f32, f32, f32),
+    /// `rotate3d(x, y, z, angle)`, also `rotateX/Y()` (angle in degrees).
+    Rotate3d(f32, f32, f32, f32),
+    /// `perspective(<length> | none)`.
+    Perspective(Option<f32>),
+    Matrix3d(Mat4),
 }
 
 impl Rect {
@@ -714,6 +840,188 @@ pub enum Display {
     None,
 }
 
+/// CSSOM-only computed values (see `LayoutStyle::cssom`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct CssomValues {
+    /// Inherited `text-align` keyword. `None` during cascade means inherit;
+    /// the top-down pass resolves it (root: `start`).
+    pub text_align: Option<&'static str>,
+    /// `vertical-align` (not inherited). `None` is `baseline`.
+    pub vertical_align: Option<VerticalAlignCss>,
+    /// Inherited `font-family` with the author's case and quoting,
+    /// serialized the way Blink does. `None` means inherit.
+    pub font_family: Option<String>,
+    /// Authored `flex-direction` / `align-items`. Reported instead of the
+    /// layout value when the box is a table/control flex stand-in.
+    pub flex_direction: Option<taffy::FlexDirection>,
+    pub align_items: Option<taffy::AlignItems>,
+    /// UA-sheet computed values that the engine paints or lays out with a
+    /// different native approximation (control borders, replaced-element
+    /// `overflow: clip`). An author declaration of the property removes its
+    /// entry.
+    pub ua_overrides: Vec<(&'static str, &'static str)>,
+    /// The element's own font-size is an absolute length (author or a
+    /// control's UA font), which ends the medium-keyword chain.
+    pub font_size_absolute: bool,
+    /// Resolved: the computed font-size does not derive from the initial
+    /// `medium` keyword through em/% factors.
+    pub font_size_not_keyword: bool,
+    /// Resolved: the keyword-derived size before the monospace adjustment
+    /// (`None` is medium, 16px).
+    pub font_size_keyword_px: Option<f32>,
+    /// `border-*-color: inherit` from the UA sheet (row groups and rows),
+    /// per side [top, right, bottom, left]; an author color clears it.
+    pub border_color_inherit: [bool; 4],
+    /// Resolved border colors, kept for children that inherit them.
+    pub border_colors: Option<Sides<Option<[u8; 4]>>>,
+}
+
+impl CssomValues {
+    /// Resolve the inherited values against the parent's resolved values.
+    pub(crate) fn inherit_from(&mut self, parent: &CssomValues) {
+        if self.text_align.is_none() {
+            self.text_align = parent.text_align;
+        }
+        if self.font_family.is_none() {
+            self.font_family.clone_from(&parent.font_family);
+        }
+        if self.vertical_align == Some(VerticalAlignCss::Inherit) {
+            self.vertical_align = parent.vertical_align;
+        }
+    }
+
+    /// Apply `border-color: inherit` from the parent's resolved colors.
+    pub(crate) fn inherit_border_colors(
+        &self,
+        parent: &CssomValues,
+        colors: &mut Sides<Option<[u8; 4]>>,
+    ) -> bool {
+        let Some(from) = parent.border_colors else {
+            return false;
+        };
+        let [top, right, bottom, left] = self.border_color_inherit;
+        if top {
+            colors.top = from.top;
+        }
+        if right {
+            colors.right = from.right;
+        }
+        if bottom {
+            colors.bottom = from.bottom;
+        }
+        if left {
+            colors.left = from.left;
+        }
+        top || right || bottom || left
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum VerticalAlignCss {
+    Keyword(&'static str),
+    Length(Dimension),
+    Inherit,
+}
+
+/// A specified `display` keyword that [`Display`] and the layout stand-in
+/// flags cannot express. `Layout` means the layout fields already name the
+/// CSS value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum CssDisplay {
+    #[default]
+    Layout,
+    /// Computed `inline` whatever layout does with the box: SVG content
+    /// elements, and `noscript`/`source`/`track`, which the UA hides
+    /// without a `display:none` rule.
+    Inline,
+    /// Computed `block` for `option`/`optgroup`, which only render in the
+    /// native popup.
+    Block,
+    ListItem,
+    FlowRoot,
+    Table,
+    InlineTable,
+    TableRowGroup,
+    TableHeaderGroup,
+    TableFooterGroup,
+    TableRow,
+    TableCell,
+    TableColumnGroup,
+    TableColumn,
+    TableCaption,
+}
+
+impl CssDisplay {
+    /// The keyword for a specified display value this enum carries.
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "list-item" => Self::ListItem,
+            "flow-root" => Self::FlowRoot,
+            "table" => Self::Table,
+            "inline-table" => Self::InlineTable,
+            "table-row-group" => Self::TableRowGroup,
+            "table-header-group" => Self::TableHeaderGroup,
+            "table-footer-group" => Self::TableFooterGroup,
+            "table-row" => Self::TableRow,
+            "table-cell" => Self::TableCell,
+            "table-column-group" => Self::TableColumnGroup,
+            "table-column" => Self::TableColumn,
+            "table-caption" => Self::TableCaption,
+            _ => return None,
+        })
+    }
+
+    /// Whether the computed display is this keyword even though layout
+    /// generates no box.
+    pub(crate) fn survives_ua_hiding(self) -> bool {
+        matches!(self, Self::Inline | Self::Block)
+    }
+
+    /// Computed value, after blockification when `blockified`.
+    pub(crate) fn css_name(self, blockified: bool) -> Option<&'static str> {
+        Some(match self {
+            Self::Layout => return None,
+            Self::Inline if blockified => "block",
+            Self::Inline => "inline",
+            Self::Block => "block",
+            Self::ListItem => "list-item",
+            Self::FlowRoot => "flow-root",
+            Self::Table => "table",
+            Self::InlineTable if blockified => "table",
+            Self::InlineTable => "inline-table",
+            _ if blockified => "block",
+            Self::TableRowGroup => "table-row-group",
+            Self::TableHeaderGroup => "table-header-group",
+            Self::TableFooterGroup => "table-footer-group",
+            Self::TableRow => "table-row",
+            Self::TableCell => "table-cell",
+            Self::TableColumnGroup => "table-column-group",
+            Self::TableColumn => "table-column",
+            Self::TableCaption => "table-caption",
+        })
+    }
+
+    /// HTML UA sheet display for elements the engine lays out with a
+    /// stand-in mode.
+    pub(crate) fn for_tag(tag: &str) -> Self {
+        match tag {
+            "li" => Self::ListItem,
+            "table" => Self::Table,
+            "tbody" => Self::TableRowGroup,
+            "thead" => Self::TableHeaderGroup,
+            "tfoot" => Self::TableFooterGroup,
+            "tr" => Self::TableRow,
+            "td" | "th" => Self::TableCell,
+            "colgroup" => Self::TableColumnGroup,
+            "col" => Self::TableColumn,
+            "caption" => Self::TableCaption,
+            "noscript" | "source" | "track" => Self::Inline,
+            "option" | "optgroup" => Self::Block,
+            _ => Self::Layout,
+        }
+    }
+}
+
 /// Computed `container-type` value. Stage A carries it through the cascade;
 /// the layout convergence stage will use it for query eligibility.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -739,6 +1047,10 @@ pub enum Dimension {
     /// parse time (the old behavior) silently corrupted every relative length.
     Em(f32),
     Ex(f32),
+    /// `ch`: the advance of "0" in the element's font, resolved with the
+    /// computed font (see `Dimension::resolve_ch`); `resolve` falls back to
+    /// half an em.
+    Ch(f32),
     Rem(f32),
     Vw(f32),
     Vh(f32),
@@ -751,6 +1063,24 @@ impl Dimension {
     /// own font-size, `rem_px` the root's, and `vw`/`vh` are one hundredth of
     /// the viewport width/height. `Px`, `Percent`, and `Auto` pass through
     /// (`Percent` stays for taffy to resolve against the containing block).
+    /// Resolve a `ch` length to px with the advance of "0" in `family` at
+    /// `em_px`; any other value passes through.
+    pub(crate) fn resolve_ch(self, em_px: f32, bold: bool, family: Option<&str>) -> Dimension {
+        match self {
+            Dimension::Ch(v) => {
+                #[cfg(feature = "paint")]
+                let zero = crate::paint::measure_text_em("0", em_px, bold, family);
+                #[cfg(not(feature = "paint"))]
+                let zero = {
+                    let _ = (bold, family);
+                    em_px * 0.5
+                };
+                Dimension::Px(v * zero)
+            }
+            other => other,
+        }
+    }
+
     pub fn resolve(self, em_px: f32, rem_px: f32, vw: f32, vh: f32) -> Dimension {
         match self {
             Dimension::Em(v) => Dimension::Px(v * em_px),
@@ -758,6 +1088,7 @@ impl Dimension {
             // the renderer. This is its x-height as a fraction of the em,
             // matching Chromium's generic sans face on the capture host.
             Dimension::Ex(v) => Dimension::Px(v * em_px * 0.528_320_3),
+            Dimension::Ch(v) => Dimension::Px(v * em_px * 0.5),
             Dimension::Rem(v) => Dimension::Px(v * rem_px),
             Dimension::Vw(v) => Dimension::Px(v * vw),
             Dimension::Vh(v) => Dimension::Px(v * vh),
@@ -847,6 +1178,62 @@ impl BackgroundPositionAxis {
 pub struct BackgroundPosition {
     pub x: BackgroundPositionAxis,
     pub y: BackgroundPositionAxis,
+}
+
+/// A separable or non-separable `mix-blend-mode` other than `normal`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixBlendMode {
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+    PlusLighter,
+}
+
+impl MixBlendMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value.trim().to_ascii_lowercase().as_str() {
+            "multiply" => Self::Multiply,
+            "screen" => Self::Screen,
+            "overlay" => Self::Overlay,
+            "darken" => Self::Darken,
+            "lighten" => Self::Lighten,
+            "color-dodge" => Self::ColorDodge,
+            "color-burn" => Self::ColorBurn,
+            "hard-light" => Self::HardLight,
+            "soft-light" => Self::SoftLight,
+            "difference" => Self::Difference,
+            "exclusion" => Self::Exclusion,
+            "hue" => Self::Hue,
+            "saturation" => Self::Saturation,
+            "color" => Self::Color,
+            "luminosity" => Self::Luminosity,
+            "plus-lighter" => Self::PlusLighter,
+            _ => return None,
+        })
+    }
+}
+
+/// Authored per-layer values of the background (or mask) longhands.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BackgroundLayerLists {
+    pub images: Vec<String>,
+    pub sizes: Vec<String>,
+    pub positions: Vec<String>,
+    pub repeats: Vec<String>,
+    pub origins: Vec<String>,
+    pub clips: Vec<String>,
 }
 
 /// Box used to establish a background layer's positioning area.
@@ -1012,6 +1399,25 @@ pub(crate) struct WaapiSampleState {
     pub opacity_fast_path: bool,
 }
 
+/// A vertical `writing-mode` (CSS Writing Modes 4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WritingMode {
+    #[default]
+    VerticalRl,
+    VerticalLr,
+    SidewaysRl,
+    SidewaysLr,
+}
+
+/// `text-orientation`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextOrientation {
+    #[default]
+    Mixed,
+    Upright,
+    Sideways,
+}
+
 /// The subset of CSS that influences box layout. Expanded in later phases.
 /// `PartialEq` lets paint damage tell an unchanged style from a changed one.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1026,6 +1432,17 @@ pub struct LayoutStyle {
     /// until the parent's computed outer/inner display is known. The DOM
     /// top-down pass copies that provenance and then clears this marker.
     pub(crate) display_inherit: bool,
+    /// The CSS `display` keyword when layout emulates it with a different
+    /// mode (tables, list items, flow roots). CSSOM reports this keyword;
+    /// layout keeps reading `display` and the stand-in flags.
+    pub(crate) css_display: CssDisplay,
+    /// Set by `blockify_outer_display`: the element is a root, flex/grid
+    /// item, float or absolutely positioned box, so its computed display is
+    /// blockified (CSS Display 3 §2.7).
+    pub(crate) blockified: bool,
+    /// Specified values CSSOM reports where layout keeps a different,
+    /// emulated value. Layout never reads these.
+    pub(crate) cssom: CssomValues,
     /// Inline outer display before absolute-position blockification. Retained
     /// styles need this provenance to reconstruct the hypothetical static box.
     pub(crate) static_position_inline: bool,
@@ -1071,6 +1488,10 @@ pub struct LayoutStyle {
     /// `<td>`/`<th>` elements even though Taffy represents their cell-content
     /// wrapper as an internal column flexbox.
     pub(crate) is_table_cell_box: bool,
+    /// Authored internal table display other than `table-cell`
+    /// (`table-row`, `table-row-group`, `table-caption` ...). Native HTML
+    /// table parts are recognised by tag instead.
+    pub(crate) table_part: Option<TablePart>,
     /// The HTML UA sheet's vendor `text-align` behavior for `<center>`.
     /// Unlike ordinary `text-align:center`, it also centers fixed-width block
     /// descendants while leaving auto-width blocks fill-available.
@@ -1102,6 +1523,9 @@ pub struct LayoutStyle {
     /// viewport, containing block, or computed font size and cannot be safely
     /// collapsed to pixels during stylesheet parsing.
     pub size_expressions: [Option<String>; 6],
+    /// A functional `flex-basis` (`calc(41.6667% - 16px)`), resolved once the
+    /// containing block is known.
+    pub flex_basis_expression: Option<String>,
     /// `aspect-ratio` as width/height, or an image's intrinsic ratio resolved
     /// at layout. Lets a replaced element (or a padding-box card) derive the
     /// missing dimension from the given one, so a `width:100%` image gets a
@@ -1142,6 +1566,10 @@ pub struct LayoutStyle {
     /// as buttons are atomic inline boxes but still use ordinary grid `normal`
     /// stretch behavior in Chromium and Gecko.
     pub(crate) has_replaced_sizing: bool,
+    /// A replaced element's percentage width is held as 0px while its flex
+    /// ancestor's inline size is still cyclic. It keeps the percentage's
+    /// zero min-content contribution (a compressible replaced element).
+    pub(crate) deferred_percent_width: bool,
     pub margin: Edges,
     /// Which margin sides are `auto` (top, right, bottom, left). `margin: 0
     /// auto` / `margin-inline: auto` centering needs a real Auto margin, which
@@ -1219,6 +1647,14 @@ pub struct LayoutStyle {
     /// (gradients and repeat keywords in the same shorthand are ignored: we
     /// paint the referenced image, not the gradient layer).
     pub background_image: Option<String>,
+    /// Authored background layers, topmost first, one entry per
+    /// comma-separated layer of `background`/`background-image`, and the
+    /// per-layer longhand lists (`background-size` and the rest). A shorthand
+    /// stores each layer's own text in every list. Empty means not set; a
+    /// shorter list repeats (CSS Backgrounds 3, 2.2).
+    pub background_layers: BackgroundLayerLists,
+    /// The same for `mask-*`.
+    pub mask_layers: BackgroundLayerLists,
     /// `background-size`, in px, when given as explicit length(s) (a bare
     /// `10px` applies to both axes, matching how small square icons are
     /// almost always sized).
@@ -1336,6 +1772,10 @@ pub struct LayoutStyle {
     pub flex_wrap: Option<taffy::FlexWrap>,
     pub justify_content: Option<taffy::JustifyContent>,
     pub flex_grow: Option<f32>,
+    /// `flex_grow` was synthesized by the table auto-layout approximation
+    /// (`grow_trailing_auto_cells`), not cascaded. Retained styles carry it so
+    /// the next layout can undo it before choosing the trailing cell again.
+    pub(crate) flex_grow_from_table_cell: bool,
     pub flex_shrink: Option<f32>,
     /// Flex/grid item order. The formatting algorithm consumes children in
     /// order-modified document order, with source order breaking ties.
@@ -1400,12 +1840,38 @@ pub struct LayoutStyle {
     // bounded balancing pass then distributes them in column-major order.
     // `None` is the initial `auto` column count.
     pub column_count: Option<u16>,
+    /// `writing-mode: vertical-*` / `sideways-*` declared on the element.
+    pub vertical_writing: bool,
+    /// Which vertical writing mode (with `vertical_writing`).
+    pub writing_mode: WritingMode,
+    /// `text-orientation`; `None` inherits (initial `mixed`).
+    pub text_orientation: Option<TextOrientation>,
+    /// `text-combine-upright: all`; `None` inherits (initial `none`).
+    pub text_combine_upright: Option<bool>,
+    /// `shape-outside: circle() | ellipse()` of a float.
+    pub shape_outside: Option<taffy::FloatShape>,
     /// `break-inside: avoid` makes this box an atomic balancing unit. The
     /// current box-level multicol implementation cannot fragment the inside
     /// of a child yet, but retaining the computed value makes that limitation
     /// explicit and lets the balancing path distinguish authored break
     /// avoidance as finer-grained fragmentation is added.
     pub break_inside_avoid: bool,
+    /// `column-span: all`: the box spans every column of its multicol
+    /// container, splitting the column flow above and below it.
+    pub column_span_all: bool,
+    /// `column-rule-width` (px; medium = 3) / `-style` / `-color`.
+    pub column_rule_width: Option<f32>,
+    pub column_rule_style: Option<BorderStyle>,
+    pub column_rule_color: Option<[u8; 4]>,
+    /// `column-width` in px: the used column count follows the container's
+    /// width (CSS Multi-column 1 §3.4).
+    pub column_width: Option<f32>,
+    /// `column-fill: auto` (fill columns in order instead of balancing).
+    pub column_fill_auto: bool,
+    /// `break-before: column | page` (forced column break before the box).
+    pub break_before_column: bool,
+    /// `break-after: column | page`.
+    pub break_after_column: bool,
 
     /// `border-spacing: <horizontal> <vertical>?` (or the `cellspacing`
     /// attribute). Only meaningful on a `<table>`; taffy has no native table
@@ -1418,6 +1884,10 @@ pub struct LayoutStyle {
     /// is still approximate, but collapsed tables must at minimum contribute
     /// no border-spacing to their geometry.
     pub border_collapse: Option<bool>,
+    /// Inherited `caption-side`: `Some(true)` for `bottom`. `None` means no
+    /// value was specified on this node yet; resolved top-down like
+    /// `border_collapse`.
+    pub caption_side_bottom: Option<bool>,
 
     // Positioning. `position: absolute|fixed` takes the box out of normal flow.
     pub position: Option<taffy::Position>,
@@ -1431,6 +1901,10 @@ pub struct LayoutStyle {
     pub inset: [Option<Dimension>; 4], // top, right, bottom, left
     /// Deferred functional inset expressions in top/right/bottom/left order.
     pub inset_expressions: [Option<String>; 4],
+    /// calc() insets with a percentage, handed to Taffy so the percentage
+    /// resolves against the absolute box's real containing block. Owned
+    /// here for the lifetime of every layout of this style.
+    pub(crate) inset_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
 
     /// `overflow`/-x/-y other than `visible`: clips this element's descendants
     /// to its border box during paint. This is what makes the ubiquitous
@@ -1474,14 +1948,32 @@ pub struct LayoutStyle {
     /// a real inherited CSS property). Resolved into `effectively_invisible`
     /// during `dom::layout_dom`'s inheritance pass.
     pub visibility_hidden: Option<bool>,
+    /// `visibility: collapse` declared on this element (not inherited; the
+    /// inherited part is `visibility_hidden`). A collapsed table row or row
+    /// group takes no block space, but its cells still size the columns.
+    pub visibility_collapse: bool,
     // Preserve the own value above for retained inheritance updates while
     // exposing the resolved inherited value through CSSOM snapshots.
     pub(crate) computed_visibility_hidden: bool,
     /// Computed `pointer-events: none|auto`. The property is inherited, so
     /// `None` means the top-down style pass still needs the parent's value.
     pub pointer_events_none: Option<bool>,
+    /// CSS `cursor`, inherited like `pointer_events_none`: the own value
+    /// until the style pass, then the computed value. `url()` images resolve
+    /// to their keyword fallback; the compositor maps keywords to OS cursors.
+    pub cursor: Option<Cursor>,
     /// `opacity`, own (non-inherited) value in 0.0-1.0. `None` means the
     /// default of 1.0.
+    /// Specified `filter` and `backdrop-filter` text (`None` is `none`),
+    /// for CSSOM. Paint uses `backdrop_filters`.
+    pub filter_css: Option<String>,
+    pub backdrop_filter_css: Option<String>,
+    /// The parsed `backdrop-filter` function list.
+    pub backdrop_filters: Option<Vec<redrob_scene::FilterOp>>,
+    /// `isolation: isolate`.
+    pub isolation_isolate: bool,
+    /// `mix-blend-mode`; `None` is `normal`.
+    pub mix_blend_mode: Option<MixBlendMode>,
     pub opacity: Option<f32>,
     /// First CSS animation name and its timing contract. The stylesheet
     /// sampler contributes animated opacity after normal declarations and
@@ -1503,6 +1995,9 @@ pub struct LayoutStyle {
     /// cells inherit it); obscura applies it as main-axis alignment of the
     /// cell's flex-column stand-in. `None` on non-cell elements.
     pub vertical_align: Option<VerticalAlign>,
+    /// `vertical-align` of an inline-level box in its line box. Not
+    /// inherited; `None` is the initial `baseline`.
+    pub vertical_align_inline: Option<InlineVerticalAlign>,
     /// `z-index` on a positioned element. `None` is `auto` (tree order). A
     /// non-zero value lifts the element's whole subtree into a separate paint
     /// layer: negatives under the normal flow, positives above it, sorted.
@@ -1610,6 +2105,13 @@ pub struct LayoutStyle {
     /// line count but tightens the effective line-breaking width during the
     /// inline formatter's final shaping pass.
     pub text_wrap_style: Option<TextWrapStyle>,
+    /// `orphans` / `widows` (inherited, initial 2): the fewest lines of a
+    /// block left before / after a column break.
+    pub orphans: Option<u16>,
+    /// A declaration that drops a form control's native appearance
+    /// (background, border, `appearance: none`) applied to the element.
+    pub native_appearance_dropped: bool,
+    pub widows: Option<u16>,
     /// Deferred functional line-height (`calc()`, `min()`, `clamp()`) resolved
     /// after the element font and live viewport are known.
     pub line_height_expression: Option<String>,
@@ -1667,6 +2169,14 @@ pub struct LayoutStyle {
     /// Authored `transform-origin`, unresolved so percentages use the final
     /// border-box dimensions. `None` is the CSS initial value, 50% 50%.
     pub transform_origin: Option<(Dimension, Dimension)>,
+    /// `perspective` in px (`None` is `none`). Applies to the children.
+    pub perspective: Option<f32>,
+    /// `perspective-origin`; `None` is 50% 50%.
+    pub perspective_origin: Option<(Dimension, Dimension)>,
+    /// `transform-style: preserve-3d`.
+    pub preserve_3d: bool,
+    /// `backface-visibility: hidden`.
+    pub backface_hidden: bool,
     /// `box-shadow` (first layer only). Painted behind the element's own
     /// background/border box: cards, buttons, menus, and modals across the
     /// modern web rely on it for depth, and without it those elements paint
@@ -1754,6 +2264,7 @@ pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
 /// Thus inline-flex becomes flex and inline-grid becomes grid, while
 /// inline-block/plain inline become block.
 pub(crate) fn blockify_outer_display(style: &mut LayoutStyle) {
+    style.blockified = true;
     if !is_inline_level_box(style) {
         return;
     }
@@ -1887,11 +2398,44 @@ impl Default for ObjectPosition {
 /// text-level values like sub/super, which do not apply to cells) map to
 /// `Top` as an approximation: real per-row baseline alignment needs shared
 /// ascent metrics across the row.
+/// Internal table display types besides `table-cell`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TablePart {
+    RowGroup,
+    HeaderGroup,
+    FooterGroup,
+    Row,
+    Column,
+    ColumnGroup,
+    Caption,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerticalAlign {
     Top,
     Middle,
     Bottom,
+    /// `baseline` (and the text-relative values, which behave like it for
+    /// table cells): the cell's first baseline aligns with the row's.
+    Baseline,
+}
+
+/// `vertical-align` of an inline-level box within its line (CSS 2.2 §10.8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum InlineVerticalAlign {
+    #[default]
+    Baseline,
+    Sub,
+    Super,
+    TextTop,
+    TextBottom,
+    Middle,
+    Top,
+    Bottom,
+    /// Raise by a length (negative lowers).
+    Length(f32),
+    /// Raise by a fraction of the element's line-height.
+    Percent(f32),
 }
 
 /// `clear`: which floated side(s) an element moves below. Ends the float
@@ -2081,6 +2625,9 @@ struct AnimationInstance {
     start_ms: f32,
     hold_time_ms: Option<f32>,
     was_paused: bool,
+    /// Paused by script (CSSAnimation.pause() / currentTime): the hold time
+    /// wins over animation-play-state until script plays it again.
+    script_paused: bool,
 }
 
 /// A normalized property keyframe supplied through the Web Animations API.
@@ -2200,6 +2747,69 @@ impl AnimationTimelineState {
     /// their existing instances.
     pub fn has_pending_start_candidates(&self) -> bool {
         !self.start_candidates.is_empty() || !self.subtree_start_candidates.is_empty()
+    }
+
+    /// The running CSS animation instances: (element, animation-name,
+    /// paused, current time in ms) at `document_time_ms`.
+    pub fn css_animations(
+        &self,
+        document_time_ms: f32,
+    ) -> Vec<(obscura_dom::tree::NodeId, String, bool, f32)> {
+        let mut out: Vec<_> = self
+            .instances
+            .iter()
+            .map(|(node, instance)| {
+                let current = instance
+                    .hold_time_ms
+                    .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+                (
+                    *node,
+                    instance.key.name.clone(),
+                    instance.script_paused || instance.was_paused,
+                    current,
+                )
+            })
+            .collect();
+        out.sort_by_key(|(node, ..)| node.index());
+        out
+    }
+
+    /// Script control of one CSS animation instance (CSSAnimation): pause,
+    /// play, or seek to `local_ms`. Returns whether the instance exists.
+    pub fn control_css_animation(
+        &mut self,
+        node: obscura_dom::tree::NodeId,
+        action: &str,
+        local_ms: f32,
+        document_time_ms: f32,
+    ) -> bool {
+        let Some(instance) = self.instances.get_mut(&node) else {
+            return false;
+        };
+        let current = instance
+            .hold_time_ms
+            .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+        match action {
+            "pause" => {
+                instance.hold_time_ms = Some(current);
+                instance.script_paused = true;
+            }
+            "play" => {
+                instance.start_ms = document_time_ms - current;
+                instance.hold_time_ms = None;
+                instance.script_paused = false;
+                instance.was_paused = false;
+            }
+            "currentTime" if local_ms.is_finite() => {
+                let local = local_ms.max(0.0);
+                instance.start_ms = document_time_ms - local;
+                if instance.script_paused || instance.was_paused {
+                    instance.hold_time_ms = Some(local);
+                }
+            }
+            _ => return false,
+        }
+        true
     }
 
     pub fn cancel_waapi(&mut self, id: u64) -> bool {
@@ -2347,6 +2957,7 @@ impl AnimationTimelineState {
                         start_ms: if paused { document_time_ms } else { candidate },
                         hold_time_ms: paused.then_some(0.0),
                         was_paused: paused,
+                        script_paused: false,
                     },
                 );
                 self.instances
@@ -2355,6 +2966,11 @@ impl AnimationTimelineState {
             }
         };
 
+        if instance.script_paused {
+            return AnimationSampleTime {
+                milliseconds: instance.hold_time_ms.unwrap_or(0.0),
+            };
+        }
         let paused = play_state == AnimationPlayState::Paused;
         if paused && !instance.was_paused {
             let paused_at = transition_time_ms.unwrap_or(document_time_ms);
@@ -2569,39 +3185,36 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         BoxSizing::Inherit => taffy::BoxSizing::ContentBox,
     };
 
-    // A block box with centered/right inline content needs a flex-column
-    // stand-in because taffy's native block algorithm has no line alignment.
-    // `text_align` is separate from real flex/grid `align-items`, so a
-    // text-align declaration never changes how flex children are sized.
-    let promote_for_alignment = style.display == Display::Block
-        && matches!(
-            style.text_align,
-            Some(taffy::AlignItems::CENTER) | Some(taffy::AlignItems::FLEX_END)
-        );
-
+    // `text-align` moves line content inside inline formatting contexts
+    // (`crate::ifc`); it never changes the box tree. An inline-level box built
+    // as a box of its own (inline-block, or an inline that contains blocks)
+    // is a block container inside.
     s.display = match style.display {
-        Display::Block if promote_for_alignment => taffy::style::Display::Flex,
-        Display::Block => taffy::style::Display::Block,
+        Display::Block | Display::Inline => taffy::style::Display::Block,
         Display::Flex => taffy::style::Display::Flex,
         Display::Grid => taffy::style::Display::Grid,
-        Display::Inline => taffy::style::Display::Flex,
         Display::None => taffy::style::Display::None,
     };
-    if promote_for_alignment {
-        s.flex_direction = taffy::FlexDirection::Column;
-        s.align_items = style.text_align;
-    }
     if let Some(fd) = style.flex_direction {
         s.flex_direction = fd;
     }
-    if let Some(fw) = style.flex_wrap {
-        s.flex_wrap = fw;
-    } else if style.display == Display::Inline {
-        s.flex_direction = taffy::FlexDirection::Row;
-        s.flex_wrap = taffy::FlexWrap::Wrap;
-    } else {
-        s.flex_wrap = taffy::FlexWrap::NoWrap;
-    }
+    s.flex_wrap = style.flex_wrap.unwrap_or(taffy::FlexWrap::NoWrap);
+    s.establishes_bfc = style.flow_root
+        || style.containment & (CONTAIN_LAYOUT | CONTAIN_PAINT) != 0
+        || style.container_type != ContainerType::Normal
+        || style.column_count.is_some_and(|count| count > 1);
+    s.shape_outside = style.shape_outside;
+    s.float = match style.float {
+        Some(Float::Left) => taffy::style::Float::Left,
+        Some(Float::Right) => taffy::style::Float::Right,
+        None => taffy::style::Float::None,
+    };
+    s.clear = match style.clear {
+        Some(Clear::Left) => taffy::style::Clear::Left,
+        Some(Clear::Right) => taffy::style::Clear::Right,
+        Some(Clear::Both) => taffy::style::Clear::Both,
+        None => taffy::style::Clear::None,
+    };
     s.size = taffy::Size {
         width: dimension(style.width),
         height: dimension(style.height),
@@ -2670,7 +3283,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         if let Some(ai) = style.align_items {
             s.align_items = Some(ai);
         }
-    } else if !promote_for_alignment {
+    } else {
         // `align-items` has no effect on a block formatting context.
         s.align_items = None;
     }
@@ -2680,16 +3293,6 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     s.align_content = style.align_content;
     if let Some(jc) = style.justify_content {
         s.justify_content = Some(jc);
-    } else if style.is_inline_block {
-        // Taffy's inline-box stand-in is a wrapping flex row. `text-align`
-        // aligns each line of an inline-block's internal formatting context;
-        // map that inherited value onto the row axis without affecting how
-        // the atomic box itself participates in its parent's inline flow.
-        s.justify_content = match style.text_align {
-            Some(taffy::AlignItems::CENTER) => Some(taffy::JustifyContent::CENTER),
-            Some(taffy::AlignItems::FLEX_END) => Some(taffy::JustifyContent::FLEX_END),
-            _ => None,
-        };
     }
     if let Some(fg) = style.flex_grow {
         s.flex_grow = fg;
@@ -2746,11 +3349,17 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
     if let Some(pos) = style.position {
         s.position = pos;
         if !style.position_sticky {
+            let inset = |index: usize| match &style.inset_calc[index] {
+                Some(calc) if pos == taffy::Position::Absolute && !style.position_fixed => {
+                    taffy::LengthPercentageAuto::calc(std::sync::Arc::as_ptr(calc).cast())
+                }
+                _ => inset_lpa(style.inset[index]),
+            };
             s.inset = taffy::Rect {
-                top: inset_lpa(style.inset[0]),
-                right: inset_lpa(style.inset[1]),
-                bottom: inset_lpa(style.inset[2]),
-                left: inset_lpa(style.inset[3]),
+                top: inset(0),
+                right: inset(1),
+                bottom: inset(2),
+                left: inset(3),
             };
         }
     }
@@ -2776,7 +3385,7 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
 
 fn inset_lpa(v: Option<Dimension>) -> taffy::style::LengthPercentageAuto {
     match v {
-        Some(Dimension::Px(px)) => taffy::style::LengthPercentageAuto::length(px),
+        Some(Dimension::Px(px)) => taffy::style::LengthPercentageAuto::length(layout_unit(px)),
         Some(Dimension::Percent(p)) => taffy::style::LengthPercentageAuto::percent(p),
         // Relative units are resolved to Px before layout; unresolved leftovers
         // and `auto`/absent both map to Auto.
@@ -2786,7 +3395,7 @@ fn inset_lpa(v: Option<Dimension>) -> taffy::style::LengthPercentageAuto {
 
 fn dimension(v: Dimension) -> taffy::style::Dimension {
     match v {
-        Dimension::Px(px) => taffy::style::Dimension::length(px),
+        Dimension::Px(px) => taffy::style::Dimension::length(layout_unit(px)),
         Dimension::Percent(p) => taffy::style::Dimension::percent(p),
         Dimension::Auto => taffy::style::Dimension::auto(),
         // Relative units are resolved to Px before layout; if one slips
@@ -2794,18 +3403,39 @@ fn dimension(v: Dimension) -> taffy::style::Dimension {
         // rather than panicking.
         Dimension::Em(v) | Dimension::Rem(v) => taffy::style::Dimension::length(v * 16.0),
         Dimension::Ex(v) => taffy::style::Dimension::length(v * 16.0 * 0.528_320_3),
+        Dimension::Ch(v) => taffy::style::Dimension::length(v * 8.0),
         Dimension::Vw(v) | Dimension::Vh(v) | Dimension::Vmin(v) | Dimension::Vmax(v) => {
             taffy::style::Dimension::length(v)
         }
     }
 }
 
+/// A px length as Blink stores it: a LayoutUnit, truncated to 1/64 px
+/// (100.4px is 100.390625). Each length truncates on its own, so a box's
+/// size is the sum of truncated parts (Chrome: 100.4px wide with 8.2px and
+/// 7.2px padding and 4px + 3px borders is 122.765625).
+pub(crate) fn layout_unit(px: f32) -> f32 {
+    if !px.is_finite() || px.abs() >= 1.0e7 {
+        return px;
+    }
+    let scaled = px * 64.0;
+    // Lengths that are already whole LayoutUnits stay exact despite float
+    // noise (33.333332 * 64 is 2133.3333; 0.1 * 3 * 64 is 19.2).
+    let snapped = scaled.round();
+    let units = if (scaled - snapped).abs() < 1e-3 {
+        snapped
+    } else {
+        scaled.trunc()
+    };
+    units / 64.0
+}
+
 fn rect_lp(e: Edges) -> taffy::Rect<taffy::style::LengthPercentage> {
     taffy::Rect {
-        top: taffy::style::LengthPercentage::length(e.top),
-        right: taffy::style::LengthPercentage::length(e.right),
-        bottom: taffy::style::LengthPercentage::length(e.bottom),
-        left: taffy::style::LengthPercentage::length(e.left),
+        top: taffy::style::LengthPercentage::length(layout_unit(e.top)),
+        right: taffy::style::LengthPercentage::length(layout_unit(e.right)),
+        bottom: taffy::style::LengthPercentage::length(layout_unit(e.bottom)),
+        left: taffy::style::LengthPercentage::length(layout_unit(e.left)),
     }
 }
 
@@ -2815,7 +3445,7 @@ fn rect_lp_percent(
 ) -> taffy::Rect<taffy::style::LengthPercentage> {
     let side = |value, percent| match percent {
         Some(percent) => taffy::style::LengthPercentage::percent(percent),
-        None => taffy::style::LengthPercentage::length(value),
+        None => taffy::style::LengthPercentage::length(layout_unit(value)),
     };
     taffy::Rect {
         top: side(e.top, percent[0]),
@@ -2830,7 +3460,7 @@ fn rect_auto(e: Edges, auto: [bool; 4]) -> taffy::Rect<taffy::style::LengthPerce
         if is_auto {
             taffy::style::LengthPercentageAuto::auto()
         } else {
-            taffy::style::LengthPercentageAuto::length(value)
+            taffy::style::LengthPercentageAuto::length(layout_unit(value))
         }
     };
     taffy::Rect {

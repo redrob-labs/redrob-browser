@@ -47,7 +47,7 @@ pub struct CdpError {
     pub message: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CdpEvent {
     pub method: String,
     pub params: serde_json::Value,

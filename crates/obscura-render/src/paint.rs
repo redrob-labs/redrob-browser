@@ -12,6 +12,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 mod damage;
+pub(crate) mod lcd;
+#[cfg(feature = "scene")]
+pub mod scene;
+mod three_d;
+pub mod video;
 pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
@@ -107,6 +112,16 @@ impl CachedResource {
     }
 }
 
+/// A decoded `<video>` frame (see `RenderResourceCache::video_frame`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VideoFrameEntry {
+    pub width: u32,
+    pub height: u32,
+    pub duration: f64,
+    pub has_audio: bool,
+    pub data_url: Arc<str>,
+}
+
 /// Fetch credentials/CORS identity for an HTML image request. No-CORS uses
 /// the ordinary URL cache key so CSS images can share the same response;
 /// CORS variants use private keys and can never contaminate one another.
@@ -193,6 +208,11 @@ pub struct RenderResourceCache {
     /// whether the consumer is a font.
     /// Deduplicated so repeated layouts do not grow the list.
     sync_misses: Vec<(String, Option<ImageRequestProfile>, bool)>,
+    /// Decoded `<video>` frames by (media URL, time bits): size, duration and
+    /// the frame as a PNG data URL, or None when the media did not decode.
+    video_frames: HashMap<(String, u64), Option<VideoFrameEntry>>,
+    /// The playback position script set on each `<video>` (seconds).
+    video_times: HashMap<obscura_dom::tree::NodeId, f64>,
     sync_miss_keys: HashSet<String>,
     loader: Box<dyn RenderResourceLoader>,
     /// Keys whose bytes, miss or cancellation changed since the last
@@ -200,7 +220,20 @@ pub struct RenderResourceCache {
     /// [`MAX_CHANGED_RESOURCES`] it only records that too much changed.
     changed: Vec<String>,
     changed_overflow: bool,
+    /// `loading=lazy` images that have come within the lazy-load distance
+    /// of the viewport and so are loaded for good (Chromium never unloads).
+    lazy_loaded: HashSet<obscura_dom::tree::NodeId>,
+    /// The lowest document y the viewport has reached (root scroll offset
+    /// plus viewport height), for lazy loading.
+    lazy_viewport_bottom: f32,
+    /// The top of the nearest still-deferred lazy image, if any.
+    lazy_deferred_top: Option<f32>,
 }
+
+/// Chromium's lazy-load distance from the viewport when the effective
+/// connection type is unknown (headless): 3000px (measured: with an 800px
+/// viewport, a lazy image at y=3700 loads, one at y=3800 does not).
+const LAZY_LOAD_DISTANCE: f32 = 3000.0;
 
 impl Default for RenderResourceCache {
     fn default() -> Self {
@@ -242,11 +275,28 @@ impl RenderResourceCache {
             content_image_layout_retries: 0,
             sync_loading_enabled: true,
             sync_misses: Vec::new(),
+            video_frames: HashMap::new(),
+            video_times: HashMap::new(),
             sync_miss_keys: HashSet::new(),
             loader: Box::new(loader),
             changed: Vec::new(),
             changed_overflow: false,
+            lazy_loaded: HashSet::new(),
+            lazy_viewport_bottom: 0.0,
+            lazy_deferred_top: None,
         }
+    }
+
+    /// Record that the viewport's bottom edge has reached document y
+    /// `bottom` (root scroll offset plus viewport height). Returns true when
+    /// a deferred lazy image is now within the lazy-load distance, so the
+    /// prepared layout must be rebuilt to load it.
+    pub fn note_viewport_bottom(&mut self, bottom: f32) -> bool {
+        if bottom.is_finite() && bottom > self.lazy_viewport_bottom {
+            self.lazy_viewport_bottom = bottom;
+        }
+        self.lazy_deferred_top
+            .is_some_and(|top| top < self.lazy_viewport_bottom + LAZY_LOAD_DISTANCE)
     }
 
     /// Resource keys that appeared, failed, were cancelled or were evicted
@@ -576,6 +626,92 @@ impl RenderResourceCache {
                 dimensions.map(|(_, width, height)| (width, height)),
             )),
         }
+    }
+
+    /// The natural size a video at `url` declares in its container header,
+    /// read from the cached bytes (a cache-only miss requests them). Needs
+    /// no decoder.
+    pub fn video_header_dimensions(&mut self, url: &str) -> Option<(f32, f32)> {
+        // Bytes the decoder path already holds.
+        if let Some(CachedResource::Bytes { bytes, .. }) =
+            self.entries.get(&network_resource_url(url))
+        {
+            return crate::video_header::video_dimensions(bytes);
+        }
+        // Otherwise only the first bytes (a Range request): a fast-start
+        // MP4's moov or a WebM's Tracks comes first.
+        let header_key = format!(
+            "{}{}",
+            crate::video_header::MEDIA_HEADER_PREFIX,
+            network_resource_url(url)
+        );
+        if let Some(bytes) = self.get_or_load(&header_key, false) {
+            if let Some(size) = crate::video_header::video_dimensions(&bytes) {
+                return Some(size);
+            }
+            // moov after mdat: the header is past the prefix.
+            if bytes.len() < crate::video_header::MEDIA_HEADER_BYTES {
+                return None;
+            }
+            let bytes = self.get_or_load(url, false)?;
+            return crate::video_header::video_dimensions(&bytes);
+        }
+        // A loader without the prefix scheme (standalone renders): the whole
+        // resource.
+        if self.sync_loading_enabled {
+            let bytes = self.get_or_load(url, false)?;
+            return crate::video_header::video_dimensions(&bytes);
+        }
+        None
+    }
+
+    /// The frame a paused video at `url` shows at `time`, decoding it from
+    /// the media bytes once they are cached (a cache-only miss requests
+    /// them). None until then, or when the media does not decode.
+    pub fn video_frame(&mut self, url: &str, time: f64) -> Option<VideoFrameEntry> {
+        let key = (network_resource_url(url), time.to_bits());
+        if let Some(entry) = self.video_frames.get(&key) {
+            return entry.clone();
+        }
+        if !cfg!(feature = "media") {
+            return None;
+        }
+        let bytes = self.get_or_load(url, false)?;
+        let entry = video::decode_frame(bytes, time).and_then(|frame| {
+            let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png).ok()?;
+            use base64::Engine;
+            let data_url = format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+            );
+            Some(VideoFrameEntry {
+                width: frame.width,
+                height: frame.height,
+                duration: frame.duration,
+                has_audio: frame.has_audio,
+                data_url: Arc::from(data_url),
+            })
+        });
+        if self.video_frames.len() >= 64 {
+            self.video_frames.clear();
+        }
+        self.video_frames.insert(key, entry.clone());
+        entry
+    }
+
+    /// Script moved `<video>` `node` to `time` seconds.
+    pub fn set_video_time(&mut self, node: obscura_dom::tree::NodeId, time: f64) {
+        if time.is_finite() && time > 0.0 {
+            self.video_times.insert(node, time);
+        } else {
+            self.video_times.remove(&node);
+        }
+    }
+
+    pub fn video_time(&self, node: obscura_dom::tree::NodeId) -> f64 {
+        self.video_times.get(&node).copied().unwrap_or(0.0)
     }
 
     fn profiled_image_intrinsic(
@@ -940,6 +1076,10 @@ pub struct ResolvedScrollState {
     container_offsets: Vec<(f32, f32)>,
     node_movement: Vec<(f32, f32)>,
     inherited_clips: Vec<Option<crate::dom::OverflowClip>>,
+    /// Scene recordings only: scroll containers the GPU compositor scrolls
+    /// and clips itself. Their own overflow clip is left out of paint, and
+    /// their content starts a fresh clip chain in the scroll frame's space.
+    scene_unclipped: Option<Arc<HashSet<obscura_dom::tree::NodeId>>>,
 }
 
 /// A rectangle in immutable document CSS-pixel coordinates.
@@ -1092,6 +1232,13 @@ pub fn validate_capture_region(region: CaptureRegion) -> Result<(), CaptureError
 impl ResolvedScrollState {
     pub fn root_offset(&self) -> (f32, f32) {
         self.root_offset
+    }
+
+    /// The compositor scrolls `id` itself (scene recordings only).
+    fn scene_unclipped(&self, id: obscura_dom::tree::NodeId) -> bool {
+        self.scene_unclipped
+            .as_ref()
+            .is_some_and(|set| set.contains(&id))
     }
 
     fn movement_for(&self, id: obscura_dom::tree::NodeId) -> (f32, f32) {
@@ -1271,6 +1418,11 @@ impl PreparedRender {
 
     pub fn base_url(&self) -> Option<&str> {
         self.base_url.as_deref()
+    }
+
+    /// Changes whenever layout, styles or selected images change.
+    pub fn paint_epoch(&self) -> u64 {
+        self.paint_epoch
     }
 
     pub fn layout(&self) -> &crate::DomLayout {
@@ -1506,6 +1658,7 @@ impl PreparedRender {
             container_offsets: offsets,
             node_movement,
             inherited_clips,
+            scene_unclipped: None,
         }
     }
 
@@ -1548,18 +1701,48 @@ impl PreparedRender {
         })
     }
 
+    /// Advance width, ascent and descent of `text` in this document's fonts
+    /// (web fonts included, with their whole-pixel advances) at
+    /// `font_size` px: (width, ascent, descent).
+    pub fn measure_text_run(
+        &mut self,
+        tree: &DomTree,
+        text: &str,
+        family: &str,
+        weight: &str,
+        italic: bool,
+        font_size: f32,
+    ) -> Option<(f32, f32, f32)> {
+        let mut style = crate::LayoutStyle {
+            font_family: Some(family.to_string()),
+            font_weight: Some(weight.to_string()),
+            font_size: Some(font_size),
+            font_style_italic: Some(italic),
+            white_space: Some(crate::WhiteSpace::Pre),
+            ..Default::default()
+        };
+        style.line_height = Some(crate::LineHeight::Normal);
+        let owner = tree.document();
+        let store = &mut self.layout.ifc;
+        let before = store.len();
+        let (index, width, _) =
+            store.standalone(tree, &self.layout.styles, owner, &style, text, None)?;
+        let metrics = store
+            .get(index)
+            .and_then(|ifc| ifc.layout.root_span_metrics())
+            .map(|metrics| (metrics.ascent, metrics.descent));
+        while store.len() > before {
+            store.ifcs.pop();
+        }
+        let (ascent, descent) = metrics?;
+        Some((width, ascent, descent))
+    }
+
     /// Axis-aligned bounds of the transformed border box in immutable document
     /// space, excluding root-scroll and sticky movement.
     pub fn document_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
         let rect = *self.layout.rects.get(&id)?;
-        Some(
-            self.layout
-                .transforms
-                .get(&id)
-                .copied()
-                .map(|transform| transform.map_rect(rect))
-                .unwrap_or(rect),
-        )
+        Some(self.layout.transformed_rect(id, rect))
     }
 
     /// Unscaled padding-box size used by CSSOM View's `clientWidth` and
@@ -1611,6 +1794,19 @@ impl PreparedRender {
         x: f32,
         y: f32,
     ) -> Option<obscura_dom::tree::NodeId> {
+        self.hit_test_all(tree, scroll, x, y, 1).into_iter().next()
+    }
+
+    /// Every element whose box contains a viewport point, topmost first
+    /// (`document.elementsFromPoint`), at most `limit` of them.
+    pub fn hit_test_all(
+        &self,
+        tree: &DomTree,
+        scroll: &ResolvedScrollState,
+        x: f32,
+        y: f32,
+        limit: usize,
+    ) -> Vec<obscura_dom::tree::NodeId> {
         fn stacking_path(
             tree: &DomTree,
             laid: &crate::DomLayout,
@@ -1664,7 +1860,7 @@ impl PreparedRender {
             || x > self.viewport.0
             || y > self.viewport.1
         {
-            return None;
+            return Vec::new();
         }
         let point = crate::Rect {
             x,
@@ -1676,7 +1872,15 @@ impl PreparedRender {
             width: 0.001,
             height: 0.001,
         };
-        let mut best: Option<(Vec<i32>, bool, usize, usize, obscura_dom::tree::NodeId)> = None;
+        type Candidate = (
+            Vec<i32>,
+            bool,
+            usize,
+            usize,
+            obscura_dom::tree::NodeId,
+            Option<f32>,
+        );
+        let mut candidates: Vec<Candidate> = Vec::new();
         for (order, id) in crate::dom::rendered_descendants(tree, tree.document())
             .into_iter()
             .enumerate()
@@ -1697,6 +1901,34 @@ impl PreparedRender {
             if x < rect.x || x >= rect.x + rect.width || y < rect.y || y >= rect.y + rect.height {
                 continue;
             }
+            // A transformed box is hit inside its transformed shape, not
+            // its bounding box; a hidden back face is not hit at all.
+            let mut depth_3d = None;
+            if self.layout.transforms.contains_key(&id) {
+                let Some(local) = self.fractional_rect(id) else {
+                    continue;
+                };
+                let movement = scroll.movement_for(id);
+                let Some((local_x, local_y)) =
+                    self.layout
+                        .untransformed_point(id, x - movement.0, y - movement.1)
+                else {
+                    continue;
+                };
+                if local_x < local.x
+                    || local_x >= local.x + local.width
+                    || local_y < local.y
+                    || local_y >= local.y + local.height
+                {
+                    continue;
+                }
+                if let Some(matrix) = self.layout.projective_transforms.get(&id) {
+                    if style.backface_hidden && matrix.is_back_face_visible() {
+                        continue;
+                    }
+                    depth_3d = matrix.project(local_x, local_y).map(|(_, _, z)| z);
+                }
+            }
             if scroll
                 .inherited_clip_for(id)
                 .is_some_and(|clip| clip.intersect_rect(&point).is_none())
@@ -1707,30 +1939,51 @@ impl PreparedRender {
             let positioned =
                 style.position.is_some() || style.position_fixed || style.position_sticky;
             let depth = tree.ancestors(id).len();
-            let replace = best.as_ref().is_none_or(
-                |(best_path, best_positioned, best_depth, best_order, best_id)| {
-                    let stacking = compare_stacking_paths(&path, best_path);
-                    if stacking != std::cmp::Ordering::Equal {
-                        return stacking.is_gt();
-                    }
-                    if tree.ancestors(id).contains(best_id) {
-                        return true;
-                    }
-                    if tree.ancestors(*best_id).contains(&id) {
-                        return false;
-                    }
-                    positioned
-                        .cmp(best_positioned)
-                        .then_with(|| depth.cmp(best_depth))
-                        .then_with(|| order.cmp(best_order))
-                        .is_gt()
-                },
-            );
-            if replace {
-                best = Some((path, positioned, depth, order, id));
-            }
+            candidates.push((path, positioned, depth, order, id, depth_3d));
         }
-        best.map(|(_, _, _, _, id)| id)
+        // Whether `a` paints above `b`.
+        let above = |a: &Candidate, b: &Candidate| {
+            let (path, positioned, depth, order, id, z) = a;
+            let (best_path, best_positioned, best_depth, best_order, best_id, best_z) = b;
+            // Two boxes in 3D space: the nearer one at this point
+            // (Chromium sorts a 3D rendering context by depth).
+            if let (Some(z), Some(best_z)) = (z, best_z) {
+                if (z - best_z).abs() > 1.0e-3
+                    && !tree.ancestors(*id).contains(best_id)
+                    && !tree.ancestors(*best_id).contains(id)
+                {
+                    return z > best_z;
+                }
+            }
+            let stacking = compare_stacking_paths(path, best_path);
+            if stacking != std::cmp::Ordering::Equal {
+                return stacking.is_gt();
+            }
+            if tree.ancestors(*id).contains(best_id) {
+                return true;
+            }
+            if tree.ancestors(*best_id).contains(id) {
+                return false;
+            }
+            positioned
+                .cmp(best_positioned)
+                .then_with(|| depth.cmp(best_depth))
+                .then_with(|| order.cmp(best_order))
+                .is_gt()
+        };
+        // Repeated selection, not a sort: `above` is not a total order
+        // across unrelated stacking branches.
+        let mut out = Vec::new();
+        while !candidates.is_empty() && out.len() < limit {
+            let mut top = 0;
+            for index in 1..candidates.len() {
+                if above(&candidates[index], &candidates[top]) {
+                    top = index;
+                }
+            }
+            out.push(candidates.swap_remove(top).4);
+        }
+        out
     }
 
     /// Shaped-text caret in the viewport. Hit testing selects the painted
@@ -1747,43 +2000,25 @@ impl PreparedRender {
             .take(tree.len() + 1)
         {
             let movement = scroll.movement_for(parent);
-            let transform = self
-                .layout
-                .transforms
-                .get(&parent)
-                .copied()
-                .unwrap_or_default();
-            let Some(inverse) = transform.inverse() else {
+            let Some((local_x, local_y)) =
+                self.layout
+                    .untransformed_point(parent, x - movement.0, y - movement.1)
+            else {
                 continue;
             };
-            let (local_x, local_y) = inverse.map_point(x - movement.0, y - movement.1);
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
-            let best = indices
-                .filter_map(|index| {
-                    self.layout.text_engine.caret_from_point(
-                        index,
-                        parent,
-                        tree,
-                        &self.layout.styles,
-                        local_x,
-                        local_y,
-                        hit,
-                    )
-                })
-                .min_by(|a, b| a.2.total_cmp(&b.2));
+            let best: Option<(obscura_dom::tree::NodeId, usize, f32)> = None;
+            let best = best.or_else(|| {
+                self.layout
+                    .ifc
+                    .by_node
+                    .get(&parent)?
+                    .iter()
+                    .filter_map(|&index| {
+                        let ifc = self.layout.ifc.get(index)?;
+                        ifc.caret_from_point(local_x - ifc.origin.0, local_y - ifc.origin.1)
+                    })
+                    .min_by(|a, b| a.2.total_cmp(&b.2))
+            });
             if let Some((node, offset, _)) = best {
                 return Some((node, offset));
             }
@@ -1807,41 +2042,28 @@ impl PreparedRender {
         })
         .take(tree.len() + 1)
         {
-            let indices = self
-                .layout
-                .ifc_items
-                .get(&parent)
-                .into_iter()
-                .copied()
-                .chain(
-                    self.layout
-                        .run_ifc_items
-                        .get(&parent)
-                        .into_iter()
-                        .flatten()
-                        .copied(),
-                );
-            for index in indices {
-                let Some(rect) = self.layout.text_engine.caret_rect(
-                    index,
-                    parent,
-                    tree,
-                    &self.layout.styles,
-                    node,
-                    offset,
-                ) else {
-                    continue;
-                };
-                let mut rect = self
-                    .layout
-                    .transforms
-                    .get(&parent)
-                    .copied()
-                    .unwrap_or_default()
-                    .map_rect(rect);
+            let ifc_rect = self.layout.ifc.by_node.get(&parent).and_then(|list| {
+                list.iter().find_map(|&index| {
+                    let ifc = self.layout.ifc.get(index)?;
+                    if !ifc.contains_text(node) {
+                        return None;
+                    }
+                    let rect = ifc.caret_rect(node, offset)?;
+                    Some(crate::Rect {
+                        x: rect.x + ifc.origin.0,
+                        y: rect.y + ifc.origin.1,
+                        ..rect
+                    })
+                })
+            });
+            if let Some(rect) = ifc_rect {
+                let mut rect = self.layout.transformed_rect(parent, rect);
                 let movement = scroll.movement_for(parent);
                 rect.x += movement.0;
                 rect.y += movement.1;
+                // A caret position's client rect has no width (Chrome:
+                // 0 x 23 at the start of 20px/24px monospace text).
+                rect.width = 0.0;
                 return Some(rect);
             }
         }
@@ -1866,7 +2088,62 @@ impl PreparedRender {
         id: obscura_dom::tree::NodeId,
     ) -> Option<HashMap<&'static str, String>> {
         let style = self.layout.styles.get(&id)?;
-        let rect = self.layout.rects.get(&id);
+        let rect = self.layout.rects.get(&id).copied();
+        self.computed_style_with(Some(id), style, rect.as_ref())
+    }
+
+    /// The computed style of `::before` (`before`) or `::after` of `id`,
+    /// with its generated box's geometry, or `None` without such a pseudo.
+    pub fn computed_pseudo_style(
+        &self,
+        id: obscura_dom::tree::NodeId,
+        before: bool,
+    ) -> Option<HashMap<&'static str, String>> {
+        let host = self.layout.styles.get(&id)?;
+        let pseudo = if before {
+            host.before_pseudo.as_deref()
+        } else {
+            host.after_pseudo.as_deref()
+        }?;
+        let kind = if before {
+            crate::dom::GeneratedBoxKind::Before
+        } else {
+            crate::dom::GeneratedBoxKind::After
+        };
+        let rect = self
+            .layout
+            .generated_boxes
+            .iter()
+            .find(|generated| generated.host == id && generated.kind == kind)
+            .map(|generated| generated.rect);
+        let mut out = self.computed_style_with(None, pseudo, rect.as_ref())?;
+        // The element path takes insets from the cascade in script; the
+        // generated box has no element, so report its own.
+        for (name, value) in ["top", "right", "bottom", "left"]
+            .into_iter()
+            .zip(pseudo.inset)
+        {
+            out.insert(
+                name,
+                value.map_or_else(|| "auto".to_string(), |v| dimension_css(v, "auto")),
+            );
+        }
+        out.insert(
+            "content",
+            pseudo.before_content.as_deref().map_or_else(
+                || "none".to_string(),
+                |value| format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")),
+            ),
+        );
+        Some(out)
+    }
+
+    fn computed_style_with(
+        &self,
+        id: Option<obscura_dom::tree::NodeId>,
+        style: &crate::LayoutStyle,
+        rect: Option<&crate::Rect>,
+    ) -> Option<HashMap<&'static str, String>> {
         let mut out = non_geometric_computed_style(style);
         out.insert("font-size", css_px(style.font_size.unwrap_or(16.0)));
         out.insert(
@@ -1879,6 +2156,42 @@ impl PreparedRender {
         if let Some(family) = &style.font_family {
             out.insert("font-family", family.clone());
         }
+        out.insert(
+            "font-family",
+            style
+                .cssom
+                .font_family
+                .clone()
+                .unwrap_or_else(|| "\"Times New Roman\"".to_string()),
+        );
+        out.insert(
+            "font-style",
+            if style.font_style_italic.unwrap_or(false) {
+                "italic"
+            } else {
+                "normal"
+            }
+            .to_string(),
+        );
+        out.insert(
+            "vertical-align",
+            match style.cssom.vertical_align {
+                None | Some(crate::VerticalAlignCss::Inherit) => "baseline".to_string(),
+                Some(crate::VerticalAlignCss::Keyword(keyword)) => keyword.to_string(),
+                Some(crate::VerticalAlignCss::Length(crate::Dimension::Percent(value))) => {
+                    format!("{}%", css_number(value * 100.0))
+                }
+                Some(crate::VerticalAlignCss::Length(length)) => dimension_css(
+                    length.resolve(
+                        style.font_size.unwrap_or(16.0),
+                        self.root_font_size,
+                        self.viewport.0,
+                        self.viewport.1,
+                    ),
+                    "0px",
+                ),
+            },
+        );
         out.insert(
             "line-height",
             match style.line_height.unwrap_or(crate::LineHeight::Normal) {
@@ -1949,12 +2262,7 @@ impl PreparedRender {
         );
         out.insert(
             "text-align",
-            match style.text_align {
-                Some(taffy::AlignItems::CENTER) => "center",
-                Some(taffy::AlignItems::FLEX_END | taffy::AlignItems::END) => "end",
-                _ => "start",
-            }
-            .to_string(),
+            style.cssom.text_align.unwrap_or("start").to_string(),
         );
 
         if style.ignores_used_box_sizes() {
@@ -1965,12 +2273,27 @@ impl PreparedRender {
                 style.border.left + style.border.right + style.padding.left + style.padding.right;
             let vertical_non_content =
                 style.border.top + style.border.bottom + style.padding.top + style.padding.bottom;
-            let (width, height) = match style.box_sizing {
-                crate::BoxSizing::BorderBox => (rect.width, rect.height),
-                _ => (
-                    (rect.width - horizontal_non_content).max(0.0),
-                    (rect.height - vertical_non_content).max(0.0),
-                ),
+            let (border_width, border_height) = id
+                .and_then(|id| self.layout.fractional_sizes.get(&id))
+                .copied()
+                .filter(|&(width, height)| {
+                    (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
+                })
+                .unwrap_or((rect.width, rect.height));
+            // A UA override reports the CSS box-sizing where the engine sizes
+            // a native control as a border box.
+            let reported_border_box = style.box_sizing == crate::BoxSizing::BorderBox
+                && !style
+                    .cssom
+                    .ua_overrides
+                    .contains(&("box-sizing", "content-box"));
+            let (width, height) = if reported_border_box {
+                (border_width, border_height)
+            } else {
+                (
+                    (border_width - horizontal_non_content).max(0.0),
+                    (border_height - vertical_non_content).max(0.0),
+                )
             };
             out.insert("width", css_px(width));
             out.insert("height", css_px(height));
@@ -2002,19 +2325,57 @@ impl PreparedRender {
         let (overflow_x, overflow_y) = crate::style::computed_overflow_axes(style);
         out.insert("overflow-x", overflow_axis(overflow_x).to_string());
         out.insert("overflow-y", overflow_axis(overflow_y).to_string());
+        out.insert(
+            "overflow",
+            if overflow_x == overflow_y {
+                overflow_axis(overflow_x).to_string()
+            } else {
+                format!(
+                    "{} {}",
+                    overflow_axis(overflow_x),
+                    overflow_axis(overflow_y)
+                )
+            },
+        );
+        out.insert(
+            "flex-grow",
+            css_number(if style.flex_grow_from_table_cell {
+                0.0
+            } else {
+                style.flex_grow.unwrap_or(0.0)
+            }),
+        );
+        out.insert("flex-shrink", css_number(style.flex_shrink.unwrap_or(1.0)));
+        out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
+        out.insert("order", style.order.to_string());
 
-        for (name, value, auto) in [
+        let used_auto = id
+            .and_then(|id| self.layout.used_auto_margins.get(&id))
+            .copied();
+        for (index, (name, value, auto)) in [
             ("margin-top", style.margin.top, style.margin_auto[0]),
             ("margin-right", style.margin.right, style.margin_auto[1]),
             ("margin-bottom", style.margin.bottom, style.margin_auto[2]),
             ("margin-left", style.margin.left, style.margin_auto[3]),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            // A rendered box reports its used margin; `auto` survives only
+            // without a box.
+            let used = match (index, used_auto) {
+                (1, Some((_, right))) => Some(right),
+                (3, Some((left, _))) => Some(left),
+                (0 | 2, _) if rect.is_some() => Some(0.0),
+                (_, None) if rect.is_some() && style.ignores_used_box_sizes() => Some(0.0),
+                _ => None,
+            };
             out.insert(
                 name,
-                if auto {
-                    "auto".to_string()
-                } else {
-                    css_px(value)
+                match (auto, used) {
+                    (true, Some(used)) => css_px(used),
+                    (true, None) => "auto".to_string(),
+                    _ => css_px(value),
                 },
             );
         }
@@ -2078,7 +2439,13 @@ impl PreparedRender {
 
         out.insert(
             "flex-direction",
-            match style.flex_direction.unwrap_or(taffy::FlexDirection::Row) {
+            match if style.internal_flex_container || style.css_display != crate::CssDisplay::Layout {
+                style.cssom.flex_direction
+            } else {
+                style.flex_direction
+            }
+            .unwrap_or(taffy::FlexDirection::Row)
+            {
                 taffy::FlexDirection::Row => "row",
                 taffy::FlexDirection::RowReverse => "row-reverse",
                 taffy::FlexDirection::Column => "column",
@@ -2097,9 +2464,12 @@ impl PreparedRender {
         );
         out.insert(
             "align-items",
-            style
-                .align_items
-                .map_or_else(|| "normal".to_string(), align_items_css),
+            if style.internal_flex_container || style.css_display != crate::CssDisplay::Layout {
+                style.cssom.align_items
+            } else {
+                style.align_items
+            }
+            .map_or_else(|| "normal".to_string(), align_items_css),
         );
         out.insert(
             "justify-items",
@@ -2140,6 +2510,58 @@ impl PreparedRender {
             .to_string(),
         );
 
+        // A grid container's resolved track lists are its used track sizes,
+        // implicit tracks included (CSS Grid 1 §7.2.6).
+        if let Some((columns, rows)) =
+            id.and_then(|id| self.layout.grid_tracks.get(&id))
+                .filter(|_| {
+                    style.display == crate::Display::Grid
+                        && style.css_display == crate::CssDisplay::Layout
+                })
+        {
+            let tracks = |sizes: &[f32]| {
+                if sizes.is_empty() {
+                    "none".to_string()
+                } else {
+                    sizes
+                        .iter()
+                        .map(|&size| css_px(size))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                }
+            };
+            out.insert("grid-template-columns", tracks(columns));
+            out.insert("grid-template-rows", tracks(rows));
+        } else if let Some(rect) = rect.filter(|_| {
+            style.display == crate::Display::Grid
+                && style.css_display == crate::CssDisplay::Layout
+                && !style.display_contents
+                && style.grid_template_columns.is_empty()
+                && style.grid_template_rows.is_empty()
+        }) {
+            // A grid whose only content is text is laid out as one text
+            // leaf rather than a Taffy grid: its anonymous item fills the
+            // single implicit track.
+            let (width, height) = id
+                .and_then(|id| self.layout.fractional_sizes.get(&id))
+                .copied()
+                .filter(|&(width, height)| {
+                    (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0
+                })
+                .unwrap_or((rect.width, rect.height));
+            let content_width = width
+                - style.border.left
+                - style.border.right
+                - style.padding.left
+                - style.padding.right;
+            let content_height = height
+                - style.border.top
+                - style.border.bottom
+                - style.padding.top
+                - style.padding.bottom;
+            out.insert("grid-template-columns", css_px(content_width.max(0.0)));
+            out.insert("grid-template-rows", css_px(content_height.max(0.0)));
+        }
         out.insert(
             "transform",
             transform_css(style, rect, self.root_font_size, self.viewport),
@@ -2166,6 +2588,35 @@ impl PreparedRender {
                 |(x, y)| format!("{} {}", css_number(x), css_number(y)),
             ),
         );
+        out.insert(
+            "text-transform",
+            match style.text_transform.unwrap_or(crate::TextTransform::None) {
+                crate::TextTransform::None => "none",
+                crate::TextTransform::Uppercase => "uppercase",
+                crate::TextTransform::Lowercase => "lowercase",
+                crate::TextTransform::Capitalize => "capitalize",
+            }
+            .to_string(),
+        );
+        out.insert("word-spacing", css_px(style.word_spacing.unwrap_or(0.0)));
+        out.insert(
+            "text-indent",
+            match style.text_indent.unwrap_or(crate::Dimension::Px(0.0)) {
+                crate::Dimension::Percent(value) => format!("{}%", css_number(value * 100.0)),
+                length => dimension_css(
+                    length.resolve(
+                        style.font_size.unwrap_or(16.0),
+                        self.root_font_size,
+                        self.viewport.0,
+                        self.viewport.1,
+                    ),
+                    "0px",
+                ),
+            },
+        );
+        for &(property, value) in &style.cssom.ua_overrides {
+            out.insert(property, value.to_string());
+        }
         Some(out)
     }
 
@@ -2221,7 +2672,8 @@ impl PreparedRender {
         id: obscura_dom::tree::NodeId,
         scroll: &ResolvedScrollState,
     ) -> Option<crate::Rect> {
-        let mut rect = self.document_rect(id)?;
+        let rect = self.fractional_rect(id)?;
+        let mut rect = self.layout.transformed_rect(id, rect);
         let movement = scroll.movement_for(id);
         rect.x += movement.0;
         rect.y += movement.1;
@@ -2242,19 +2694,13 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = self.root_only_movement_for(id, requested_scroll);
         Some(
             source
                 .into_iter()
                 .map(|rect| {
-                    let rect = self
-                        .layout
-                        .transforms
-                        .get(&id)
-                        .copied()
-                        .map(|transform| transform.map_rect(rect))
-                        .unwrap_or(rect);
+                    let rect = self.layout.transformed_rect(id, rect);
                     crate::Rect {
                         x: rect.x + movement.0,
                         y: rect.y + movement.1,
@@ -2263,6 +2709,71 @@ impl PreparedRender {
                 })
                 .collect(),
         )
+    }
+
+    /// Viewport client rects of the UTF-16 range `start..end` of text node
+    /// `text`, one per line box it occupies (`Range.getClientRects`).
+    pub fn text_range_client_rects_with_scroll(
+        &self,
+        tree: &DomTree,
+        text: obscura_dom::tree::NodeId,
+        start: usize,
+        end: usize,
+        scroll: &ResolvedScrollState,
+    ) -> Option<Vec<crate::Rect>> {
+        let parent = crate::dom::rendered_parent(tree, text)?;
+        for owner in
+            std::iter::successors(Some(parent), |id| crate::dom::rendered_parent(tree, *id))
+                .take(tree.len() + 1)
+        {
+            let Some(list) = self.layout.ifc.by_node.get(&owner) else {
+                continue;
+            };
+            for &index in list {
+                let Some(ifc) = self.layout.ifc.get(index) else {
+                    continue;
+                };
+                if !ifc.contains_text(text) {
+                    continue;
+                }
+                let movement = scroll.movement_for(parent);
+                return Some(
+                    ifc.text_range_rects(text, start, end)
+                        .into_iter()
+                        .map(|rect| {
+                            let rect = crate::Rect {
+                                x: rect.x + ifc.origin.0,
+                                y: rect.y + ifc.origin.1,
+                                ..rect
+                            };
+                            let rect = self.layout.transformed_rect(parent, rect);
+                            crate::Rect {
+                                x: rect.x + movement.0,
+                                y: rect.y + movement.1,
+                                ..rect
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        None
+    }
+
+    /// The box's rect with its 1/64 px used size (Chrome's LayoutUnit)
+    /// instead of the whole-pixel size paint snaps to.
+    fn fractional_rect(&self, id: obscura_dom::tree::NodeId) -> Option<crate::Rect> {
+        if let Some(rect) = self.layout.fractional_rects.get(&id) {
+            return Some(*rect);
+        }
+        let mut rect = self.layout.rects.get(&id).copied()?;
+        if let Some(&(width, height)) = self.layout.fractional_sizes.get(&id) {
+            if (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0 {
+                rect.width = width;
+                rect.height = height;
+            }
+        }
+        Some(rect)
     }
 
     pub fn viewport_client_rects_with_scroll(
@@ -2275,19 +2786,13 @@ impl PreparedRender {
             .inline_fragments
             .get(&id)
             .cloned()
-            .or_else(|| self.layout.rects.get(&id).copied().map(|rect| vec![rect]))?;
+            .or_else(|| self.fractional_rect(id).map(|rect| vec![rect]))?;
         let movement = scroll.movement_for(id);
         Some(
             source
                 .into_iter()
                 .map(|rect| {
-                    let rect = self
-                        .layout
-                        .transforms
-                        .get(&id)
-                        .copied()
-                        .map(|transform| transform.map_rect(rect))
-                        .unwrap_or(rect);
+                    let rect = self.layout.transformed_rect(id, rect);
                     crate::Rect {
                         x: rect.x + movement.0,
                         y: rect.y + movement.1,
@@ -2322,6 +2827,57 @@ impl PreparedRender {
                 && selected.profile == profile
                 && self.image_intrinsics_affect_geometry(tree, *id)
         })
+    }
+
+    /// Whether this layout's geometry still holds after `mutations`: each is
+    /// a selector-only attribute change inside a `display: none` subtree and
+    /// restyles nothing outside it (beyond the mutated nodes' ancestor
+    /// chain, which the planner rebuilds for context only). Such a change
+    /// cannot create, remove or resize a box (Chrome restyles the hidden
+    /// subtree and skips layout), so a geometry read may keep this layout
+    /// while the mutations stay queued for the next style read or paint.
+    pub fn geometry_survives_hidden_mutations(
+        &self,
+        tree: &DomTree,
+        stylesheet_cache: &mut crate::css::StylesheetCache,
+        mutations: &[crate::dom::RetainedStyleMutation],
+    ) -> bool {
+        let suppressed = |id: obscura_dom::tree::NodeId| {
+            let mut ancestor = crate::dom::rendered_parent(tree, id);
+            while let Some(node) = ancestor {
+                if self
+                    .layout
+                    .styles
+                    .get(&node)
+                    .is_some_and(|style| style.display == crate::Display::None)
+                {
+                    return true;
+                }
+                ancestor = crate::dom::rendered_parent(tree, node);
+            }
+            false
+        };
+        let mut chain = std::collections::HashSet::new();
+        for mutation in mutations {
+            let crate::dom::RetainedStyleMutation::Attribute(attribute) = mutation else {
+                return false;
+            };
+            if !suppressed(attribute.node) {
+                return false;
+            }
+            chain.extend(tree.ancestors(attribute.node));
+        }
+        let Some(dirty) = crate::dom::retained_selector_dirty_set(
+            tree,
+            self.viewport,
+            stylesheet_cache,
+            mutations,
+        ) else {
+            return false;
+        };
+        dirty
+            .into_iter()
+            .all(|node| chain.contains(&node) || suppressed(node))
     }
 
     fn image_is_display_suppressed(&self, tree: &DomTree, id: obscura_dom::tree::NodeId) -> bool {
@@ -2410,7 +2966,10 @@ pub(crate) fn non_geometric_computed_style(
     out.insert("display", computed_display(style).to_string());
     out.insert(
         "float",
-        match style.float {
+        match style
+            .float
+            .filter(|_| style.position != Some(taffy::Position::Absolute))
+        {
             Some(crate::Float::Left) => "left",
             Some(crate::Float::Right) => "right",
             None => "none",
@@ -2469,7 +3028,69 @@ pub(crate) fn non_geometric_computed_style(
         }
         .to_string(),
     );
+    out.insert(
+        "cursor",
+        cursor_css(style.cursor.unwrap_or_default()).to_string(),
+    );
     out.insert("opacity", css_number(style.opacity.unwrap_or(1.0)));
+    out.insert(
+        "writing-mode",
+        match (style.vertical_writing, style.writing_mode) {
+            (false, _) => "horizontal-tb",
+            (true, crate::WritingMode::VerticalRl) => "vertical-rl",
+            (true, crate::WritingMode::VerticalLr) => "vertical-lr",
+            (true, crate::WritingMode::SidewaysRl) => "sideways-rl",
+            (true, crate::WritingMode::SidewaysLr) => "sideways-lr",
+        }
+        .to_string(),
+    );
+    out.insert(
+        "text-orientation",
+        match style.text_orientation.unwrap_or_default() {
+            crate::TextOrientation::Mixed => "mixed",
+            crate::TextOrientation::Upright => "upright",
+            crate::TextOrientation::Sideways => "sideways",
+        }
+        .to_string(),
+    );
+    out.insert(
+        "text-combine-upright",
+        if style.text_combine_upright.unwrap_or(false) {
+            "all"
+        } else {
+            "none"
+        }
+        .to_string(),
+    );
+    // Filter-like longhands: their initial values, as Chrome reports them.
+    out.insert(
+        "filter",
+        style.filter_css.clone().unwrap_or_else(|| "none".into()),
+    );
+    let backdrop = style
+        .backdrop_filter_css
+        .clone()
+        .unwrap_or_else(|| "none".into());
+    out.insert("backdrop-filter", backdrop);
+    out.insert(
+        "mix-blend-mode",
+        mix_blend_css(style.mix_blend_mode).to_string(),
+    );
+    if style.clip_path.is_none() {
+        out.insert("clip-path", "none".to_string());
+    }
+    if style.mask_image.is_none() && style.mask_layers.images.is_empty() {
+        out.insert("mask-image", "none".to_string());
+    }
+    out.insert(
+        "isolation",
+        if style.isolation_isolate {
+            "isolate"
+        } else {
+            "auto"
+        }
+        .to_string(),
+    );
     out.insert(
         "background-color",
         css_color(style.background_color.unwrap_or([0, 0, 0, 0])),
@@ -2497,13 +3118,55 @@ pub(crate) fn non_geometric_computed_style(
     out
 }
 
+fn cursor_css(cursor: crate::Cursor) -> &'static str {
+    use crate::Cursor as C;
+    match cursor {
+        C::Auto => "auto",
+        C::Default => "default",
+        C::Pointer => "pointer",
+        C::Text => "text",
+        C::VerticalText => "vertical-text",
+        C::Wait => "wait",
+        C::Progress => "progress",
+        C::Help => "help",
+        C::Crosshair => "crosshair",
+        C::Move => "move",
+        C::Grab => "grab",
+        C::Grabbing => "grabbing",
+        C::NotAllowed => "not-allowed",
+        C::NoDrop => "no-drop",
+        C::ContextMenu => "context-menu",
+        C::Cell => "cell",
+        C::Copy => "copy",
+        C::Alias => "alias",
+        C::ZoomIn => "zoom-in",
+        C::ZoomOut => "zoom-out",
+        C::ColResize => "col-resize",
+        C::RowResize => "row-resize",
+        C::EResize => "e-resize",
+        C::NResize => "n-resize",
+        C::NeResize => "ne-resize",
+        C::NwResize => "nw-resize",
+        C::SResize => "s-resize",
+        C::SeResize => "se-resize",
+        C::SwResize => "sw-resize",
+        C::WResize => "w-resize",
+        C::EwResize => "ew-resize",
+        C::NsResize => "ns-resize",
+        C::NeswResize => "nesw-resize",
+        C::NwseResize => "nwse-resize",
+        C::AllScroll => "all-scroll",
+        C::None => "none",
+    }
+}
+
 fn computed_display(style: &crate::LayoutStyle) -> &'static str {
     let active_webkit_clamp = style.webkit_box_display.is_some()
         && style.webkit_box_orient_vertical
         && style.webkit_line_clamp.is_some();
     if style.display_contents {
         "contents"
-    } else if style.display == crate::Display::None {
+    } else if style.display == crate::Display::None && !style.css_display.survives_ua_hiding() {
         "none"
     } else if active_webkit_clamp && style.webkit_box_display == Some(false) {
         "flow-root"
@@ -2511,6 +3174,8 @@ fn computed_display(style: &crate::LayoutStyle) -> &'static str {
         "-webkit-box"
     } else if style.webkit_box_display == Some(true) && !active_webkit_clamp {
         "-webkit-inline-box"
+    } else if let Some(name) = style.css_display.css_name(style.blockified) {
+        name
     } else if style.internal_flex_container {
         "block"
     } else {
@@ -2526,11 +3191,40 @@ fn computed_display(style: &crate::LayoutStyle) -> &'static str {
     }
 }
 
+/// Serialize a number the way Blink does: six significant digits, trailing
+/// zeros trimmed, exponent form outside [1e-6, 1e6).
 fn css_number(value: f32) -> String {
-    if value == 0.0 {
+    let value = value as f64;
+    if value == 0.0 || !value.is_finite() {
+        return "0".to_string();
+    }
+    let exponent = value.abs().log10().floor() as i32;
+    let trim = |s: String| {
+        if s.contains('.') {
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            s
+        }
+    };
+    if !(-6..6).contains(&exponent) {
+        let formatted = format!("{value:.5e}");
+        let (mantissa, exp) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let exp: i32 = exp.parse().unwrap_or(0);
+        return format!(
+            "{}e{}{:02}",
+            trim(mantissa.to_string()),
+            if exp < 0 { '-' } else { '+' },
+            exp.abs()
+        );
+    }
+    let decimals = (5 - exponent).max(0) as usize;
+    let formatted = trim(format!("{value:.decimals$}"));
+    // Rounding can carry into a new digit (999999.5 -> 1000000); six
+    // significant digits still hold, so this stays fixed notation.
+    if formatted == "-0" {
         "0".to_string()
     } else {
-        value.to_string()
+        formatted
     }
 }
 
@@ -2545,6 +3239,7 @@ fn dimension_css(value: crate::Dimension, auto: &str) -> String {
         crate::Dimension::Percent(v) => format!("{}%", css_number(v * 100.0)),
         crate::Dimension::Em(v) => format!("{}em", css_number(v)),
         crate::Dimension::Ex(v) => format!("{}ex", css_number(v)),
+        crate::Dimension::Ch(v) => format!("{}ch", css_number(v)),
         crate::Dimension::Rem(v) => format!("{}rem", css_number(v)),
         crate::Dimension::Vw(v) => format!("{}vw", css_number(v)),
         crate::Dimension::Vh(v) => format!("{}vh", css_number(v)),
@@ -2579,8 +3274,20 @@ fn css_color([r, g, b, a]: [u8; 4]) -> String {
     if a == 255 {
         format!("rgb({r}, {g}, {b})")
     } else {
-        format!("rgba({r}, {g}, {b}, {})", css_number(a as f32 / 255.0))
+        format!("rgba({r}, {g}, {b}, {})", css_alpha(a))
     }
+}
+
+/// Blink keeps 8-bit alpha and prints the shortest of two or three decimals
+/// that maps back to the same byte.
+fn css_alpha(a: u8) -> String {
+    let two = (a as f64 / 255.0 * 100.0).round() / 100.0;
+    let value = if (two * 255.0).round() as u8 == a {
+        two
+    } else {
+        (a as f64 / 255.0 * 1000.0).round() / 1000.0
+    };
+    css_number(value as f32)
 }
 
 fn align_items_css(value: taffy::AlignItems) -> String {
@@ -2629,18 +3336,28 @@ fn transform_css(
     if style.transform_ops.is_empty() {
         return "none".to_string();
     }
+    // Transforms do not apply to non-replaced inline boxes; the resolved
+    // value of a rendered one is `none` (Blink: no transformable box).
+    if rect.is_some() && style.ignores_used_box_sizes() {
+        return "none".to_string();
+    }
     let fallback = crate::Rect {
         x: 0.0,
         y: 0.0,
         width: 0.0,
         height: 0.0,
     };
-    let matrix = crate::dom::resolved_transform_property_matrix(
+    let matrix3d = crate::dom::resolved_transform_property_matrix3d(
         style,
         rect.unwrap_or(&fallback),
         root_font_size,
         viewport,
     );
+    if !matrix3d.is_2d() {
+        let values: Vec<String> = matrix3d.to_css().iter().map(|v| css_number(*v)).collect();
+        return format!("matrix3d({})", values.join(", "));
+    }
+    let matrix = matrix3d.to_affine();
     format!(
         "matrix({}, {}, {}, {}, {}, {})",
         css_number(matrix.a),
@@ -3013,11 +3730,159 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
     resources: &mut RenderResourceCache,
     dynamic_fonts: &[DynamicFontFace],
     stylesheet_cache: &mut crate::css::StylesheetCache,
-    mut previous: PreparedRender,
+    previous: PreparedRender,
     mutations: &[crate::dom::RetainedStyleMutation],
     animation_sample: crate::AnimationSample,
     animation_timeline: &mut crate::AnimationTimelineState,
 ) -> Option<PreparedRender> {
+    let entered = std::time::Instant::now();
+    let verify = crate::dom::layout_verify_enabled() && !VERIFYING.with(std::cell::Cell::get);
+    let timeline_before = verify.then(|| animation_timeline.clone());
+    let prepared = prepare_dom_with_retained_styles_with_animation_state_inner(
+        tree,
+        viewport,
+        base_url,
+        resources,
+        dynamic_fonts,
+        previous,
+        stylesheet_cache,
+        mutations,
+        animation_sample,
+        animation_timeline,
+    );
+    let mut prepared = prepared;
+    if let (Some(prepared), Some(timeline)) = (prepared.as_mut(), timeline_before) {
+        verify_against_scratch(
+            "retained",
+            prepared,
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            animation_sample,
+            timeline,
+        );
+    }
+    if crate::prof::enabled() {
+        eprintln!("[timing] retained-prepare total={:?}", entered.elapsed());
+    }
+    prepared
+}
+
+thread_local! {
+    static VERIFYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `OBSCURA_LAYOUT_VERIFY`: lay the document out again from scratch (fresh
+/// stylesheet cache, no retained styles, no reused text shaping) and panic
+/// with the first difference if the incremental result is not identical.
+#[allow(clippy::too_many_arguments)]
+fn verify_against_scratch(
+    path: &str,
+    prepared: &mut PreparedRender,
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
+    animation_sample: crate::AnimationSample,
+    mut timeline: crate::AnimationTimelineState,
+) {
+    VERIFYING.with(|flag| flag.set(true));
+    let mut fresh_sheets = crate::css::StylesheetCache::default();
+    let scratch = crate::inline::without_shaped_item_reuse(|| {
+        prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            &mut fresh_sheets,
+            None,
+            None,
+            crate::CssMediaType::Screen,
+            animation_sample,
+            &mut timeline,
+        )
+    });
+    VERIFYING.with(|flag| flag.set(false));
+    let Some(mut scratch) = scratch else {
+        panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
+    };
+    let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
+    if difference.is_none() && prepared.content_size != scratch.content_size {
+        difference = Some(format!(
+            "content_size {:?} vs {:?}",
+            prepared.content_size, scratch.content_size
+        ));
+    }
+    if difference.is_none() && prepared.viewport_fixed != scratch.viewport_fixed {
+        difference = Some("viewport_fixed differs".into());
+    }
+    if difference.is_none() {
+        difference = crate::dom::sticky_layout_difference(&prepared.sticky, &scratch.sticky);
+    }
+    if difference.is_none() {
+        difference =
+            crate::dom::scroll_tree_difference(&prepared.scroll_tree, &scratch.scroll_tree);
+    }
+    // The compositor frame built from the incremental layout must equal the
+    // frame built from scratch: no stale boxes, glyph runs or clips.
+    #[cfg(feature = "scene")]
+    if difference.is_none() {
+        let no_scroll = HashMap::new();
+        let frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
+            scene::build_scene_prepared(
+                tree,
+                render,
+                resources,
+                (0.0, 0.0),
+                &no_scroll,
+                [255, 255, 255, 255],
+                &EMPTY_CANVAS_SURFACES,
+                1.0,
+            )
+            .ok()
+            .map(|frame| redrob_scene::encode(&frame.frame))
+        };
+        let incremental = frame(prepared, resources);
+        let from_scratch = frame(&mut scratch, resources);
+        if incremental != from_scratch {
+            difference = Some(format!(
+                "scene frame differs ({:?} vs {:?} bytes)",
+                incremental.as_ref().map(Vec::len),
+                from_scratch.as_ref().map(Vec::len)
+            ));
+        }
+    }
+    if let Some(difference) = difference {
+        panic!(
+            "OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}"
+        );
+    }
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] layout-verify path={path} ok boxes={}",
+            prepared.layout.rects.len()
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_dom_with_retained_styles_with_animation_state_inner(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
+    mut previous: PreparedRender,
+    stylesheet_cache: &mut crate::css::StylesheetCache,
+    mutations: &[crate::dom::RetainedStyleMutation],
+    animation_sample: crate::AnimationSample,
+    animation_timeline: &mut crate::AnimationTimelineState,
+) -> Option<PreparedRender> {
+    let _prof = crate::prof::start();
     let sample_changed = previous.animation_sample != animation_sample;
     let forward_document_sample = sample_changed
         && previous.animation_sample.mode == crate::AnimationSampleMode::DocumentTime
@@ -3198,6 +4063,7 @@ pub fn prepare_dom_with_retained_styles_with_animation_state(
             .collect::<Vec<_>>();
         animation_mutations.as_slice()
     };
+    crate::prof::stop(crate::prof::RETAIN_CHECKS, _prof);
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
@@ -3248,7 +4114,60 @@ fn retained_animation_restyle_mutations(
     mutations
 }
 
+#[allow(clippy::too_many_arguments)]
 fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    resources: &mut RenderResourceCache,
+    dynamic_fonts: &[DynamicFontFace],
+    stylesheet_cache: &mut crate::css::StylesheetCache,
+    retained: Option<(RetainedStyleMaps, &[crate::dom::RetainedStyleMutation])>,
+    query_seed: Option<RetainedStyleMaps>,
+    media_type: crate::CssMediaType,
+    animation_sample: crate::AnimationSample,
+    animation_timeline: &mut crate::AnimationTimelineState,
+) -> Option<PreparedRender> {
+    // Retained calls are verified by their public entry point, which also
+    // covers its early returns. Screen layouts without retained styles still
+    // reuse shaped text from the previous layout, so check them here.
+    let verify = crate::dom::layout_verify_enabled()
+        && retained.is_none()
+        && media_type == crate::CssMediaType::Screen
+        && !VERIFYING.with(std::cell::Cell::get);
+    let timeline_before = verify.then(|| animation_timeline.clone());
+    let prepared = prepare_dom_internal_unverified(
+        tree,
+        viewport,
+        base_url,
+        resources,
+        dynamic_fonts,
+        stylesheet_cache,
+        retained,
+        query_seed,
+        media_type,
+        animation_sample,
+        animation_timeline,
+    );
+    let mut prepared = prepared;
+    if let (Some(prepared), Some(timeline)) = (prepared.as_mut(), timeline_before) {
+        verify_against_scratch(
+            "full",
+            prepared,
+            tree,
+            viewport,
+            base_url,
+            resources,
+            dynamic_fonts,
+            animation_sample,
+            timeline,
+        );
+    }
+    prepared
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_dom_internal_unverified(
     tree: &DomTree,
     viewport: (f32, f32),
     base_url: Option<&str>,
@@ -3265,6 +4184,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
     {
         return None;
     }
+    let prepare_started = std::time::Instant::now();
     // Fetch <img> bytes up front to learn intrinsic sizes for layout (a
     // CSS-sized image with no width/height attribute would otherwise be 0x0
     // and never paint). This seeds the same cache the paint pass reads, so
@@ -3291,6 +4211,25 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
         .collect::<HashMap<_, _>>();
     let seeded_content_images =
         resources.seed_content_image_intrinsics(tree, &mut intrinsic, &mut selected_images);
+    // `loading=lazy` images load only once they come within
+    // LAZY_LOAD_DISTANCE of the viewport (Chromium: an IntersectionObserver
+    // with that root margin on the not-yet-loaded, box-less image). Until
+    // then they have no natural size and paint nothing.
+    let lazy_images: Vec<obscura_dom::tree::NodeId> = intrinsic
+        .keys()
+        .copied()
+        .filter(|nid| !resources.lazy_loaded.contains(nid) && image_is_lazy(tree, *nid))
+        .collect();
+    let mut deferred_images: HashMap<
+        obscura_dom::tree::NodeId,
+        (crate::ReplacedIntrinsic, Option<SelectedImage>),
+    > = HashMap::new();
+    for nid in lazy_images {
+        if let Some(value) = intrinsic.remove(&nid) {
+            deferred_images.insert(nid, (value, selected_images.remove(&nid)));
+        }
+    }
+    resources.lazy_viewport_bottom = resources.lazy_viewport_bottom.max(viewport.1);
     let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
     // Most framework pages use web fonts and many decorative SVG icons, but
     // only SVG text needs the page font faces. Avoid cloning/loading the page
@@ -3303,6 +4242,7 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
     let (retained, mutations) = retained.map_or((None, &[][..]), |(styles, mutations)| {
         (Some(styles), mutations)
     });
+    let resources_done = std::time::Instant::now();
     let mut laid = layout_dom_with_query_seed(
         tree,
         viewport,
@@ -3350,7 +4290,62 @@ fn prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
             animation_timeline,
         );
     }
+    // Load the deferred lazy images the layout places within the lazy-load
+    // distance; loading them moves the rest, so repeat (bounded).
+    for _ in 0..4 {
+        if deferred_images.is_empty() {
+            break;
+        }
+        let reach = resources.lazy_viewport_bottom + LAZY_LOAD_DISTANCE;
+        let near: Vec<obscura_dom::tree::NodeId> = deferred_images
+            .keys()
+            .copied()
+            .filter(|nid| {
+                laid.rects.get(nid).is_some_and(|rect| {
+                    rect.y < reach && rect.y + rect.height > -LAZY_LOAD_DISTANCE
+                })
+            })
+            .collect();
+        if near.is_empty() {
+            break;
+        }
+        for nid in near {
+            if let Some((value, selected)) = deferred_images.remove(&nid) {
+                intrinsic.insert(nid, value);
+                if let Some(selected) = selected {
+                    selected_images.insert(nid, selected);
+                }
+                resources.lazy_loaded.insert(nid);
+            }
+        }
+        query_seed = None;
+        laid = layout_dom_with_web_fonts_and_stylesheet_cache_for_media_with_animation_state(
+            tree,
+            viewport,
+            &intrinsic,
+            &fonts,
+            stylesheet_cache,
+            media_type,
+            animation_sample,
+            animation_timeline,
+        );
+    }
+    resources.lazy_deferred_top = deferred_images
+        .keys()
+        .filter_map(|nid| laid.rects.get(nid).map(|rect| rect.y))
+        .fold(None, |top: Option<f32>, y| {
+            Some(top.map_or(y, |top| top.min(y)))
+        });
+    let layout_done = std::time::Instant::now();
     let derived = laid.derived_layout_state(tree, viewport);
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] prepare resources={:?} layout={:?} derived={:?}",
+            resources_done.duration_since(prepare_started),
+            layout_done.duration_since(resources_done),
+            layout_done.elapsed(),
+        );
+    }
     let root_font_size = tree
         .query_selector("html")
         .ok()
@@ -3818,6 +4813,8 @@ fn native_raster_scale_supported(tree: &DomTree, laid: &crate::DomLayout) -> boo
             && style.clip_path.is_none()
             && style.background_image.is_none()
             && style.mask_image.is_none()
+            && style.mask_layers.images.is_empty()
+            && style.background_layers.images.len() <= 1
             && gradients_supported
             && !style.background_clip_text
             && style.box_shadow.is_none()
@@ -3887,6 +4884,30 @@ fn stacking_z_index(
         return is_flex_or_grid.then_some(z);
     }
     None
+}
+
+/// The paint layer of a box in its stacking context: its z-index stack
+/// level, or 0 for a positioned block-level box with `z-index: auto`.
+/// CSS 2.1 Appendix E paints the latter in step 8, after inline content, as
+/// if it created a stacking context. Positioned inline boxes keep their text
+/// in the parent's inline formatting context, so they stay in flow.
+fn paint_layer_z(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    id: obscura_dom::tree::NodeId,
+) -> Option<i32> {
+    if let Some(z) = stacking_z_index(tree, laid, id) {
+        return Some(z);
+    }
+    let style = laid.styles.get(&id)?;
+    if style.position.is_none()
+        || style.display == crate::Display::None
+        || style.display_contents
+        || (style.display == crate::Display::Inline && !style.is_inline_block)
+    {
+        return None;
+    }
+    Some(0)
 }
 
 /// Whether this box participates in the float painting band of its current
@@ -4274,6 +5295,10 @@ fn paint_laid_dom_scrolled(
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut consumed: std::collections::HashSet<obscura_dom::tree::NodeId> =
         std::collections::HashSet::new();
+    // Members of z >= 0 layers (Appendix E step 8 and up): the inline
+    // content of this context paints before them.
+    let mut positive_members: std::collections::HashSet<obscura_dom::tree::NodeId> =
+        std::collections::HashSet::new();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -4284,15 +5309,21 @@ fn paint_laid_dom_scrolled(
             continue;
         }
         let is_opacity_root = suppress_opacity_for != Some(nid)
-            && laid
+            && (laid
                 .styles
                 .get(&nid)
                 .and_then(|style| style.opacity)
-                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0);
+                .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0)
+                || laid
+                    .styles
+                    .get(&nid)
+                    .is_some_and(|style| style.mix_blend_mode.is_some())
+                || layer_mask(tree, laid, nid).is_some());
         let is_transform_root = suppress_transform_for != Some(nid)
-            && laid.styles.get(&nid).is_some_and(has_authored_transform);
+            && (laid.styles.get(&nid).is_some_and(has_authored_transform)
+                || three_d::is_context_root(tree, laid, nid));
         let z = (suppress_stacking_for != Some(nid))
-            .then(|| stacking_z_index(tree, laid, nid))
+            .then(|| paint_layer_z(tree, laid, nid))
             .flatten();
         let is_float_root = paint_root != Some(nid) && is_effective_float(tree, laid, nid);
         if is_opacity_root || is_transform_root {
@@ -4305,7 +5336,10 @@ fn paint_laid_dom_scrolled(
             // z-order is resolved while painting its isolated surface.
             match z {
                 Some(z) if z < 0 => neg_layers.push((z, vec![nid])),
-                Some(z) => pos_layers.push((z, vec![nid])),
+                Some(z) => {
+                    positive_members.extend(sub.iter().copied());
+                    pos_layers.push((z, vec![nid]))
+                }
                 None if is_float_root => float_layers.push(nid),
                 None => normal.push(nid),
             }
@@ -4318,6 +5352,7 @@ fn paint_laid_dom_scrolled(
             if z < 0 {
                 neg_layers.push((z, vec![nid]));
             } else {
+                positive_members.extend(sub.iter().copied());
                 pos_layers.push((z, vec![nid]));
             }
         } else if is_float_root {
@@ -4330,6 +5365,7 @@ fn paint_laid_dom_scrolled(
     }
     neg_layers.sort_by_key(|(z, _)| *z);
     pos_layers.sort_by_key(|(z, _)| *z);
+    let positive_start = neg_layers.len() + normal.len() + float_layers.len();
     let paint_order: Vec<obscura_dom::tree::NodeId> = neg_layers
         .into_iter()
         .flat_map(|(_, sub)| sub)
@@ -4392,11 +5428,93 @@ fn paint_laid_dom_scrolled(
         }
     }
 
+    // Inline content (CSS 2.1 Appendix E step 7): the shaped text of this
+    // stacking context paints above its in-flow and float boxes and below
+    // its positioned descendants (step 8) and z >= 0 layers, so it runs
+    // just before the first positive layer.
+    let mut inline_content_painted = false;
+    macro_rules! paint_inline_content {
+        () => {
+            // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
+            // cells, labels) draw last, in tree order, so their glyphs sit above the
+            // box backgrounds/borders painted in the loop above. Each item already
+            // carries its final origin and clip from `TextEngine::finalize`.
+            for &nid in &paint_nodes {
+                if svg_subtree_skip.contains(&nid)
+                    || opacity_subtree_skip.contains(&nid)
+                    || positive_members.contains(&nid)
+                    || three_d::is_excluded(nid)
+                {
+                    continue;
+                }
+                let Some(ifcs) = laid.ifc.by_node.get(&nid).cloned() else {
+                    continue;
+                };
+                if laid
+                    .styles
+                    .get(&nid)
+                    .map(|s| s.effectively_invisible)
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+                // Shaped text is the container's content: for a compositor scroller
+                // it scrolls with the scroll frame.
+                scene_content_node(&scroll_state, nid);
+                // Shift the shaped glyphs by the same accumulated translate as the
+                // container's box so text under a transformed ancestor moves with
+                // it. Computed before the mutable `paint_item` borrow.
+                let off = scroll_state.translation_for(laid, nid);
+                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
+                let clip = overflow_clip.as_ref().map(|clip| {
+                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
+                });
+                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
+                    cached_overflow_clip_mask(
+                        &mut overflow_mask_cache,
+                        pixmap.width(),
+                        pixmap.height(),
+                        clip,
+                        scroll_state.surface_extent.unwrap_or(viewport),
+                    )
+                });
+                {
+                    let store = &mut laid.ifc;
+                    for index in ifcs {
+                        let Some(ifc) = store.ifcs.get(index).and_then(|ifc| ifc.as_deref()) else {
+                            continue;
+                        };
+                        ifc.paint(
+                            &mut store.raster,
+                            &laid.styles,
+                            &mut pixmap,
+                            ifc.origin,
+                            off,
+                            clip.or(ifc.clip),
+                            clip_mask.as_deref(),
+                            raster_scale,
+                            print_economy,
+                        );
+                    }
+                }
+            }
+        };
+    }
+
     for (paint_index, nid) in paint_order.into_iter().enumerate() {
+        if paint_index == positive_start && !inline_content_painted {
+            inline_content_painted = true;
+            paint_inline_content!();
+        }
+        scene_node(nid);
         if svg_subtree_skip.contains(&nid) {
             continue;
         }
-        if suppress_stacking_for != Some(nid) && stacking_z_index(tree, laid, nid).is_some() {
+        if three_d::is_excluded(nid) {
+            opacity_subtree_skip.insert(nid);
+            continue;
+        }
+        if suppress_stacking_for != Some(nid) && paint_layer_z(tree, laid, nid).is_some() {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             // A stacking context is one structural paint item in its parent.
@@ -4433,6 +5551,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             continue;
         }
         if paint_root != Some(nid) && is_effective_float(tree, laid, nid) {
@@ -4470,6 +5589,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             continue;
         }
         let node = match tree.get_node(nid) {
@@ -4478,35 +5598,7 @@ fn paint_laid_dom_scrolled(
         };
 
         if node.is_text() {
-            if let Some(items) = laid.word_ifc_items.get(&nid) {
-                let offset = scroll_state.translation_for(laid, nid);
-                let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-                let clip = overflow_clip.as_ref().map(|clip| {
-                    clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport))
-                });
-                let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-                    cached_overflow_clip_mask(
-                        &mut overflow_mask_cache,
-                        pixmap.width(),
-                        pixmap.height(),
-                        clip,
-                        scroll_state.surface_extent.unwrap_or(viewport),
-                    )
-                });
-                for &item in items {
-                    laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                        item,
-                        &mut pixmap,
-                        offset,
-                        clip,
-                        clip_mask.as_deref(),
-                        raster_scale,
-                        print_economy,
-                    );
-                }
-            } else {
-                paint_text_node(tree, nid, laid, &scroll_state, &mut pixmap, raster_scale);
-            }
+            // Other text is painted with its inline formatting context.
             for generated in &generated_after_at[paint_index] {
                 paint_in_flow_generated_box(
                     &mut pixmap,
@@ -4537,6 +5629,167 @@ fn paint_laid_dom_scrolled(
             None => continue,
         };
 
+        // `backface-visibility: hidden` on a box turned away from the
+        // viewer hides it and its content.
+        if style.backface_hidden && faces_back(laid, nid) {
+            opacity_subtree_skip.insert(nid);
+            opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            continue;
+        }
+        // A 3D rendering context: every plane painted flat, culled, depth
+        // sorted and projected through its own homography.
+        if suppress_transform_for != Some(nid) && three_d::is_context_root(tree, laid, nid) {
+            opacity_subtree_skip.insert(nid);
+            opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            // Planes map into the surface of the context root's parent:
+            // its accumulated transform, flattened, is the surface frame.
+            let surface = crate::dom::rendered_parent(tree, nid)
+                .map_or(crate::Mat4::IDENTITY, |parent| {
+                    three_d::accumulated(laid, parent).flatten()
+                });
+            let Some(surface_inverse) = three_d::invert(&surface) else {
+                continue;
+            };
+            let surface_movement = scroll_state.translation_for(laid, nid);
+            let outside_overflow_clip = scroll_state.overflow_clip_for(laid, nid);
+            let clip_mask = outside_overflow_clip.as_ref().and_then(|clip| {
+                cached_overflow_clip_mask(
+                    &mut overflow_mask_cache,
+                    pixmap.width(),
+                    pixmap.height(),
+                    clip,
+                    scroll_state.surface_extent.unwrap_or(viewport),
+                )
+            });
+            // Back to front by the depth of each plane's centre (z / w in
+            // the surface frame, larger is nearer), tree order on ties.
+            let mut planes: Vec<(f64, usize, obscura_dom::tree::NodeId, bool)> =
+                three_d::context_planes(tree, laid, nid)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(order, (plane, own_only))| {
+                        let rect = laid.rects.get(&plane).copied().unwrap_or_default();
+                        let relative = surface_inverse.then(three_d::accumulated(laid, plane));
+                        let (cx, cy) = (rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
+                        let m = &relative.m;
+                        let w = m[3][0] * cx + m[3][1] * cy + m[3][3];
+                        let z = m[2][0] * cx + m[2][1] * cy + m[2][3];
+                        let depth = if w.abs() > 1e-6 { (z / w) as f64 } else { 0.0 };
+                        (depth, order, plane, own_only)
+                    })
+                    .collect();
+            planes.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            for (_, _, plane, own_only) in planes {
+                let (Some(plane_style), Some(plane_rect)) =
+                    (laid.styles.get(&plane), laid.rects.get(&plane).copied())
+                else {
+                    continue;
+                };
+                let accumulated = three_d::accumulated(laid, plane);
+                if plane_style.backface_hidden && accumulated.is_back_face_visible() {
+                    continue;
+                }
+                let relative = surface_inverse.then(accumulated);
+                let movement = scroll_state.translation_for(laid, plane);
+                let bounds = if own_only {
+                    let ink = non_text_ink_bounds(&plane_rect, plane_style);
+                    Some(crate::Rect {
+                        x: ink.x + movement.0,
+                        y: ink.y + movement.1,
+                        ..ink
+                    })
+                } else {
+                    transform_subtree_source_bounds(tree, laid, &scroll_state, plane)
+                };
+                let Some(bounds) = bounds else {
+                    continue;
+                };
+                let left = bounds.x.floor();
+                let top = bounds.y.floor();
+                let width = ((bounds.x + bounds.width).ceil() - left).max(1.0) as u32;
+                let height = ((bounds.y + bounds.height).ceil() - top).max(1.0) as u32;
+                if width > 4096
+                    || height > 4096
+                    || u64::from(width) * u64::from(height) > MAX_CAPTURE_PIXELS
+                {
+                    continue;
+                }
+                let Some(layer) = Pixmap::new(width, height) else {
+                    continue;
+                };
+                // layer pixel -> plane space -> surface space -> surface pixel.
+                let h = three_d::multiply(
+                    &three_d::translation(surface_movement.0 as f64, surface_movement.1 as f64),
+                    &three_d::multiply(
+                        &three_d::homography(&relative),
+                        &three_d::translation(
+                            left as f64 - movement.0 as f64,
+                            top as f64 - movement.1 as f64,
+                        ),
+                    ),
+                );
+                // A scene recording keeps the plane as a projective reference
+                // frame (the window and scene rasterizer project it).
+                #[cfg(feature = "display-list")]
+                crate::display_list::note_projective_layer(
+                    &layer,
+                    scene_node_id(plane),
+                    (surface_offset.0 - left, surface_offset.1 - top),
+                    three_d::to_4x4(&h),
+                );
+                let excluded = if own_only {
+                    three_d::exclude(tree, &three_d::plane_children(tree, laid, plane))
+                } else {
+                    Vec::new()
+                };
+                crate::canvas::begin_layer(&layer);
+                let painted = paint_laid_dom_scrolled(
+                    tree,
+                    viewport,
+                    base_url,
+                    scroll,
+                    resolved_scroll,
+                    Some(&scroll_state),
+                    layer,
+                    image_cache,
+                    selected_images,
+                    canvas_surfaces,
+                    svg_fonts,
+                    content_size,
+                    viewport_fixed,
+                    sticky,
+                    scroll_tree,
+                    laid,
+                    Some(plane),
+                    suppress_opacity_for,
+                    suppress_stacking_for,
+                    Some(plane),
+                    Some(plane),
+                    surface_extent,
+                    (surface_offset.0 - left, surface_offset.1 - top),
+                    raster_scale,
+                    print_economy,
+                    canvas_background,
+                );
+                three_d::restore(excluded);
+                let layer = painted?;
+                #[cfg(feature = "display-list")]
+                if crate::display_list::scene_active() {
+                    pixmap.canvas().draw_image(
+                        0,
+                        0,
+                        layer.as_ref(),
+                        &tiny_skia::PixmapPaint::default(),
+                        Transform::identity(),
+                        clip_mask.as_deref(),
+                    );
+                    continue;
+                }
+                three_d::draw_projective(&mut pixmap, &layer, &h, clip_mask.as_deref());
+            }
+            scene_node(nid);
+            continue;
+        }
         if suppress_transform_for != Some(nid) && has_authored_transform(style) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
@@ -4574,6 +5827,7 @@ fn paint_laid_dom_scrolled(
                     print_economy,
                     canvas_background,
                 )?;
+                scene_node(nid);
                 continue;
             }
 
@@ -4636,6 +5890,15 @@ fn paint_laid_dom_scrolled(
             let Some(layer) = Pixmap::new(layer_width, layer_height) else {
                 continue;
             };
+            #[cfg(feature = "display-list")]
+            crate::display_list::note_reference_layer(
+                &layer,
+                scene_node_id(nid),
+                (
+                    surface_offset.0 + layer_delta.0,
+                    surface_offset.1 + layer_delta.1,
+                ),
+            );
             crate::canvas::begin_layer(&layer);
             let layer = paint_laid_dom_scrolled(
                 tree,
@@ -4668,6 +5931,7 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
             let transform =
                 display_transform.then(crate::Affine2::translate(-layer_delta.0, -layer_delta.1));
             let transform = Transform::from_row(
@@ -4704,10 +5968,21 @@ fn paint_laid_dom_scrolled(
             .and_then(|style| style.opacity)
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
-        if suppress_opacity_for != Some(nid) && own_opacity < 1.0 {
+        // A mask (CSS Masking 1) is applied, like opacity, to the finished
+        // element: its layers' alpha multiplies the isolated surface.
+        let mask_layers = (suppress_opacity_for != Some(nid) && raster_scale == 1.0)
+            .then(|| layer_mask(tree, laid, nid))
+            .flatten();
+        let blend_mode = laid.styles.get(&nid).and_then(|style| style.mix_blend_mode);
+        if suppress_opacity_for != Some(nid)
+            && (own_opacity < 1.0 || mask_layers.is_some() || blend_mode.is_some())
+        {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
             if own_opacity <= 0.0 {
+                // Fully transparent boxes still take pointer input.
+                #[cfg(feature = "display-list")]
+                scene_subtree_hits(tree, laid, &scroll_state, &pixmap, nid, viewport);
                 continue;
             }
             // Opacity is applied to the finished stacking context, never to
@@ -4715,7 +5990,7 @@ fn paint_laid_dom_scrolled(
             // opacity:.5 incorrectly become .75 alpha in their overlap.
             let layer = Pixmap::new(pixmap.width(), pixmap.height())?;
             crate::canvas::begin_layer(&layer);
-            let layer = paint_laid_dom_scrolled(
+            let mut layer = paint_laid_dom_scrolled(
                 tree,
                 viewport,
                 base_url,
@@ -4743,8 +6018,37 @@ fn paint_laid_dom_scrolled(
                 print_economy,
                 canvas_background,
             )?;
+            scene_node(nid);
+            if let Some(layers) = mask_layers.as_deref() {
+                let (tx, ty) = scroll_state.translation_for(laid, nid);
+                let border_box = crate::Rect {
+                    x: rect.x + tx,
+                    y: rect.y + ty,
+                    ..rect
+                };
+                if let (Some(mut alpha), Some(style)) = (
+                    Pixmap::new(layer.width(), layer.height()),
+                    laid.styles.get(&nid),
+                ) {
+                    paint_resolved_layers(
+                        &mut alpha,
+                        (0, 0),
+                        &border_box,
+                        style,
+                        layers,
+                        base_url,
+                        root_font_size,
+                        viewport,
+                        image_cache,
+                    );
+                    let mask =
+                        tiny_skia::Mask::from_pixmap(alpha.as_ref(), tiny_skia::MaskType::Alpha);
+                    layer.apply_mask(&mask);
+                }
+            }
             let group_paint = tiny_skia::PixmapPaint {
                 opacity: own_opacity,
+                blend_mode: blend_mode.map_or(tiny_skia::BlendMode::SourceOver, tiny_blend_mode),
                 ..tiny_skia::PixmapPaint::default()
             };
             pixmap.canvas().draw_image(
@@ -4786,6 +6090,8 @@ fn paint_laid_dom_scrolled(
         let clip = overflow_clip
             .as_ref()
             .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
+        #[cfg(feature = "display-list")]
+        scene_element_hit(&pixmap, tree, laid, nid, &rect, style, clip, (ox, oy));
         let cull_rect = rect;
         let visible_rect = match clip {
             Some(c) => match cull_rect.intersect(&c) {
@@ -4918,6 +6224,35 @@ fn paint_laid_dom_scrolled(
             .as_ref()
             .or(ancestor_clip_mask.as_deref());
         let background_mask = element_clip_mask;
+        // backdrop-filter: blur the backdrop under the box before its own
+        // background paints over it.
+        if let Some(filters) = &style.backdrop_filters {
+            if box_on_surface && !paints_inline_fragments {
+                let radii = style.border_model.radii.resolve(rect.width, rect.height);
+                filter_backdrop(
+                    &mut pixmap,
+                    &rect,
+                    [
+                        radii.top_left.0,
+                        radii.top_right.0,
+                        radii.bottom_right.0,
+                        radii.bottom_left.0,
+                    ],
+                    filters,
+                    raster_scale,
+                    element_clip_mask,
+                );
+            }
+        }
+        // Several layers or an image layer: painted per layer, each with its
+        // own size, position, repeat, origin and clip.
+        let layered = (raster_scale == 1.0)
+            .then(|| layered_background(style))
+            .flatten();
+        // Masked through its layers by the effect path above; the mask is
+        // not also a fill.
+        let layer_masked =
+            !style.mask_layers.images.is_empty() && layer_mask(tree, laid, nid).is_some();
         // A linear-gradient background (heavily used by modern hero sections);
         // without this it paints white. Takes precedence over a solid color.
         // `background-clip: text` clips the background to the glyphs, so it must
@@ -4925,7 +6260,7 @@ fn paint_laid_dom_scrolled(
         if box_on_surface
             && !paints_inline_fragments
             && !background_transfers_to_canvas
-            && style.mask_image.is_none()
+            && (style.mask_image.is_none() || layer_masked)
             && !style.background_clip_text
         {
             if let Some(bg) = style.background_color {
@@ -4942,7 +6277,19 @@ fn paint_laid_dom_scrolled(
                     );
                 }
             }
-            if !style.background_gradient_layers.is_empty() {
+            if let Some(layers) = layered.as_deref() {
+                paint_layered_background(
+                    &mut pixmap,
+                    &rect,
+                    style,
+                    layers,
+                    base_url,
+                    root_font_size,
+                    viewport,
+                    image_cache,
+                    background_mask,
+                );
+            } else if !style.background_gradient_layers.is_empty() {
                 if let Some(path) = background_path.as_ref() {
                     paint_background_gradient_layers(
                         &mut pixmap,
@@ -5004,7 +6351,7 @@ fn paint_laid_dom_scrolled(
         }
 
         if box_on_surface && !paints_inline_fragments && !background_transfers_to_canvas {
-            if let Some(mask_url) = &style.mask_image {
+            if let (false, Some(mask_url)) = (layer_masked, &style.mask_image) {
                 let fill = style
                     .background_color
                     .or(style.color)
@@ -5028,7 +6375,7 @@ fn paint_laid_dom_scrolled(
                     &mut pixmap,
                     image_cache,
                 );
-            } else if let Some(bg_url) = &style.background_image {
+            } else if let (None, Some(bg_url)) = (&layered, &style.background_image) {
                 if let Some(img_rect) = background_image_rect(
                     bg_url,
                     base_url,
@@ -5065,6 +6412,13 @@ fn paint_laid_dom_scrolled(
                 }
             }
         }
+        // An inset shadow paints above the backgrounds, inside the padding
+        // box, below the border and content.
+        if let Some(shadow) = style.box_shadow.filter(|shadow| shadow.inset) {
+            if box_on_surface && !paints_inline_fragments && raster_scale == 1.0 {
+                paint_inset_box_shadow(&mut pixmap, &shadow, &rect, style, element_clip_mask);
+            }
+        }
         let has_positioned_pseudo = [
             style.before_pseudo.as_deref(),
             style.after_pseudo.as_deref(),
@@ -5073,6 +6427,7 @@ fn paint_laid_dom_scrolled(
         .flatten()
         .any(|pseudo| pseudo.position == Some(taffy::Position::Absolute));
         if has_positioned_pseudo {
+            scene_content_node(&scroll_state, nid);
             let positioned_pseudo_containing_block = {
                 let mut ancestor = Some(nid);
                 let mut found = None;
@@ -5114,7 +6469,10 @@ fn paint_laid_dom_scrolled(
             .flatten()
             {
                 paint_positioned_pseudo(
-                    &mut laid.text_engine,
+                    &mut laid.ifc,
+                    tree,
+                    &laid.styles,
+                    nid,
                     &mut pixmap,
                     pseudo,
                     &positioned_pseudo_containing_block,
@@ -5130,7 +6488,9 @@ fn paint_laid_dom_scrolled(
             }
         }
 
-        if box_on_surface && name.local.as_ref() == "canvas" {
+        scene_node(nid);
+        // A canvas bitmap, or the painted child document of an iframe.
+        if box_on_surface && matches!(name.local.as_ref(), "canvas" | "iframe") {
             if let Some(surface) = canvas_surfaces.surface(nid) {
                 // A canvas bitmap is replaced content: CSS sizing and
                 // object-fit operate on the content box, never the padding or
@@ -5164,6 +6524,24 @@ fn paint_laid_dom_scrolled(
 
         if !paints_inline_fragments {
             paint_css_border(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
+        }
+        // Multicol column rules sit between the columns, over the
+        // container's background (CSS Multi-column 1 §4).
+        if let Some(rules) = laid.column_rules.get(&nid) {
+            for (rule, color) in rules {
+                if let Some(shape) =
+                    tiny_skia::Rect::from_xywh(rule.x, rule.y, rule.width, rule.height)
+                {
+                    let mut paint = Paint::default();
+                    paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                    pixmap.fill_rect(
+                        shape,
+                        &paint,
+                        raster_transform(raster_scale),
+                        element_clip_mask,
+                    );
+                }
+            }
         }
         paint_css_outline(&mut pixmap, &rect, style, element_clip_mask, raster_scale);
 
@@ -5232,6 +6610,45 @@ fn paint_laid_dom_scrolled(
             }
         }
 
+        // Headless captures draw Chrome's default controls bar; the window
+        // draws its own (docs/MEDIA.md).
+        if box_on_surface
+            && name.local.as_ref() == "video"
+            && node.get_attribute("controls").is_some()
+        {
+            #[cfg(feature = "display-list")]
+            let window_draws = crate::display_list::scene_active();
+            #[cfg(not(feature = "display-list"))]
+            let window_draws = false;
+            if !window_draws {
+                let frame = video_source_url(tree, nid)
+                    .and_then(|src| resolve_resource_url(&src, base_url))
+                    .and_then(|url| image_cache.video_frame(&url, image_cache.video_time(nid)));
+                let content = inset_rect(
+                    &rect,
+                    crate::Sides {
+                        top: style.border.top + style.padding.top,
+                        right: style.border.right + style.padding.right,
+                        bottom: style.border.bottom + style.padding.bottom,
+                        left: style.border.left + style.padding.left,
+                    },
+                );
+                paint_video_controls(
+                    &mut pixmap,
+                    &content,
+                    image_cache.video_time(nid),
+                    frame.as_ref(),
+                    element_clip_mask,
+                );
+            }
+        }
+
+        // The window draws the video frame over the poster painted above.
+        #[cfg(feature = "display-list")]
+        if name.local.as_ref() == "video" {
+            scene_external(&pixmap, nid, &rect, style, element_clip_mask, clip);
+        }
+
         // Inline `<svg>...</svg>`: serialize the whole subtree back to one
         // standalone SVG document and rasterize it as a unit, so a
         // `<use href="#id">` resolves against the `<symbol>`/`<defs>` in the
@@ -5270,16 +6687,20 @@ fn paint_laid_dom_scrolled(
                 if let Some(color) = style.color {
                     inject_svg_current_color(&mut markup, color);
                 }
+                // resvg reads only `data:` images; the standalone document
+                // has no base URL for the page's relative ones.
+                inline_svg_image_hrefs(&mut markup, base_url, image_cache);
                 // `<use href="url#id">` pointing at an EXTERNAL sprite file resolves
                 // to nothing in resvg (the symbol lives in another document). Fetch
                 // the sprite, splice the referenced `<symbol>` into a local `<defs>`,
                 // and rewrite the href to a same-document `#id`. Same-document
                 // `<use href="#id">` (empty url) is untouched.
-                if let Some(content) = render_svg_with_font_database(
+                if let Some(content) = render_svg_with_font_database_scaled(
                     markup.as_bytes(),
                     rect.width as u32,
                     rect.height as u32,
                     svg_fonts,
+                    scene_svg_scale(),
                 ) {
                     let mut mask = element_clip_mask.map(crate::canvas::clone_mask);
                     if has_radius {
@@ -5291,12 +6712,35 @@ fn paint_laid_dom_scrolled(
                         );
                         mask = intersect_clip_masks(mask, own.as_ref());
                     }
+                    // A scene raster is denser than CSS pixels; map it back.
+                    let density = content.width() as f32 / (rect.width as u32).max(1) as f32;
+                    let (paint, transform) = if density > 1.0 {
+                        (
+                            tiny_skia::PixmapPaint {
+                                quality: tiny_skia::FilterQuality::Bilinear,
+                                ..tiny_skia::PixmapPaint::default()
+                            },
+                            Transform::from_row(
+                                1.0 / density,
+                                0.0,
+                                0.0,
+                                1.0 / density,
+                                rect.x as i32 as f32,
+                                rect.y as i32 as f32,
+                            ),
+                        )
+                    } else {
+                        (
+                            tiny_skia::PixmapPaint::default(),
+                            Transform::from_translate(rect.x as i32 as f32, rect.y as i32 as f32),
+                        )
+                    };
                     pixmap.canvas().draw_image(
-                        rect.x as i32,
-                        rect.y as i32,
+                        0,
+                        0,
                         content.as_ref(),
-                        &tiny_skia::PixmapPaint::default(),
-                        Transform::identity(),
+                        &paint,
+                        transform,
                         mask.as_ref(),
                     );
                 }
@@ -5307,6 +6751,7 @@ fn paint_laid_dom_scrolled(
         }
 
         if let Some(generated) = generated_before.get(&nid) {
+            scene_content_node(&scroll_state, nid);
             for generated in generated {
                 paint_in_flow_generated_box(
                     &mut pixmap,
@@ -5320,6 +6765,7 @@ fn paint_laid_dom_scrolled(
                     raster_scale,
                 );
             }
+            scene_node(nid);
         }
 
         // List-item marker (bullet or number), drawn in the indent to the left
@@ -5350,46 +6796,6 @@ fn paint_laid_dom_scrolled(
             }
         }
 
-        // `::before`/`::after` generated text has no DOM text node of its own.
-        // Its shaped word items are registered under the host element, so
-        // paint them here. The static path remains for layout-only builds and
-        // for a face that cosmic-text cannot decode.
-        if let Some(items) = laid.word_ifc_items.get(&nid) {
-            let offset = scroll_state.translation_for(laid, nid);
-            for &item in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    item,
-                    &mut pixmap,
-                    offset,
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                    print_economy,
-                );
-            }
-        } else if let Some(runs) = laid.text_runs.get(&nid) {
-            let color = style.color.unwrap_or([0, 0, 0, 255]);
-            let fsize = style.font_size.unwrap_or(16.0);
-            let is_bold = crate::style::used_font_weight(style) >= 600;
-            for (word_rect, word) in runs {
-                draw_text(
-                    &mut pixmap,
-                    word,
-                    word_rect.x + ox,
-                    word_rect.y + oy,
-                    color,
-                    fsize,
-                    is_bold,
-                    style.font_family.as_deref(),
-                    style.letter_spacing.unwrap_or(0.0),
-                    style.word_spacing.unwrap_or(0.0),
-                    clip,
-                    element_clip_mask,
-                    raster_scale,
-                );
-            }
-        }
-
         // A closed native `<select>` paints only its selected option. Options
         // themselves are popup content (`display:none` in the layout tree),
         // so the label and disclosure arrow belong to the atomic control.
@@ -5397,7 +6803,8 @@ fn paint_laid_dom_scrolled(
             if let Some(label) = selected_option_label(tree, nid) {
                 let fsize = style.font_size.unwrap_or(13.333_333);
                 let line_height = crate::inline::used_line_height(style);
-                let text_x = rect.x + style.border.left + style.padding.left;
+                let text_x =
+                    rect.x + style.border.left + style.padding.left + crate::SELECT_INLINE_START;
                 let text_y = rect.y + (rect.height - line_height) / 2.0;
                 draw_text(
                     &mut pixmap,
@@ -5650,73 +7057,223 @@ fn paint_laid_dom_scrolled(
         }
     }
 
-    // Inline formatting contexts shaped by cosmic-text (paragraphs, headings,
-    // cells, labels) draw last, in tree order, so their glyphs sit above the
-    // box backgrounds/borders painted in the loop above. Each item already
-    // carries its final origin and clip from `TextEngine::finalize`.
-    for nid in paint_nodes {
-        if svg_subtree_skip.contains(&nid) || opacity_subtree_skip.contains(&nid) {
-            continue;
-        }
-        let whole = laid.ifc_items.get(&nid).copied();
-        let run_items = laid.run_ifc_items.get(&nid).cloned();
-        if whole.is_none() && run_items.is_none() {
-            continue;
-        }
-        if laid
-            .styles
-            .get(&nid)
-            .map(|s| s.effectively_invisible)
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        // Shift the shaped glyphs by the same accumulated translate as the
-        // container's box so text under a transformed ancestor moves with
-        // it. Computed before the mutable `paint_item` borrow.
-        let off = scroll_state.translation_for(laid, nid);
-        let overflow_clip = scroll_state.shaped_text_overflow_clip_for(laid, nid);
-        let clip = overflow_clip
-            .as_ref()
-            .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
-        let clip_mask = overflow_clip.as_ref().and_then(|clip| {
-            cached_overflow_clip_mask(
-                &mut overflow_mask_cache,
-                pixmap.width(),
-                pixmap.height(),
-                clip,
-                scroll_state.surface_extent.unwrap_or(viewport),
-            )
-        });
-        if let Some(idx) = whole {
-            laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                idx,
-                &mut pixmap,
-                off,
-                clip,
-                clip_mask.as_deref(),
-                raster_scale,
-                print_economy,
-            );
-        }
-        // Anonymous inline-run leaves of a mixed block (see
-        // `build_mixed_block`), pinned to their own boxes at finalize.
-        if let Some(items) = run_items {
-            for idx in items {
-                laid.text_engine.paint_item_with_clip_mask_scaled_for_print(
-                    idx,
-                    &mut pixmap,
-                    off,
-                    clip,
-                    clip_mask.as_deref(),
-                    raster_scale,
-                    print_economy,
-                );
-            }
-        }
+    if !inline_content_painted {
+        paint_inline_content!();
     }
 
     Some(pixmap)
+}
+
+/// Device scale SVG images are rasterized at (1 outside scene recordings).
+fn scene_svg_scale() -> f32 {
+    #[cfg(feature = "display-list")]
+    {
+        crate::display_list::scene_raster_scale()
+    }
+    #[cfg(not(feature = "display-list"))]
+    {
+        1.0
+    }
+}
+
+/// Scene node tag for `nid` (index + 1; 0 means none).
+fn scene_node_id(nid: obscura_dom::tree::NodeId) -> u64 {
+    nid.index() as u64 + 1
+}
+
+/// Tag later recorded ops with `nid` (scene recordings only; free otherwise).
+#[inline]
+fn scene_node(nid: obscura_dom::tree::NodeId) {
+    #[cfg(feature = "display-list")]
+    crate::display_list::set_current_node(scene_node_id(nid));
+    #[cfg(not(feature = "display-list"))]
+    let _ = nid;
+}
+
+/// Bit set on a node tag for ops that are the node's *content* (its shaped
+/// text, generated boxes): for a compositor scroller they scroll.
+pub(crate) const SCENE_CONTENT_FLAG: u64 = 1 << 63;
+
+#[inline]
+fn scene_content_node(scroll_state: &ScrollPaintState<'_>, nid: obscura_dom::tree::NodeId) {
+    #[cfg(feature = "display-list")]
+    {
+        let content = scroll_state
+            .resolved
+            .is_some_and(|resolved| resolved.scene_unclipped(nid));
+        let tag = scene_node_id(nid) | if content { SCENE_CONTENT_FLAG } else { 0 };
+        crate::display_list::set_current_node(tag);
+    }
+    #[cfg(not(feature = "display-list"))]
+    let _ = (scroll_state, nid);
+}
+
+fn rect_array(rect: &crate::Rect) -> [f32; 4] {
+    [rect.x, rect.y, rect.width, rect.height]
+}
+
+/// Whether text editing happens in this element's box (an I-beam over it).
+fn scene_editable_text(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> bool {
+    tree.with_node(nid, |node| {
+        let Some(element) = node.as_element() else {
+            return false;
+        };
+        match element.local.as_ref() {
+            "textarea" => true,
+            "input" => {
+                let kind = node
+                    .get_attribute("type")
+                    .map(|kind| kind.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                matches!(
+                    kind.as_str(),
+                    "" | "text" | "search" | "email" | "url" | "tel" | "password" | "number"
+                )
+            }
+            _ => node
+                .get_attribute("contenteditable")
+                .is_some_and(|value| !value.eq_ignore_ascii_case("false")),
+        }
+    })
+    .unwrap_or(false)
+}
+
+/// Hit region(s) for an element box at its paint position.
+#[cfg(feature = "display-list")]
+#[allow(clippy::too_many_arguments)]
+fn scene_element_hit(
+    pixmap: &Pixmap,
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    nid: obscura_dom::tree::NodeId,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    clip: Option<crate::Rect>,
+    offset: (f32, f32),
+) {
+    if !crate::display_list::scene_active() || style.pointer_events_none.unwrap_or(false) {
+        return;
+    }
+    let text = scene_editable_text(tree, nid);
+    let clip = clip.map(|clip| rect_array(&clip));
+    let fragments = style
+        .ignores_used_box_sizes()
+        .then(|| laid.inline_fragments.get(&nid))
+        .flatten()
+        .filter(|fragments| !fragments.is_empty());
+    if let Some(fragments) = fragments {
+        for fragment in fragments {
+            let rect = crate::Rect {
+                x: fragment.x + offset.0,
+                y: fragment.y + offset.1,
+                ..*fragment
+            };
+            crate::display_list::emit_scene_marker(
+                pixmap,
+                crate::display_list::Op::Hit {
+                    node: scene_node_id(nid),
+                    rect: rect_array(&rect),
+                    radii: [0.0; 4],
+                    clip,
+                    text,
+                    transform: crate::display_list::IDENTITY,
+                },
+            );
+        }
+        return;
+    }
+    let radii = style.border_model.radii.resolve(rect.width, rect.height);
+    crate::display_list::emit_scene_marker(
+        pixmap,
+        crate::display_list::Op::Hit {
+            node: scene_node_id(nid),
+            rect: rect_array(rect),
+            radii: [
+                radii.top_left.0,
+                radii.top_right.0,
+                radii.bottom_right.0,
+                radii.bottom_left.0,
+            ],
+            clip,
+            text,
+            transform: crate::display_list::IDENTITY,
+        },
+    );
+}
+
+/// Hit regions for an `opacity: 0` subtree, which paints nothing but still
+/// receives pointer input.
+#[cfg(feature = "display-list")]
+fn scene_subtree_hits(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    scroll_state: &ScrollPaintState<'_>,
+    pixmap: &Pixmap,
+    nid: obscura_dom::tree::NodeId,
+    viewport: (f32, f32),
+) {
+    if !crate::display_list::scene_active() {
+        return;
+    }
+    let mut ids = vec![nid];
+    ids.extend(crate::dom::rendered_descendants(tree, nid));
+    for id in ids {
+        let (Some(rect), Some(style)) = (laid.rects.get(&id), laid.styles.get(&id)) else {
+            continue;
+        };
+        if style.computed_visibility_hidden || !tree.get_node(id).is_some_and(|n| n.is_element()) {
+            continue;
+        }
+        scene_node(id);
+        let (ox, oy) = scroll_state.translation_for(laid, id);
+        let moved = crate::Rect {
+            x: rect.x + ox,
+            y: rect.y + oy,
+            ..*rect
+        };
+        let clip = scroll_state
+            .overflow_clip_for(laid, id)
+            .map(|clip| clip.viewport_rect(scroll_state.surface_extent.unwrap_or(viewport)));
+        scene_element_hit(pixmap, tree, laid, id, &moved, style, clip, (ox, oy));
+    }
+    scene_node(nid);
+}
+
+/// A region the window fills itself: the content box of a video or canvas.
+#[cfg(feature = "display-list")]
+fn scene_external(
+    pixmap: &Pixmap,
+    nid: obscura_dom::tree::NodeId,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    mask: Option<&tiny_skia::Mask>,
+    clip: Option<crate::Rect>,
+) {
+    if !crate::display_list::scene_active() {
+        return;
+    }
+    let content = crate::Rect {
+        x: rect.x + style.border.left + style.padding.left,
+        y: rect.y + style.border.top + style.padding.top,
+        width: (rect.width
+            - style.border.left
+            - style.border.right
+            - style.padding.left
+            - style.padding.right)
+            .max(0.0),
+        height: (rect.height
+            - style.border.top
+            - style.border.bottom
+            - style.padding.top
+            - style.padding.bottom)
+            .max(0.0),
+    };
+    let op = crate::display_list::Op::External {
+        key: scene_node_id(nid),
+        rect: rect_array(&content),
+        transform: crate::display_list::IDENTITY,
+    };
+    crate::display_list::emit_scene_op(pixmap, mask, clip.map(|c| rect_array(&c)), op);
 }
 
 fn raster_transform(scale: f32) -> Transform {
@@ -5782,6 +7339,28 @@ fn non_text_ink_bounds(rect: &crate::Rect, style: &crate::LayoutStyle) -> crate:
     bounds
 }
 
+/// Blink's pixel snapping of a box for painting (PixelSnappedIntRect): each
+/// edge rounds to the nearest device pixel, so the size is the distance
+/// between rounded edges rather than a rounded size. Inline fragments carry
+/// fractional positions from text layout; backgrounds and borders paint on
+/// whole device pixels.
+fn snap_to_device_pixels(rect: crate::Rect, scale: f32) -> crate::Rect {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let snap = |v: f32| (v * scale).round() / scale;
+    let (x0, y0) = (snap(rect.x), snap(rect.y));
+    let (x1, y1) = (snap(rect.x + rect.width), snap(rect.y + rect.height));
+    crate::Rect {
+        x: x0,
+        y: y0,
+        width: (x1 - x0).max(0.0),
+        height: (y1 - y0).max(0.0),
+    }
+}
+
 /// Paint an ordinary inline's sliced border boxes instead of its multiline
 /// bounding union. Background coordinates stay anchored to the union so
 /// gradients and images remain one joined `box-decoration-break:slice`
@@ -5809,11 +7388,14 @@ fn paint_inline_fragment_decorations(
     };
     let mut fragment_style = style.clone();
     for (index, fragment) in fragments.iter().enumerate() {
-        let fragment = crate::Rect {
-            x: fragment.x + offset.0,
-            y: fragment.y + offset.1,
-            ..*fragment
-        };
+        let fragment = snap_to_device_pixels(
+            crate::Rect {
+                x: fragment.x + offset.0,
+                y: fragment.y + offset.1,
+                ..*fragment
+            },
+            raster_scale,
+        );
         if clip.is_some_and(|clip| fragment.intersect(&clip).is_none()) {
             continue;
         }
@@ -5863,7 +7445,7 @@ fn paint_inline_fragment_decorations(
         let background_origin = background_geometry(&union, style).origin_rect;
         let background_path = background_clip_path(background);
         let element_clip_mask = background_extra_clip(ancestor_clip_mask, clip_path_mask.as_ref());
-        let background_mask = element_clip_mask.clone();
+        let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
 
         if let Some(shadow) = fragment_style.box_shadow {
             paint_box_shadow(
@@ -6269,7 +7851,10 @@ impl<'a> ScrollPaintState<'a> {
                     else {
                         continue;
                     };
-                    if !style.overflow_hidden || style.overflow_propagated_to_viewport {
+                    if !style.overflow_hidden
+                        || style.overflow_propagated_to_viewport
+                        || self.resolved.is_some_and(|r| r.scene_unclipped(owner))
+                    {
                         continue;
                     }
                     let (x, y) = self.translation_for(laid, owner);
@@ -6301,6 +7886,11 @@ impl<'a> ScrollPaintState<'a> {
         laid: &crate::DomLayout,
         id: obscura_dom::tree::NodeId,
     ) -> Option<crate::dom::OverflowClip> {
+        if self.resolved.is_some_and(|r| r.scene_unclipped(id)) {
+            // Content of a compositor scroller: its clip chain restarts in
+            // the scroll frame's space, and the compositor clips the frame.
+            return None;
+        }
         let inherited = self.overflow_clip_for(laid, id);
         let Some(style) = laid.styles.get(&id) else {
             return inherited;
@@ -6425,6 +8015,22 @@ fn paint_css_border(
     if widths.as_array().iter().all(|width| *width <= 0.0) {
         return;
     }
+    // In the collapsing border model a cell's (and the table's) layout box
+    // reaches only the middle of each border; the border itself is centred
+    // on that grid line.
+    let collapsed_rect;
+    let rect =
+        if style.border_collapse == Some(true) && (style.is_table_cell_box || style.is_table_box) {
+            collapsed_rect = crate::Rect {
+                x: rect.x - widths.left / 2.0,
+                y: rect.y - widths.top / 2.0,
+                width: rect.width + (widths.left + widths.right) / 2.0,
+                height: rect.height + (widths.top + widths.bottom) / 2.0,
+            };
+            &collapsed_rect
+        } else {
+            rect
+        };
     if !rect_intersects_paint_surface(rect, pixmap, raster_scale) {
         return;
     }
@@ -6691,6 +8297,35 @@ fn stroke_rounded_border_path(
     mask: Option<&tiny_skia::Mask>,
     raster_scale: f32,
 ) {
+    if radii.is_zero()
+        && matches!(
+            line_style,
+            crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+        )
+    {
+        // Square corners: each side is its own dash run over the full
+        // border-box edge, as Blink paints it.
+        let outer = crate::Rect {
+            x: center_rect.x - width / 2.0,
+            y: center_rect.y - width / 2.0,
+            width: center_rect.width + width,
+            height: center_rect.height + width,
+        };
+        for side in [Side::Top, Side::Right, Side::Bottom, Side::Left] {
+            paint_straight_border_side(
+                pixmap,
+                &outer,
+                side,
+                width,
+                width / 2.0,
+                color,
+                Some(line_style),
+                mask,
+                raster_scale,
+            );
+        }
+        return;
+    }
     let Some(path) = rounded_rect_path_radii(
         center_rect.x,
         center_rect.y,
@@ -6707,15 +8342,19 @@ fn stroke_rounded_border_path(
         width,
         ..Default::default()
     };
-    match line_style {
-        crate::BorderStyle::Dashed => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![width * 3.0, width * 3.0], 0.0);
-        }
-        crate::BorderStyle::Dotted => {
-            stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, width * 2.0], 0.0);
+    if matches!(
+        line_style,
+        crate::BorderStyle::Dashed | crate::BorderStyle::Dotted
+    ) {
+        let r = (radii.top_left.0 + radii.top_right.0 + radii.bottom_right.0 + radii.bottom_left.0)
+            / 4.0;
+        let perimeter =
+            2.0 * (center_rect.width + center_rect.height) - (8.0 - 2.0 * std::f32::consts::PI) * r;
+        let (dash, round) = border_dash(line_style, width, perimeter, true);
+        stroke.dash = dash;
+        if round {
             stroke.line_cap = tiny_skia::LineCap::Round;
         }
-        _ => {}
     }
     pixmap
         .canvas()
@@ -6901,15 +8540,63 @@ fn paint_straight_border_side(
         width: stroke_width,
         ..Default::default()
     };
-    if pattern == Some(crate::BorderStyle::Dashed) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![stroke_width * 3.0, stroke_width * 3.0], 0.0);
-    } else if pattern == Some(crate::BorderStyle::Dotted) {
-        stroke.dash = tiny_skia::StrokeDash::new(vec![0.0, stroke_width * 2.0], 0.0);
-        stroke.line_cap = tiny_skia::LineCap::Round;
+    if let Some(pattern) = pattern {
+        let length = match side {
+            Side::Top | Side::Bottom => rect.width,
+            Side::Left | Side::Right => rect.height,
+        };
+        let (dash, round) = border_dash(pattern, stroke_width, length, false);
+        stroke.dash = dash;
+        if round {
+            stroke.line_cap = tiny_skia::LineCap::Round;
+        }
     }
     pixmap
         .canvas()
         .stroke_path(&path, &paint, &stroke, raster_transform(raster_scale), mask);
+}
+
+/// Blink's dash pattern for a dashed or dotted border side of `length`
+/// (StrokeData::SetupPaintDashPathEffect): dashes 3w long with 2w gaps
+/// below 3px, 2w with 1w gaps from 3px; the gap is stretched so whole
+/// dashes start and end the side. A side too
+/// short for two dashes is solid (`None`). Dots wider than 3px are round.
+/// Returns the dash and whether the
+/// caps are round.
+fn border_dash(
+    pattern: crate::BorderStyle,
+    width: f32,
+    length: f32,
+    closed: bool,
+) -> (Option<tiny_skia::StrokeDash>, bool) {
+    let (mut dash, mut gap) = (width, width);
+    if pattern == crate::BorderStyle::Dashed {
+        dash *= if width >= 3.0 { 2.0 } else { 3.0 };
+        gap *= if width >= 3.0 { 1.0 } else { 2.0 };
+    }
+    if length <= 2.0 * dash + gap {
+        return (None, false);
+    }
+    // SelectBestDashGap: the dash count whose gap is nearest the ideal.
+    let min_dashes = ((length + gap) / (dash + gap)).floor();
+    let max_dashes = min_dashes + 1.0;
+    let gaps = |dashes: f32| if closed { dashes } else { dashes - 1.0 };
+    let min_gap = (length - min_dashes * dash) / gaps(min_dashes).max(1.0);
+    let max_gap = (length - max_dashes * dash) / gaps(max_dashes).max(1.0);
+    let gap = if max_gap <= 0.0 || (min_gap - gap).abs() < (max_gap - gap).abs() {
+        min_gap
+    } else {
+        max_gap
+    };
+    let round = pattern == crate::BorderStyle::Dotted && width > 3.0;
+    let intervals = if round {
+        // A zero-length dash with round caps is a dot of diameter `width`.
+        vec![0.0, dash + gap]
+    } else {
+        vec![dash, gap]
+    };
+    let phase = if round { dash + gap - dash / 2.0 } else { 0.0 };
+    (tiny_skia::StrokeDash::new(intervals, phase), round)
 }
 
 fn shade_border_color(color: [u8; 4], amount: f32) -> [u8; 4] {
@@ -6957,15 +8644,38 @@ fn paint_box_shadow(
         return;
     }
     let border_radii = border_radius.resolve(rect.width, rect.height);
+    #[cfg(feature = "display-list")]
+    {
+        let op = crate::display_list::Op::BoxShadow {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            radii: [
+                border_radii.top_left.0,
+                border_radii.top_right.0,
+                border_radii.bottom_right.0,
+                border_radii.bottom_left.0,
+            ],
+            color: shadow.color.map(|c| c as f32 / 255.0),
+            blur: shadow.blur.max(0.0),
+            offset: [shadow.offset_x, shadow.offset_y],
+            spread,
+            inset: false,
+            transform: crate::display_list::IDENTITY,
+        };
+        if crate::display_list::emit_scene_op(pixmap, ancestor_clip, None, op) {
+            return;
+        }
+    }
     let radius = border_radii.top_left;
     let rx0 = (radius.0 + spread).max(0.0);
     let ry0 = (radius.1 + spread).max(0.0);
     let blur = shadow.blur.max(0.0);
+    // A Gaussian with sigma = blur / 2 is negligible past 3 sigma.
+    let pad = if blur < 0.5 { 0.0 } else { (blur * 1.5).ceil() };
     let shadow_bounds = crate::Rect {
-        x: x0 - blur,
-        y: y0 - blur,
-        width: w0 + 2.0 * blur,
-        height: h0 + 2.0 * blur,
+        x: x0 - pad,
+        y: y0 - pad,
+        width: w0 + 2.0 * pad,
+        height: h0 + 2.0 * pad,
     };
     // Shadows disable the native >1x path, so their paint coordinate space is
     // the pixmap's one-CSS-pixel-per-pixel surface.
@@ -7012,28 +8722,40 @@ fn paint_box_shadow(
             Some(&shadow_mask),
         );
     } else {
-        let steps: u32 = (blur.ceil() as u32).clamp(2, 24);
-        // Per-layer alpha chosen so `steps` source-over composites reach the target
-        // alpha at the core: 1 - (1 - a)^steps == A  =>  a = 1 - (1 - A)^(1/steps).
+        // A Gaussian blur of the offset (and spread) shape with sigma =
+        // blur / 2 (CSS Backgrounds 3, as Skia draws Chrome's shadows).
+        let mut shape = match Pixmap::new(shadow_pixmap.width(), shadow_pixmap.height()) {
+            Some(p) => p,
+            None => return,
+        };
+        fill_shadow_rect(
+            &mut shape,
+            x0 - left as f32,
+            y0 - top as f32,
+            w0,
+            h0,
+            rx0,
+            ry0,
+            [255, 255, 255, 255],
+            None,
+        );
+        let width = shape.width() as usize;
+        let height = shape.height() as usize;
+        let mut coverage: Vec<f32> = shape
+            .pixels()
+            .iter()
+            .map(|p| p.alpha() as f32 / 255.0)
+            .collect();
+        gaussian_blur(&mut coverage, width, height, blur / 2.0);
+        let mask = shadow_mask.data();
         let a_frac = color[3] as f32 / 255.0;
-        let per = 1.0 - (1.0 - a_frac).powf(1.0 / steps as f32);
-        let layer_alpha = (per * 255.0).round().clamp(1.0, 255.0) as u8;
-        let layer_color = [color[0], color[1], color[2], layer_alpha];
-        for j in 0..steps {
-            // j = 0 is the solid core (expansion 0); j = steps-1 reaches the blur
-            // radius. Larger rects paint first, smaller (more-covered) ones on top.
-            let e = blur * (j as f32) / ((steps - 1) as f32);
-            fill_shadow_rect(
-                &mut shadow_pixmap,
-                x0 - e - left as f32,
-                y0 - e - top as f32,
-                w0 + 2.0 * e,
-                h0 + 2.0 * e,
-                rx0 + e,
-                ry0 + e,
-                layer_color,
-                Some(&shadow_mask),
-            );
+        for (i, pixel) in shadow_pixmap.pixels_mut().iter_mut().enumerate() {
+            let a = coverage[i] * a_frac * mask[i] as f32 / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let a8 = (a * 255.0).round().clamp(0.0, 255.0) as u8;
+            *pixel = tiny_skia::ColorU8::from_rgba(color[0], color[1], color[2], a8).premultiply();
         }
     }
     // Ancestor overflow clip is already the complete rect/rounded chain.
@@ -7045,6 +8767,291 @@ fn paint_box_shadow(
         Transform::identity(),
         ancestor_clip,
     );
+}
+
+/// An inset box shadow: the padding box minus a blurred copy of itself moved
+/// by the offset and shrunk by the spread (CSS Backgrounds 3, 7.1).
+fn paint_inset_box_shadow(
+    pixmap: &mut Pixmap,
+    shadow: &crate::BoxShadow,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    if shadow.color[3] == 0 {
+        return;
+    }
+    let geometry = layer_geometry(
+        rect,
+        style,
+        crate::BackgroundOrigin::PaddingBox,
+        crate::BackgroundClip::PaddingBox,
+    );
+    let padding = geometry.clip_rect;
+    let x0 = padding.x.floor().max(0.0) as i32;
+    let y0 = padding.y.floor().max(0.0) as i32;
+    let x1 = ((padding.x + padding.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((padding.y + padding.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (width, height) = ((x1 - x0) as u32, (y1 - y0) as u32);
+    let blur = shadow.blur.max(0.0);
+    let sigma = blur / 2.0;
+    // The hole is painted on a margin wide enough for the blur to read
+    // "outside the hole" (shadow) past the padding box edges.
+    let margin = (sigma * 3.0).ceil() as i32 + 1;
+    let (hw, hh) = (width + 2 * margin as u32, height + 2 * margin as u32);
+    let Some(mut hole) = Pixmap::new(hw, hh) else {
+        return;
+    };
+    let radii = geometry.clip_radii;
+    let hx = padding.x + shadow.offset_x + shadow.spread - (x0 - margin) as f32;
+    let hy = padding.y + shadow.offset_y + shadow.spread - (y0 - margin) as f32;
+    let hwid = padding.width - 2.0 * shadow.spread;
+    let hhei = padding.height - 2.0 * shadow.spread;
+    if hwid > 0.0 && hhei > 0.0 {
+        let r = radii.top_left;
+        fill_shadow_rect(
+            &mut hole,
+            hx,
+            hy,
+            hwid,
+            hhei,
+            (r.0 - shadow.spread).max(0.0),
+            (r.1 - shadow.spread).max(0.0),
+            [255, 255, 255, 255],
+            None,
+        );
+    }
+    let mut coverage: Vec<f32> = hole
+        .pixels()
+        .iter()
+        .map(|p| p.alpha() as f32 / 255.0)
+        .collect();
+    gaussian_blur(&mut coverage, hw as usize, hh as usize, sigma);
+    let Some(mut out) = Pixmap::new(width, height) else {
+        return;
+    };
+    let a = shadow.color[3] as f32 / 255.0;
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let c = coverage[(y + margin as usize) * hw as usize + x + margin as usize];
+            let alpha = ((1.0 - c) * a * 255.0).round().clamp(0.0, 255.0) as u8;
+            if alpha > 0 {
+                out.pixels_mut()[y * width as usize + x] = tiny_skia::ColorU8::from_rgba(
+                    shadow.color[0],
+                    shadow.color[1],
+                    shadow.color[2],
+                    alpha,
+                )
+                .premultiply();
+            }
+        }
+    }
+    // Only inside the (rounded) padding box.
+    let local = BackgroundGeometry {
+        origin_rect: padding,
+        clip_rect: crate::Rect {
+            x: padding.x - x0 as f32,
+            y: padding.y - y0 as f32,
+            ..padding
+        },
+        clip_radii: radii,
+    };
+    if let Some(path) = background_clip_path(local) {
+        if let Some(mut mask) = crate::canvas::new_mask(width, height) {
+            mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+            out.apply_mask(&mask);
+        }
+    }
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        out.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// CSS keyword of a `mix-blend-mode`.
+fn mix_blend_css(mode: Option<crate::MixBlendMode>) -> &'static str {
+    use crate::MixBlendMode as M;
+    match mode {
+        None => "normal",
+        Some(M::Multiply) => "multiply",
+        Some(M::Screen) => "screen",
+        Some(M::Overlay) => "overlay",
+        Some(M::Darken) => "darken",
+        Some(M::Lighten) => "lighten",
+        Some(M::ColorDodge) => "color-dodge",
+        Some(M::ColorBurn) => "color-burn",
+        Some(M::HardLight) => "hard-light",
+        Some(M::SoftLight) => "soft-light",
+        Some(M::Difference) => "difference",
+        Some(M::Exclusion) => "exclusion",
+        Some(M::Hue) => "hue",
+        Some(M::Saturation) => "saturation",
+        Some(M::Color) => "color",
+        Some(M::Luminosity) => "luminosity",
+        Some(M::PlusLighter) => "plus-lighter",
+    }
+}
+
+/// `backdrop-filter`: replace what is already painted under `rect`
+/// (surface CSS px, rounded by `radii`) with itself through `filters`
+/// (`redrob_scene::filter`, the same code the compositor uses). Blur samples
+/// clamp at the box edge, as Skia's backdrop filter does. Pixels outside
+/// the rounded box (and outside `clip`) are untouched. A scene recording
+/// records a `Backdrop` op instead.
+pub(crate) fn filter_backdrop(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    radii: [f32; 4],
+    filters: &[redrob_scene::FilterOp],
+    raster_scale: f32,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    if filters.is_empty() {
+        return;
+    }
+    #[cfg(feature = "display-list")]
+    {
+        let op = crate::display_list::Op::Backdrop {
+            rect: [rect.x, rect.y, rect.width, rect.height],
+            radii,
+            filters: filters.to_vec(),
+            transform: crate::display_list::IDENTITY,
+        };
+        if crate::display_list::emit_scene_op(pixmap, clip, None, op) {
+            return;
+        }
+    }
+    let (pw, ph) = (pixmap.width() as i32, pixmap.height() as i32);
+    let x0 = ((rect.x * raster_scale).round() as i32).clamp(0, pw);
+    let y0 = ((rect.y * raster_scale).round() as i32).clamp(0, ph);
+    let x1 = (((rect.x + rect.width) * raster_scale).round() as i32).clamp(0, pw);
+    let y1 = (((rect.y + rect.height) * raster_scale).round() as i32).clamp(0, ph);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let (w, h) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let mut region = Vec::with_capacity(w * h * 4);
+    {
+        let src = pixmap.data();
+        for y in 0..h {
+            let start = (((y0 as usize + y) * pw as usize) + x0 as usize) * 4;
+            region.extend_from_slice(&src[start..start + w * 4]);
+        }
+    }
+    redrob_scene::filter::apply_filters(&mut region, w, h, filters, raster_scale);
+    let mask = clip.map(|mask| mask.data());
+    let r = radii.map(|r| (r * raster_scale).max(0.0));
+    let (bw, bh) = (w as f32, h as f32);
+    // Inside the rounded box: corners by their circle.
+    let inside = |x: f32, y: f32| -> bool {
+        let corner = |cx: f32, cy: f32, radius: f32| {
+            let (dx, dy) = (x - cx, y - cy);
+            dx * dx + dy * dy <= radius * radius
+        };
+        if x < r[0] && y < r[0] {
+            return corner(r[0], r[0], r[0]);
+        }
+        if x > bw - r[1] && y < r[1] {
+            return corner(bw - r[1], r[1], r[1]);
+        }
+        if x > bw - r[2] && y > bh - r[2] {
+            return corner(bw - r[2], bh - r[2], r[2]);
+        }
+        if x < r[3] && y > bh - r[3] {
+            return corner(r[3], bh - r[3], r[3]);
+        }
+        true
+    };
+    let data = pixmap.data_mut();
+    for y in 0..h {
+        for x in 0..w {
+            let index = (y0 as usize + y) * pw as usize + x0 as usize + x;
+            if mask.is_some_and(|mask| mask[index] == 0) {
+                continue;
+            }
+            if !inside(x as f32 + 0.5, y as f32 + 0.5) {
+                continue;
+            }
+            let o = (y * w + x) * 4;
+            data[index * 4..index * 4 + 4].copy_from_slice(&region[o..o + 4]);
+        }
+    }
+}
+
+/// The tiny-skia blend mode of a CSS `mix-blend-mode`.
+fn tiny_blend_mode(mode: crate::MixBlendMode) -> tiny_skia::BlendMode {
+    use crate::MixBlendMode as M;
+    use tiny_skia::BlendMode as B;
+    match mode {
+        M::Multiply => B::Multiply,
+        M::Screen => B::Screen,
+        M::Overlay => B::Overlay,
+        M::Darken => B::Darken,
+        M::Lighten => B::Lighten,
+        M::ColorDodge => B::ColorDodge,
+        M::ColorBurn => B::ColorBurn,
+        M::HardLight => B::HardLight,
+        M::SoftLight => B::SoftLight,
+        M::Difference => B::Difference,
+        M::Exclusion => B::Exclusion,
+        M::Hue => B::Hue,
+        M::Saturation => B::Saturation,
+        M::Color => B::Color,
+        M::Luminosity => B::Luminosity,
+        M::PlusLighter => B::Plus,
+    }
+}
+
+/// Separable Gaussian blur of a coverage plane in place.
+fn gaussian_blur(plane: &mut [f32], width: usize, height: usize, sigma: f32) {
+    if sigma <= 0.0 || width == 0 || height == 0 {
+        return;
+    }
+    let radius = (sigma * 3.0).ceil() as i32;
+    let mut kernel: Vec<f32> = (-radius..=radius)
+        .map(|i| (-(i * i) as f32 / (2.0 * sigma * sigma)).exp())
+        .collect();
+    let sum: f32 = kernel.iter().sum();
+    for k in &mut kernel {
+        *k /= sum;
+    }
+    let mut line = vec![0.0f32; width.max(height)];
+    for y in 0..height {
+        let row = &mut plane[y * width..(y + 1) * width];
+        line[..width].copy_from_slice(row);
+        for (x, out) in row.iter_mut().enumerate() {
+            let mut v = 0.0;
+            for (k, w) in kernel.iter().enumerate() {
+                let sx = x as i32 + k as i32 - radius;
+                if sx >= 0 && (sx as usize) < width {
+                    v += w * line[sx as usize];
+                }
+            }
+            *out = v;
+        }
+    }
+    for x in 0..width {
+        for y in 0..height {
+            line[y] = plane[y * width + x];
+        }
+        for y in 0..height {
+            let mut v = 0.0;
+            for (k, w) in kernel.iter().enumerate() {
+                let sy = y as i32 + k as i32 - radius;
+                if sy >= 0 && (sy as usize) < height {
+                    v += w * line[sy as usize];
+                }
+            }
+            plane[y * width + x] = v;
+        }
+    }
 }
 
 /// Fill one (possibly rounded) shadow rectangle with a flat color, optionally
@@ -7408,6 +9415,7 @@ struct PrintEconomyStyleSnapshot {
     background_conic_gradient: Option<(f32, (f32, f32), Vec<([u8; 4], Option<f32>)>)>,
     background_gradient_layers: Vec<crate::BackgroundGradientLayer>,
     background_image: Option<String>,
+    background_layers: crate::BackgroundLayerLists,
     color: Option<[u8; 4]>,
     before_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
     after_pseudo: Option<Box<PrintEconomyStyleSnapshot>>,
@@ -7421,6 +9429,7 @@ impl PrintEconomyStyleSnapshot {
         let background_conic_gradient = style.background_conic_gradient.take();
         let background_gradient_layers = std::mem::take(&mut style.background_gradient_layers);
         let background_image = style.background_image.take();
+        let background_layers = std::mem::take(&mut style.background_layers);
         let had_background = background_color.is_some_and(|color| color[3] != 0)
             || background_gradient.is_some()
             || background_radial_gradient.is_some()
@@ -7447,6 +9456,7 @@ impl PrintEconomyStyleSnapshot {
             background_conic_gradient,
             background_gradient_layers,
             background_image,
+            background_layers,
             color,
             before_pseudo,
             after_pseudo,
@@ -7460,6 +9470,7 @@ impl PrintEconomyStyleSnapshot {
         style.background_conic_gradient = self.background_conic_gradient;
         style.background_gradient_layers = self.background_gradient_layers;
         style.background_image = self.background_image;
+        style.background_layers = self.background_layers;
         style.color = self.color;
         if let (Some(snapshot), Some(pseudo)) =
             (self.before_pseudo, style.before_pseudo.as_deref_mut())
@@ -7591,53 +9602,81 @@ fn paint_text_node(
 }
 
 fn fallback_font_bytes(family: Option<&str>) -> &'static [u8] {
-    let Some(family) = family else {
-        return FONT_BYTES;
+    use crate::ifc::fonts::{
+        bundled_family_for_css_token, DEFAULT_FAMILY, MONO_FAMILY, SERIF_FAMILY, SYSTEM_FAMILY,
     };
-    for token in family.split(',') {
-        let token = token
-            .trim()
-            .trim_matches(|c| c == '"' || c == '\'')
-            .to_ascii_lowercase();
-        if token == "system-ui" || token == "ui-sans-serif" {
-            return SYSTEM_FONT_BYTES;
-        }
-        if token == "monospace"
-            || token.contains("mono")
-            || token.contains("courier")
-            || token.contains("consol")
-            || token == "menlo"
-            || token == "monaco"
-            || token == "code"
-        {
-            return MONO_FONT_BYTES;
-        }
-        if token == "serif"
-            || token == "georgia"
-            || token.contains("times")
-            || token == "cambria"
-            || token.contains("garamond")
-            || token.contains("liberation serif")
-            || token == "roman"
-        {
-            return SERIF_FONT_BYTES;
-        }
-        if token == "sans-serif"
-            || token.contains("sans")
-            || token == "arial"
-            || token == "helvetica"
-            || token == "helvetica neue"
-            || token == "-apple-system"
-            || token == "roboto"
-            || token == "segoe ui"
-            || token == "inter"
-            || token == "verdana"
-            || token == "tahoma"
-        {
-            return FONT_BYTES;
-        }
+    let resolved = family
+        .into_iter()
+        .flat_map(|family| family.split(','))
+        .find_map(bundled_family_for_css_token)
+        .unwrap_or(DEFAULT_FAMILY);
+    match resolved {
+        SYSTEM_FAMILY => SYSTEM_FONT_BYTES,
+        MONO_FAMILY => MONO_FONT_BYTES,
+        SERIF_FAMILY => SERIF_FONT_BYTES,
+        _ => FONT_BYTES,
     }
-    FONT_BYTES
+}
+
+/// Advance width of `text` at a CSS font-size of `size` px (one em).
+/// `measure_text` scales by the font's line height instead of its em.
+/// Advance width of `text` in a CSS `font` shorthand as canvas 2D uses it
+/// (`[style] [variant] [weight] <size>[/<line-height>] <family>`), with the
+/// bundled faces. Returns `None` when the shorthand has no size.
+pub fn measure_text_with_font_shorthand(text: &str, font: &str) -> Option<f32> {
+    let tokens: Vec<&str> = font.split_whitespace().collect();
+    let size_index = tokens.iter().position(|token| {
+        let size = token.split('/').next().unwrap_or(token);
+        size.ends_with("px") && size.trim_end_matches("px").parse::<f32>().is_ok()
+    })?;
+    let size: f32 = tokens[size_index]
+        .split('/')
+        .next()?
+        .trim_end_matches("px")
+        .parse()
+        .ok()?;
+    let bold = tokens[..size_index].iter().any(|token| {
+        token.eq_ignore_ascii_case("bold")
+            || token.eq_ignore_ascii_case("bolder")
+            || token.parse::<u16>().is_ok_and(|weight| weight >= 600)
+    });
+    let family = tokens[size_index + 1..].join(" ");
+    let family = (!family.is_empty()).then_some(family.as_str());
+    if !bold {
+        return Some(measure_text_em(text, size, false, family));
+    }
+    // The bold face of the family the regular measure would use.
+    use crate::ifc::fonts::{MONO_B, SANS_B, SERIF_B, SYSTEM_B};
+    let regular = fallback_font_bytes(family);
+    let bytes = if std::ptr::eq(regular, SERIF_FONT_BYTES) {
+        SERIF_B
+    } else if std::ptr::eq(regular, MONO_FONT_BYTES) {
+        MONO_B
+    } else if std::ptr::eq(regular, SYSTEM_FONT_BYTES) {
+        SYSTEM_B
+    } else {
+        SANS_B
+    };
+    let font = FontRef::try_from_slice(bytes).ok()?;
+    let units_per_em = font.units_per_em().unwrap_or(1000.0);
+    let scaled = font.as_scaled(PxScale::from(size * font.height_unscaled() / units_per_em));
+    Some(
+        text.chars()
+            .filter(|c| !c.is_control())
+            .map(|c| scaled.h_advance(font.glyph_id(c)))
+            .sum(),
+    )
+}
+
+pub fn measure_text_em(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {
+    let font = FontRef::try_from_slice(fallback_font_bytes(family)).unwrap();
+    let units_per_em = font.units_per_em().unwrap_or(1000.0);
+    measure_text(
+        text,
+        size * font.height_unscaled() / units_per_em,
+        is_bold,
+        family,
+    )
 }
 
 pub fn measure_text(text: &str, size: f32, is_bold: bool, family: Option<&str>) -> f32 {
@@ -7673,6 +9712,24 @@ fn draw_text(
     clip_mask: Option<&tiny_skia::Mask>,
     raster_scale: f32,
 ) {
+    #[cfg(feature = "scene")]
+    if crate::display_list::skip_raster(pixmap) {
+        if scene::scene_draw_text(
+            pixmap,
+            text,
+            (x, y),
+            color,
+            size,
+            is_bold,
+            fallback_font_bytes(family),
+            letter_spacing,
+            word_spacing,
+            clip,
+            clip_mask,
+        ) {
+            return;
+        }
+    }
     // Glyphs are blitted pixel by pixel; the canvas sees the result as one image.
     crate::canvas::direct_pixels(pixmap, |pixmap| {
         draw_text_pixels(
@@ -7830,6 +9887,16 @@ fn draw_text_pixels(
     }
 }
 
+/// Natural size of the image at `src` when its bytes are already in the
+/// page's resource cache (an SVG `<image>` without width/height uses it).
+pub fn cached_image_natural_size(
+    src: &str,
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+) -> Option<(f32, f32)> {
+    image_intrinsic_dimensions(&fetch_bytes(src, base_url, cache)?)
+}
+
 /// Resolve `src` (a `data:` URI, or an absolute/relative URL against
 /// `base_url`) to raw bytes, fetching over the network at most once per
 /// distinct URL through the retained resource cache.
@@ -7920,6 +9987,12 @@ fn resolve_resource_url(src: &str, base_url: Option<&str>) -> Option<String> {
 /// filtering is load-bearing for performance: generated font packages commonly
 /// emit six or seven script subsets per face, while an English page needs only
 /// the subset containing ASCII.
+/// Web font faces registered per document. Pages that load a batch of
+/// Google Fonts declare 16+ faces before their own (w3schools'
+/// css_font_google: its PS2P button font came after 16 others and fell
+/// back to monospace); Chrome registers all of them.
+const MAX_WEB_FONT_FACES: usize = 64;
+
 fn collect_web_fonts(
     tree: &DomTree,
     base_url: Option<&str>,
@@ -7937,26 +10010,48 @@ fn collect_web_fonts(
     let mut fonts = Vec::new();
     let mut rules = Vec::new();
 
+    // Author style sheets in document order: `<style>` text, and linked
+    // sheets the host fetched (their URLs resolve against the sheet's own
+    // URL, as CSS requires).
+    let mut sheets: Vec<(String, Option<String>)> = Vec::new();
     for nid in crate::dom::rendered_descendants(tree, tree.document()) {
         // Inspect tags without copying unrelated script/text payloads.
-        if !tree
+        let kind = tree
             .with_node(nid, |node| {
-                node.as_element()
-                    .is_some_and(|element| element.local.as_ref() == "style")
+                let element = node.as_element()?;
+                match element.local.as_ref() {
+                    "style" => Some(None),
+                    "link" => Some(Some(node.get_attribute("href").unwrap_or("").to_string())),
+                    _ => None,
+                }
             })
-            .unwrap_or(false)
-        {
-            continue;
+            .flatten();
+        match kind {
+            Some(None) => sheets.push((tree.text_content(nid), base_url.map(str::to_string))),
+            Some(Some(href)) => {
+                if let Some(sheet) = tree.external_stylesheet(nid) {
+                    let css: String = sheet.sources.iter().map(|part| part.as_ref()).collect();
+                    let sheet_url = resolve_resource_url(&href, base_url)
+                        .or_else(|| base_url.map(str::to_string));
+                    sheets.push((css, sheet_url));
+                }
+            }
+            None => {}
         }
-        let css = tree.text_content(nid);
-        for face in font_face_blocks(&css) {
+    }
+    for (css, sheet_base) in &sheets {
+        let sheet_base = sheet_base.as_deref();
+        for face in font_face_blocks(css) {
             if !font_face_covers_ascii(face) {
                 continue;
             }
             let sources: Vec<_> = font_face_urls(face)
                 .into_iter()
                 .filter(|src| font_source_may_be_supported(src))
-                .map(|src| (font_resource_key(&src, base_url), src))
+                .map(|src| {
+                    let key = font_resource_key(&src, sheet_base);
+                    (key.clone(), key)
+                })
                 .collect();
             if sources.is_empty() {
                 continue;
@@ -8020,7 +10115,7 @@ fn collect_web_fonts(
             preloads.push(href);
         }
     }
-    for src in preloads.iter().take(16) {
+    for src in preloads.iter().take(MAX_WEB_FONT_FACES) {
         let key = font_resource_key(src, base_url);
         if !seen.insert(key.clone()) {
             continue;
@@ -8040,15 +10135,28 @@ fn collect_web_fonts(
         }
     }
 
+    // Bytes already fetched per source, so two @font-face rules sharing a
+    // `src` (one file under two families or weights) both register a face.
+    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
     for rule in rules {
-        if fonts.len() >= 16 {
+        if fonts.len() >= MAX_WEB_FONT_FACES {
             break;
         }
         for (key, src) in rule.sources {
-            if !seen.insert(key) {
+            if let Some(decoded) = fetched.get(&key).cloned() {
+                fonts.push(crate::inline::WebFont {
+                    data: decoded,
+                    family: rule.family,
+                    weight: rule.weight,
+                    italic: rule.italic,
+                });
+                break;
+            }
+            if !seen.insert(key.clone()) {
                 continue;
             }
             if let Some(decoded) = fetch_and_decode_font(&src, base_url, cache) {
+                fetched.insert(key, Arc::clone(&decoded));
                 fonts.push(crate::inline::WebFont {
                     data: decoded,
                     family: rule.family,
@@ -8169,10 +10277,13 @@ fn font_face_declaration<'a>(face: &'a str, name: &str) -> Option<&'a str> {
         .into_iter()
         .filter_map(|declaration| {
             let (property, value) = declaration.split_once(':')?;
-            property
-                .trim()
-                .eq_ignore_ascii_case(name)
-                .then_some(value.trim())
+            // A comment may precede the property (`/* IE9 Compat Modes */
+            // src: ...`), as on w3schools.
+            let mut property = property.trim();
+            while let Some(rest) = property.strip_prefix("/*") {
+                property = rest.split_once("*/").map_or("", |(_, after)| after).trim();
+            }
+            property.eq_ignore_ascii_case(name).then_some(value.trim())
         })
         .next_back()
 }
@@ -8805,6 +10916,366 @@ fn paint_linear_gradient_layer(
     );
 }
 
+/// Size of a gradient layer's image: `background-size` resolved against the
+/// positioning area; `auto` and cover/contain fill it.
+fn gradient_layer_size(
+    size: Option<&str>,
+    fit: Option<crate::ObjectFit>,
+    rect: &crate::Rect,
+    em: f32,
+    rem: f32,
+    viewport: (f32, f32),
+) -> (f32, f32) {
+    let Some(expression) = size else {
+        return (rect.width, rect.height);
+    };
+    if fit.is_some() {
+        return (rect.width, rect.height);
+    }
+    let components = split_background_size_components(expression);
+    let resolve = |value: &&str, basis: f32| {
+        (!value.eq_ignore_ascii_case("auto"))
+            .then(|| {
+                crate::style::resolve_contextual_length(
+                    value,
+                    em,
+                    rem,
+                    viewport.0 / 100.0,
+                    viewport.1 / 100.0,
+                    basis,
+                )
+            })
+            .flatten()
+    };
+    let width = components
+        .first()
+        .and_then(|value| resolve(value, rect.width))
+        .unwrap_or(rect.width);
+    let height = match components.get(1) {
+        Some(value) => resolve(value, rect.height).unwrap_or(rect.height),
+        // One value sets the width; a gradient has no ratio, so the height
+        // is `auto`: the positioning area's.
+        None => rect.height,
+    };
+    (width, height)
+}
+
+/// Paint background (or mask) layers bottom-up into `surface`, whose
+/// top-left pixel is page pixel `offset`. `rect` is the box's border box in
+/// page pixels. Each layer is tiled over its painting area per its own
+/// size, position, repeat, origin and clip (CSS Backgrounds 3).
+#[allow(clippy::too_many_arguments)]
+fn paint_resolved_layers(
+    surface: &mut Pixmap,
+    offset: (i32, i32),
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+) {
+    let em = style.font_size.unwrap_or(16.0);
+    let (ox, oy) = (offset.0 as f32, offset.1 as f32);
+    for layer in layers.iter().rev() {
+        let geometry = layer_geometry(rect, style, layer.origin, layer.clip);
+        let origin = geometry.origin_rect;
+        let tile_rect = match &layer.image {
+            crate::style::LayerImage::Url(url) => background_image_rect(
+                url,
+                base_url,
+                &origin,
+                None,
+                layer.size.as_deref(),
+                layer.fit,
+                layer.position,
+                em,
+                root_font_size,
+                viewport,
+                cache,
+            ),
+            crate::style::LayerImage::Gradient(..) => {
+                let (width, height) = gradient_layer_size(
+                    layer.size.as_deref(),
+                    layer.fit,
+                    &origin,
+                    em,
+                    root_font_size,
+                    viewport,
+                );
+                Some(crate::Rect {
+                    x: origin.x + layer.position.x.resolve(origin.width - width),
+                    y: origin.y + layer.position.y.resolve(origin.height - height),
+                    width,
+                    height,
+                })
+            }
+        };
+        let Some(tile_rect) = tile_rect else {
+            continue;
+        };
+        if tile_rect.width <= 0.0 || tile_rect.height <= 0.0 {
+            continue;
+        }
+        let width = tile_rect.width.ceil().clamp(1.0, 4096.0) as u32;
+        let height = tile_rect.height.ceil().clamp(1.0, 4096.0) as u32;
+        let Some(mut tile) = Pixmap::new(width, height) else {
+            continue;
+        };
+        let local = crate::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: tile_rect.width,
+            height: tile_rect.height,
+        };
+        match &layer.image {
+            crate::style::LayerImage::Url(url)
+                if fetch_bytes(url, base_url, cache).is_some_and(|bytes| is_svg(&bytes)) =>
+            {
+                // An SVG image is scaled as a whole to its concrete size;
+                // one without a viewBox gets one from its intrinsic size.
+                let Some(bytes) = fetch_bytes(url, base_url, cache) else {
+                    continue;
+                };
+                let bytes = svg_with_intrinsic_viewbox(&bytes);
+                match render_svg(&bytes, width, height) {
+                    Some(rendered) => tile = rendered,
+                    None => continue,
+                }
+            }
+            crate::style::LayerImage::Url(url) => {
+                paint_image(
+                    url,
+                    base_url,
+                    &local,
+                    &local,
+                    crate::ObjectFit::Fill,
+                    crate::ObjectPosition::default(),
+                    &mut tile,
+                    cache,
+                    None,
+                    None,
+                    crate::ResolvedBorderRadii::default(),
+                    None,
+                );
+            }
+            crate::style::LayerImage::Gradient(gradient, geometry) => {
+                let Some(path) = Rect::from_xywh(0.0, 0.0, local.width, local.height)
+                    .map(PathBuilder::from_rect)
+                else {
+                    continue;
+                };
+                paint_gradient_layer_stack(
+                    &mut tile,
+                    &path,
+                    &local,
+                    &local,
+                    crate::ResolvedBorderRadii::default(),
+                    std::slice::from_ref(gradient),
+                    std::slice::from_ref(geometry),
+                    em,
+                    root_font_size,
+                    viewport,
+                    None,
+                    1.0,
+                );
+            }
+        }
+        // The painting area, cut to one tile along an axis that does not
+        // repeat.
+        let clip = geometry.clip_rect;
+        let (mut x0, mut x1) = (clip.x, clip.x + clip.width);
+        let (mut y0, mut y1) = (clip.y, clip.y + clip.height);
+        if !layer.repeat.0 {
+            x0 = x0.max(tile_rect.x);
+            x1 = x1.min(tile_rect.x + tile_rect.width);
+        }
+        if !layer.repeat.1 {
+            y0 = y0.max(tile_rect.y);
+            y1 = y1.min(tile_rect.y + tile_rect.height);
+        }
+        let Some(area) = Rect::from_ltrb(x0 - ox, y0 - oy, x1 - ox, y1 - oy) else {
+            continue;
+        };
+        let sx = tile_rect.width / width as f32;
+        let sy = tile_rect.height / height as f32;
+        let exact = (sx - 1.0).abs() < 1e-4
+            && (sy - 1.0).abs() < 1e-4
+            && (tile_rect.x - tile_rect.x.round()).abs() < 1e-3
+            && (tile_rect.y - tile_rect.y.round()).abs() < 1e-3;
+        let mut paint = Paint::default();
+        paint.shader = Pattern::new(
+            tile.as_ref(),
+            SpreadMode::Repeat,
+            if exact {
+                FilterQuality::Nearest
+            } else {
+                FilterQuality::Bilinear
+            },
+            1.0,
+            Transform::from_row(sx, 0.0, 0.0, sy, tile_rect.x - ox, tile_rect.y - oy),
+        );
+        let rounded_clip = (!geometry.clip_radii.is_zero())
+            .then(|| {
+                let local_geometry = BackgroundGeometry {
+                    origin_rect: geometry.origin_rect,
+                    clip_rect: crate::Rect {
+                        x: clip.x - ox,
+                        y: clip.y - oy,
+                        ..clip
+                    },
+                    clip_radii: geometry.clip_radii,
+                };
+                let path = background_clip_path(local_geometry)?;
+                let mut mask = crate::canvas::new_mask(surface.width(), surface.height())?;
+                mask.clip_fill_path(&path, FillRule::Winding, true, Transform::identity());
+                Some(mask)
+            })
+            .flatten();
+        surface.fill_rect(area, &paint, Transform::identity(), rounded_clip.as_ref());
+    }
+}
+
+/// `bytes` with a `viewBox` of its `width` x `height` on the root `<svg>`
+/// when it has none, so the image scales with its concrete size as CSS
+/// images do.
+fn svg_with_intrinsic_viewbox(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.into();
+    };
+    let Some(start) = text.find("<svg") else {
+        return bytes.into();
+    };
+    let Some(end) = text[start..].find('>').map(|end| start + end) else {
+        return bytes.into();
+    };
+    let tag = &text[start..end];
+    if tag.contains("viewBox") {
+        return bytes.into();
+    }
+    let attribute = |name: &str| -> Option<f32> {
+        let at = tag.find(&format!(" {name}="))? + name.len() + 2;
+        let rest = &tag[at..];
+        let quote = rest.chars().next()?;
+        let value = if quote == '"' || quote == '\'' {
+            rest[1..].split(quote).next()?
+        } else {
+            rest.split(|c: char| c.is_whitespace() || c == '/').next()?
+        };
+        value.trim().trim_end_matches("px").parse::<f32>().ok()
+    };
+    let (Some(width), Some(height)) = (attribute("width"), attribute("height")) else {
+        return bytes.into();
+    };
+    let mut out = String::with_capacity(text.len() + 32);
+    out.push_str(&text[..start + 4]);
+    out.push_str(&format!(" viewBox=\"0 0 {width} {height}\""));
+    out.push_str(&text[start + 4..]);
+    out.into_bytes().into()
+}
+
+/// Paint every background layer of a box with more than one layer or an
+/// image layer. Background color is painted by the caller.
+#[allow(clippy::too_many_arguments)]
+fn paint_layered_background(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    layers: &[crate::style::ResolvedLayer],
+    base_url: Option<&str>,
+    root_font_size: f32,
+    viewport: (f32, f32),
+    cache: &mut RenderResourceCache,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let x0 = rect.x.floor().max(0.0) as i32;
+    let y0 = rect.y.floor().max(0.0) as i32;
+    let x1 = ((rect.x + rect.width).ceil() as i32).min(pixmap.width() as i32);
+    let y1 = ((rect.y + rect.height).ceil() as i32).min(pixmap.height() as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let Some(mut surface) = Pixmap::new((x1 - x0) as u32, (y1 - y0) as u32) else {
+        return;
+    };
+    paint_resolved_layers(
+        &mut surface,
+        (x0, y0),
+        rect,
+        style,
+        layers,
+        base_url,
+        root_font_size,
+        viewport,
+        cache,
+    );
+    pixmap.canvas().draw_image(
+        x0,
+        y0,
+        surface.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// The mask layers of an element when they mask its rendering: any
+/// gradient layer, several layers, or a box with content (children or a
+/// replaced element). A single image mask on an empty box keeps the icon
+/// path (`paint_mask`), which fills the mask shape with the box's color.
+fn layer_mask(
+    tree: &DomTree,
+    laid: &crate::DomLayout,
+    nid: obscura_dom::tree::NodeId,
+) -> Option<Vec<crate::style::ResolvedLayer>> {
+    let style = laid.styles.get(&nid)?;
+    if style.mask_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.mask_layers, style, true);
+    if layers.is_empty() {
+        return None;
+    }
+    let gradient = layers
+        .iter()
+        .any(|layer| matches!(layer.image, crate::style::LayerImage::Gradient(..)));
+    let replaced = tree
+        .get_node(nid)
+        .and_then(|node| node.as_element().map(|e| e.local.to_string()))
+        .is_some_and(|tag| {
+            matches!(
+                tag.as_str(),
+                "img" | "video" | "canvas" | "svg" | "picture" | "iframe" | "input" | "object"
+            )
+        });
+    let has_children = !crate::dom::rendered_descendants(tree, nid).is_empty();
+    (gradient || layers.len() > 1 || replaced || has_children).then_some(layers)
+}
+
+/// Whether a box shows its back to the viewer: its accumulated 3D
+/// transform (through preserve-3d ancestors and perspective) maps the
+/// plane's normal away from the viewer.
+fn faces_back(laid: &crate::DomLayout, nid: obscura_dom::tree::NodeId) -> bool {
+    laid.projective_transforms
+        .get(&nid)
+        .is_some_and(|matrix| matrix.is_back_face_visible())
+}
+
+/// Background layers that take the layered paint path: more than one
+/// layer, or any image layer. A single gradient keeps the gradient path.
+fn layered_background(style: &crate::LayoutStyle) -> Option<Vec<crate::style::ResolvedLayer>> {
+    if style.background_layers.images.is_empty() {
+        return None;
+    }
+    let layers = crate::style::resolve_layers(&style.background_layers, style, false);
+    (layers.len() > 1
+        || layers
+            .iter()
+            .any(|layer| matches!(layer.image, crate::style::LayerImage::Url(_))))
+    .then_some(layers)
+}
+
 #[derive(Clone, Copy)]
 struct BackgroundGeometry {
     origin_rect: crate::Rect,
@@ -8831,6 +11302,16 @@ fn add_sides(a: crate::Sides<f32>, b: crate::Sides<f32>) -> crate::Sides<f32> {
 }
 
 fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> BackgroundGeometry {
+    layer_geometry(rect, style, style.background_origin, style.background_clip)
+}
+
+/// Positioning and painting areas of one background or mask layer.
+fn layer_geometry(
+    rect: &crate::Rect,
+    style: &crate::LayoutStyle,
+    origin: crate::BackgroundOrigin,
+    clip: crate::BackgroundClip,
+) -> BackgroundGeometry {
     let border = crate::Sides {
         top: style.border.top,
         right: style.border.right,
@@ -8844,12 +11325,12 @@ fn background_geometry(rect: &crate::Rect, style: &crate::LayoutStyle) -> Backgr
         left: style.padding.left,
     };
     let content = add_sides(border, padding);
-    let origin_insets = match style.background_origin {
+    let origin_insets = match origin {
         crate::BackgroundOrigin::BorderBox => crate::Sides::all(0.0),
         crate::BackgroundOrigin::PaddingBox => border,
         crate::BackgroundOrigin::ContentBox => content,
     };
-    let clip_insets = match style.background_clip {
+    let clip_insets = match clip {
         crate::BackgroundClip::BorderBox | crate::BackgroundClip::Text => crate::Sides::all(0.0),
         crate::BackgroundClip::PaddingBox => border,
         crate::BackgroundClip::ContentBox => content,
@@ -9751,7 +12232,7 @@ fn paint_in_flow_generated_box(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
@@ -9896,8 +12377,12 @@ fn paint_in_flow_generated_box(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_positioned_pseudo(
-    text_engine: &mut crate::inline::TextEngine,
+    ifc: &mut crate::ifc::IfcStore,
+    tree: &DomTree,
+    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    owner: obscura_dom::tree::NodeId,
     pixmap: &mut Pixmap,
     style: &crate::LayoutStyle,
     containing_block: &crate::Rect,
@@ -9932,12 +12417,13 @@ fn paint_positioned_pseudo(
     // positioned pseudo whose width and/or height is auto. Tailwind's code
     // gutters use exactly this shape (`width` plus auto height); requiring two
     // opposing insets previously discarded the pseudo before text painting.
-    let generated_item = style
+    let generated = style
         .before_content
         .as_deref()
         .filter(|content| !content.is_empty())
-        .and_then(|content| text_engine.push_generated_text(content, style));
-    let generated_intrinsic = generated_item.map(|item| text_engine.measure(item, None));
+        .and_then(|content| ifc.standalone(tree, styles, owner, style, content, None));
+    let generated_item = generated.map(|(index, _, _)| index);
+    let generated_intrinsic = generated.map(|(_, width, height)| (width, height));
     let width = resolve(style.width, containing_block.width)
         .or_else(|| Some(containing_block.width - left? - right?))
         .or_else(|| generated_intrinsic.map(|size| size.0));
@@ -9993,7 +12479,7 @@ fn paint_positioned_pseudo(
     let background_path = background_clip_path(background);
     let element_clip_mask =
         background_extra_clip(ancestor_clip_mask.as_ref(), clip_path_mask.as_ref());
-    let background_mask = element_clip_mask.clone();
+    let background_mask = element_clip_mask.as_ref().map(crate::canvas::clone_mask);
     if style.mask_image.is_none() && !style.background_clip_text {
         if let (Some(color), Some(path)) = (style.background_color, background_path.as_ref()) {
             let mut paint = Paint::default();
@@ -10166,16 +12652,170 @@ fn paint_positioned_pseudo(
             }
             _ => rect.y + style.padding.top,
         };
-        text_engine.finalize(item, (x, y), text_width, Some(visible));
-        text_engine.paint_item_with_clip_mask_scaled(
-            item,
-            pixmap,
-            (0.0, 0.0),
-            Some(visible),
-            element_clip_mask.as_ref(),
-            raster_scale,
-        );
+        let _ = text_width;
+        let crate::ifc::IfcStore { ifcs, raster, .. } = ifc;
+        if let Some(generated) = ifcs.get(item).and_then(|slot| slot.as_deref()) {
+            generated.paint(
+                raster,
+                styles,
+                pixmap,
+                (x, y),
+                (0.0, 0.0),
+                Some(visible),
+                element_clip_mask.as_ref(),
+                raster_scale,
+                false,
+            );
+        }
     }
+}
+
+/// Whether `<img>` `nid` has `loading=lazy` (ASCII case-insensitive).
+fn image_is_lazy(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> bool {
+    tree.with_node(nid, |node| {
+        node.as_element()
+            .is_some_and(|element| element.local.as_ref() == "img")
+            && node
+                .get_attribute("loading")
+                .is_some_and(|value| value.trim().eq_ignore_ascii_case("lazy"))
+    })
+    .unwrap_or(false)
+}
+
+/// `m:ss` (or `h:mm:ss`), as Chrome's media controls show times.
+fn media_time_label(seconds: f64) -> String {
+    let total = if seconds.is_finite() && seconds > 0.0 {
+        seconds.floor() as u64
+    } else {
+        0
+    };
+    let (h, m, s) = (total / 3600, total / 60 % 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Chrome's default `<video controls>` bar for a paused video, over the
+/// content box `rect`: the bottom gradient, play, time, timeline, volume,
+/// fullscreen and overflow buttons. Geometry and colours are measured from
+/// headless Chrome; icons are the Material icons Chromium's controls use.
+fn paint_video_controls(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    time: f64,
+    frame: Option<&VideoFrameEntry>,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let (w, h) = (rect.width.round(), rect.height.round());
+    if w < 48.0 || h < 40.0 || !rect_intersects_paint_surface(rect, pixmap, 1.0) {
+        return;
+    }
+    // Gradient alpha by distance from the bottom edge, every 6 px.
+    const GRADIENT: [u8; 19] = [
+        255, 253, 248, 242, 232, 215, 198, 178, 156, 133, 110, 87, 66, 48, 32, 20, 10, 4, 1,
+    ];
+    let height = 110.0f32.min(h);
+    let mut stops = String::new();
+    // Top to bottom: SVG stop offsets must not decrease.
+    for (i, alpha) in GRADIENT.iter().enumerate().rev() {
+        let distance = i as f32 * 6.0;
+        if distance > height {
+            continue;
+        }
+        stops.push_str(&format!(
+            r#"<stop offset="{:.4}" stop-color="black" stop-opacity="{:.4}"/>"#,
+            1.0 - distance / height,
+            *alpha as f32 / 255.0
+        ));
+    }
+    let duration = frame.map_or(0.0, |frame| frame.duration);
+    let label = format!(
+        "{} / {}",
+        media_time_label(time),
+        media_time_label(duration)
+    );
+    let volume_opacity = if frame.is_some_and(|frame| frame.has_audio) {
+        1.0
+    } else {
+        0.38
+    };
+    let icon = |x: f32, path: &str, opacity: f32| {
+        format!(
+            r#"<path transform="translate({x:.2} {:.2}) scale(0.8333)" fill="white" fill-opacity="{opacity}" d="{path}"/>"#,
+            h - 58.17
+        )
+    };
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}">
+<defs><linearGradient id="g" x1="0" y1="{y0}" x2="0" y2="{h}" gradientUnits="userSpaceOnUse">{stops}</linearGradient></defs>
+<rect x="0" y="{y0}" width="{w}" height="{height}" fill="url(#g)"/>
+{play}
+<text x="47.4" y="{ty}" font-family="Liberation Sans, Arial, sans-serif" font-size="14" fill="white">{label}</text>
+{volume}{fullscreen}{menu}
+<rect x="16" y="{tl}" width="{tw}" height="4" rx="2" fill="rgb(178,178,178)" fill-opacity="0.97"/>
+</svg>"#,
+        y0 = h - height,
+        play = icon(13.33, "M8 5v14l11-7z", 1.0),
+        ty = h - 43.0,
+        volume = icon(
+            w - 129.5,
+            "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
+            volume_opacity
+        ),
+        fullscreen = icon(
+            w - 82.17,
+            "M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z",
+            1.0
+        ),
+        menu = icon(
+            w - 34.33,
+            "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
+            1.0
+        ),
+        tl = h - 24.0,
+        tw = w - 32.0,
+    );
+    let Some(overlay) = render_svg(svg.as_bytes(), w as u32, h as u32) else {
+        return;
+    };
+    pixmap.canvas().draw_image(
+        rect.x.round() as i32,
+        rect.y.round() as i32,
+        overlay.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// The absolute media URL of `<video>` `nid`, resolved against `base_url`.
+pub fn video_media_url(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    base_url: Option<&str>,
+) -> Option<String> {
+    resolve_resource_url(&video_source_url(tree, nid)?, base_url)
+}
+
+/// The media URL of a `<video>`: its `src`, else its first `<source src>`.
+pub(crate) fn video_source_url(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> Option<String> {
+    let own = tree
+        .get_node(nid)?
+        .get_attribute("src")
+        .map(str::trim)
+        .filter(|src| !src.is_empty())
+        .map(str::to_owned);
+    own.or_else(|| {
+        tree.children(nid).into_iter().find_map(|child| {
+            let node = tree.get_node(child)?;
+            (node.as_element()?.local.as_ref() == "source")
+                .then(|| node.get_attribute("src").map(str::trim).map(str::to_owned))
+                .flatten()
+                .filter(|src| !src.is_empty())
+        })
+    })
 }
 
 /// Fetch every `<img>` once (seeding `cache` for the paint pass) and record its
@@ -10196,6 +12836,7 @@ fn collect_image_intrinsics(
     enum Source {
         Image,
         VideoPoster(String),
+        VideoFrame(String),
     }
     let mut out = std::collections::HashMap::new();
     let mut selected = HashMap::new();
@@ -10207,7 +12848,16 @@ fn collect_image_intrinsics(
                     .get_attribute("poster")
                     .map(str::trim)
                     .filter(|poster| !poster.is_empty())
-                    .map(|poster| Source::VideoPoster(poster.to_owned())),
+                    .map(|poster| Source::VideoPoster(poster.to_owned()))
+                    .or_else(|| {
+                        // Without a poster a paused video shows its frame at
+                        // the playback position; without a decoder its header
+                        // still gives the natural size.
+                        if node.get_attribute("preload") == Some("none") {
+                            return None;
+                        }
+                        video_source_url(tree, nid).map(Source::VideoFrame)
+                    }),
                 _ => None,
             })
             .flatten();
@@ -10220,6 +12870,23 @@ fn collect_image_intrinsics(
                 candidate
             }
             Some(Source::VideoPoster(poster)) => (poster, 1.0),
+            Some(Source::VideoFrame(src)) => {
+                let Some(media_url) = resolve_resource_url(&src, base_url) else {
+                    continue;
+                };
+                let time = cache.video_time(nid);
+                let Some(frame) = cache.video_frame(&media_url, time) else {
+                    // Chrome sizes the box from the metadata alone.
+                    if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
+                        out.insert(
+                            nid,
+                            crate::ReplacedIntrinsic::from_dimensions(width, height),
+                        );
+                    }
+                    continue;
+                };
+                (frame.data_url.to_string(), 1.0)
+            }
             None => continue,
         };
         let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
@@ -10770,7 +13437,13 @@ fn paint_image(
     // result up on draw when the destination is larger.
     let (rw, rh) = bounded_raster_size(dw, dh);
     let content = if svg {
-        render_svg(&bytes, rw, rh).map(Arc::new)
+        let scale = scene_svg_scale();
+        if scale > 1.0 {
+            render_svg_with_font_database_scaled(&bytes, rw, rh, &svg_font_database(), scale)
+                .map(Arc::new)
+        } else {
+            render_svg(&bytes, rw, rh).map(Arc::new)
+        }
     } else if !src.starts_with("data:") {
         let key = resolved.map(|url| match profile {
             Some(profile) => image_resource_key(&url, profile),
@@ -10845,6 +13518,7 @@ fn paint_image(
             )
         })
         .unwrap_or_else(Transform::identity);
+    let (rw, rh) = (content.width(), content.height());
     if (rw, rh) == (dw, dh) {
         pixmap.canvas().draw_image(
             dest.x as i32,
@@ -11310,6 +13984,18 @@ fn render_svg_with_font_database(
     height: u32,
     fonts: &std::sync::Arc<usvg::fontdb::Database>,
 ) -> Option<Pixmap> {
+    render_svg_with_font_database_scaled(bytes, width, height, fonts, 1.0)
+}
+
+/// [`render_svg_with_font_database`] at `scale` device pixels per CSS
+/// pixel: the SVG viewport stays `width` x `height`, the pixmap is larger.
+fn render_svg_with_font_database_scaled(
+    bytes: &[u8],
+    width: u32,
+    height: u32,
+    fonts: &std::sync::Arc<usvg::fontdb::Database>,
+    scale: f32,
+) -> Option<Pixmap> {
     if width == 0 || height == 0 {
         return None;
     }
@@ -11332,9 +14018,19 @@ fn render_svg_with_font_database(
     if size.width() <= 0.0 || size.height() <= 0.0 {
         return None;
     }
-    let mut svg_pixmap = Pixmap::new(width, height)?;
-    let transform =
-        Transform::from_scale(width as f32 / size.width(), height as f32 / size.height());
+    let (pixel_width, pixel_height) = if scale > 1.0 {
+        (
+            ((width as f32 * scale).round() as u32).max(1),
+            ((height as f32 * scale).round() as u32).max(1),
+        )
+    } else {
+        (width, height)
+    };
+    let mut svg_pixmap = Pixmap::new(pixel_width, pixel_height)?;
+    let transform = Transform::from_scale(
+        pixel_width as f32 / size.width(),
+        pixel_height as f32 / size.height(),
+    );
     resvg::render(&tree, transform, &mut svg_pixmap.as_mut());
     Some(svg_pixmap)
 }
@@ -12034,6 +14730,75 @@ fn svg_escape_attr(s: &str, buf: &mut String) {
 /// document-level symbol sprite (`href="#id"`) or an external sprite file
 /// (`href="url#id"`), splicing the referenced symbol into the standalone SVG
 /// handed to resvg. Symbols already inside `root` need no injection.
+/// Replace the `href`/`xlink:href` of each `<image>` in standalone SVG
+/// markup with a `data:` URL of the bytes it names, fetched through the
+/// page's resource cache.
+fn inline_svg_image_hrefs(
+    markup: &mut String,
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+) {
+    use base64::Engine;
+    let mut out = String::with_capacity(markup.len());
+    let mut rest = markup.as_str();
+    let mut changed = false;
+    while let Some(start) = rest.find("<image") {
+        let Some(end) = rest[start..].find('>').map(|end| start + end) else {
+            break;
+        };
+        out.push_str(&rest[..start]);
+        let mut tag = rest[start..end].to_string();
+        for attribute in ["xlink:href=", " href="] {
+            let Some(at) = tag.find(attribute) else {
+                continue;
+            };
+            let value_start = at + attribute.len();
+            let Some(quote) = tag[value_start..].chars().next() else {
+                continue;
+            };
+            if quote != '"' && quote != '\'' {
+                continue;
+            }
+            let Some(len) = tag[value_start + 1..].find(quote) else {
+                continue;
+            };
+            let raw = tag[value_start + 1..value_start + 1 + len].replace("&amp;", "&");
+            if raw.starts_with("data:") || raw.starts_with('#') {
+                continue;
+            }
+            let Some(bytes) = fetch_bytes(&raw, base_url, cache) else {
+                continue;
+            };
+            let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
+                "image/png"
+            } else if bytes.starts_with(&[0xFF, 0xD8]) {
+                "image/jpeg"
+            } else if bytes.starts_with(b"GIF8") {
+                "image/gif"
+            } else if bytes.len() > 12 && &bytes[8..12] == b"WEBP" {
+                "image/webp"
+            } else if is_svg(&bytes) {
+                "image/svg+xml"
+            } else {
+                continue;
+            };
+            let data = format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(&bytes[..])
+            );
+            tag.replace_range(value_start + 1..value_start + 1 + len, &data);
+            changed = true;
+            break;
+        }
+        out.push_str(&tag);
+        rest = &rest[end..];
+    }
+    if changed {
+        out.push_str(rest);
+        *markup = out;
+    }
+}
+
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
@@ -12805,6 +15570,485 @@ mod tests {
     }
 
     #[test]
+    fn inline_svg_images_paint_relative_hrefs() {
+        let source = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            40,
+            20,
+            image::Rgba([255, 0, 0, 255]),
+        ));
+        let mut encoded = std::io::Cursor::new(Vec::new());
+        source
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("png");
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <svg width="100" height="50" xmlns="http://www.w3.org/2000/svg">
+                  <image href="red.png"></image></svg>
+            </body></html>"#,
+        );
+        let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
+        resources.seed("https://assets.test/red.png".into(), encoded.into_inner());
+        let mut prepared = prepare_dom(
+            &tree,
+            (120.0, 60.0),
+            Some("https://assets.test/page.html"),
+            &mut resources,
+        )
+        .expect("prepared");
+        let pixmap =
+            paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).expect("paint");
+        let inside = pixmap.pixel(10, 10).expect("pixel");
+        assert_eq!(
+            (inside.red(), inside.green(), inside.blue()),
+            (255, 0, 0),
+            "the svg <image> paints its relative href at its intrinsic size"
+        );
+        let outside = pixmap.pixel(60, 10).expect("pixel");
+        assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[cfg(feature = "media")]
+    #[test]
+    fn video_frames_decode_at_the_playback_position() {
+        const WEBM: &[u8] = include_bytes!("../tests/fixtures/two-phase.webm");
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <video id="v" src="v.webm"></video></body></html>"#,
+        );
+        let mut resources = RenderResourceCache::with_loader(|url: &str| {
+            url.ends_with("v.webm").then(|| WEBM.to_vec())
+        });
+        let base = Some("https://media.test/page.html");
+        let video = tree.get_element_by_id("v").expect("video");
+        let mut prepared = prepare_dom(&tree, (200.0, 100.0), base, &mut resources).unwrap();
+        let rect = prepared.layout.rects[&video];
+        assert_eq!(
+            (rect.width, rect.height),
+            (64.0, 36.0),
+            "the frame sizes the video"
+        );
+        let frame = paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).unwrap();
+        let p = frame.pixel(10, 18).unwrap();
+        assert!(p.blue() > 150 && p.red() < 80, "first frame is blue: {p:?}");
+        resources.set_video_time(video, 0.7);
+        let mut prepared = prepare_dom(&tree, (200.0, 100.0), base, &mut resources).unwrap();
+        let frame = paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).unwrap();
+        let p = frame.pixel(10, 18).unwrap();
+        assert!(
+            p.red() > 150 && p.blue() < 100,
+            "the frame at 0.7s has a red left half: {p:?}"
+        );
+        let info = resources
+            .video_frame("https://media.test/v.webm", 0.0)
+            .expect("metadata");
+        assert!(
+            (info.duration - 1.0).abs() < 0.15,
+            "duration {}",
+            info.duration
+        );
+        assert!(!info.has_audio);
+    }
+
+    #[test]
+    fn video_controls_paint_chrome_bar_over_the_content_box() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <video controls style="display:block;width:320px;height:180px;background:white"></video>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (340.0, 200.0), None).expect("controls");
+        let p = |x, y| pixmap.pixel(x, y).expect("pixel");
+        assert!(p(160, 60).red() > 250, "above the gradient the video shows");
+        assert!(
+            p(160, 178).red() < 10,
+            "the bottom of the gradient is black"
+        );
+        let mid = p(160, 125).red();
+        assert!(mid > 100 && mid < 160, "half way up the gradient: {mid}");
+        assert!(p(24, 129).red() > 240, "the play icon is white");
+        assert!(p(160, 157).red() > 150, "the timeline track");
+    }
+
+    #[test]
+    fn vertical_writing_modes_turn_and_stack_glyphs() {
+        // Same page as Chrome comparisons: 20px Liberation Sans columns.
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:20px sans-serif;background:#fff">
+              <div style="position:absolute;left:0;top:0;height:220px;writing-mode:vertical-rl">vertical-rl Text</div>
+              <div style="position:absolute;left:100px;top:0;height:220px;writing-mode:sideways-lr">sideways-lr</div>
+              <div style="position:absolute;left:200px;top:0;height:220px;writing-mode:vertical-rl;text-orientation:upright">UPRIGHT</div>
+              <p style="position:absolute;left:0;top:240px;margin:0;width:300px">horizontal text</p>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (320.0, 280.0), None).expect("vertical");
+        let red = |x: u32, y: u32| pixmap.pixel(x, y).map_or(255, |p| p.red());
+        // vertical-rl: one column of turned glyphs, taller than wide, inside
+        // its 24px wide box (Chrome: ink x 7..21, y 2..124).
+        let (x0, y0, x1, y1) = ink_box(red, (0, 0, 60, 230)).expect("vertical-rl ink");
+        assert!(x0 >= 3 && x1 <= 23, "column x {x0}..{x1}");
+        assert!(y0 <= 4 && (118..=130).contains(&y1), "column y {y0}..{y1}");
+        // Turned glyphs take the LCD path with the device's horizontal
+        // subpixel axis, as Chrome: their edges carry color fringes.
+        let fringed = (0..230)
+            .flat_map(|y| (0..30).map(move |x| (x, y)))
+            .filter_map(|(x, y)| pixmap.pixel(x, y))
+            .any(|p| (p.red() as i32 - p.blue() as i32).abs() > 60);
+        assert!(fringed, "vertical-rl glyphs are LCD antialiased");
+        // The horizontal paragraph still paints horizontally.
+        let (hx0, hy0, hx1, hy1) = ink_box(red, (0, 238, 320, 280)).expect("horizontal ink");
+        assert!(
+            hx1 - hx0 > 4 * (hy1 - hy0),
+            "horizontal line {hx0}..{hx1} x {hy0}..{hy1}"
+        );
+        // sideways-lr reads bottom to top: its text ends at the top, so the
+        // ink starts far down the 220px box, not at its top (Chrome: y 77..220).
+        let (_, sy0, _, sy1) = ink_box(red, (100, 0, 160, 230)).expect("sideways ink");
+        assert!(sy0 > 50 && sy1 > 200, "sideways-lr y {sy0}..{sy1}");
+        // text-orientation: upright stacks upright letters 22px apart
+        // (ascent + descent), the first top 4px down (Chrome: 4, 26, 48, ...).
+        let rows = ink_rows(red, 200, 230, 0, 220);
+        assert_eq!(rows.len(), 7, "seven upright letters: {rows:?}");
+        assert!((3..=5).contains(&rows[0].0), "first letter top {rows:?}");
+        assert!(
+            (21..=23).contains(&(rows[1].0 - rows[0].0)),
+            "pitch {rows:?}"
+        );
+        let computed = {
+            let mut layout = crate::layout_dom(&tree, (320.0, 280.0));
+            let id = tree
+                .descendants(tree.document())
+                .into_iter()
+                .find(|id| {
+                    layout
+                        .styles
+                        .get(id)
+                        .is_some_and(|s| s.text_orientation.is_some())
+                })
+                .expect("upright div");
+            non_geometric_computed_style(&layout.styles.remove(&id).unwrap())
+        };
+        assert_eq!(computed["writing-mode"], "vertical-rl");
+        assert_eq!(computed["text-orientation"], "upright");
+        assert_eq!(computed["text-combine-upright"], "none");
+    }
+
+    #[test]
+    fn backdrop_filter_blurs_what_is_under_a_translucent_fixed_header() {
+        let rows: String = (0..20)
+            .map(|i| {
+                format!(
+                    r#"<div style="height:20px;background:{}"></div>"#,
+                    if i % 2 == 0 {
+                        "rgb(0,0,0)"
+                    } else {
+                        "rgb(255,255,255)"
+                    }
+                )
+            })
+            .collect();
+        let tree = parse_html(&format!(
+            r#"<html style="margin:0"><body style="margin:0">
+                <div style="position:fixed;top:0;left:0;width:100px;height:60px;
+                    backdrop-filter:blur(8px);background:rgba(255,255,255,0.2)"></div>{rows}
+            </body></html>"#
+        ));
+        let pixmap = paint_dom(&tree, (200.0, 100.0), None).expect("backdrop");
+        // Inside the header the 20px stripes blur toward mid grey;
+        // outside it they stay black and white.
+        let inside = pixmap.pixel(50, 10).expect("pixel").red();
+        let outside = pixmap.pixel(150, 10).expect("pixel").red();
+        // Unblurred it would be the 20% white over black: 51.
+        assert!(
+            inside > 65 && inside < 200,
+            "blurred under the header: {inside}"
+        );
+        assert_eq!(outside, 0, "untouched beside it");
+        let mut layout = crate::layout_dom(&tree, (200.0, 100.0));
+        let header = tree
+            .descendants(tree.document())
+            .into_iter()
+            .find(|id| {
+                layout
+                    .styles
+                    .get(id)
+                    .is_some_and(|s| s.backdrop_filters.is_some())
+            })
+            .expect("header");
+        let style = layout.styles.remove(&header).unwrap();
+        let computed = non_geometric_computed_style(&style);
+        assert_eq!(computed["backdrop-filter"], "blur(8px)");
+        let body = tree
+            .descendants(tree.document())
+            .into_iter()
+            .find(|id| {
+                tree.get_node(*id)
+                    .and_then(|n| n.as_element().map(|e| e.local.as_ref() == "body"))
+                    .unwrap_or(false)
+            })
+            .expect("body");
+        let plain = non_geometric_computed_style(&layout.styles[&body]);
+        for (property, value) in [
+            ("backdrop-filter", "none"),
+            ("filter", "none"),
+            ("mix-blend-mode", "normal"),
+            ("isolation", "auto"),
+            ("clip-path", "none"),
+            ("mask-image", "none"),
+        ] {
+            assert_eq!(plain[property], value, "{property}");
+        }
+    }
+
+    #[test]
+    fn mix_blend_mode_multiplies_the_element_over_its_backdrop() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:50px;background:rgb(200,100,50)"></div>
+                <div style="position:absolute;left:0;top:0;width:100px;height:50px;
+                            background:rgb(128,128,255);mix-blend-mode:multiply"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 60.0), None).expect("blend");
+        let p = pixmap.pixel(50, 25).expect("pixel");
+        // multiply: 200*128/255, 100*128/255, 50*255/255
+        let close = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 2;
+        assert!(
+            close(p.red(), 100) && close(p.green(), 50) && close(p.blue(), 50),
+            "multiplied: {p:?}"
+        );
+    }
+
+    #[test]
+    fn inline_fragment_decorations_snap_to_device_pixels() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white;font:16px sans-serif">
+                <p style="margin:0"><span style="margin-left:11.4px;background:rgb(0,0,255)">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></p>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 30.0), None).expect("snapped inline");
+        // A background edge at x = 11.4 paints on whole pixels: every pixel
+        // of the row is the background or the canvas, none half covered.
+        let row: Vec<(u8, u8, u8)> = (0..120u32)
+            .map(|x| {
+                let p = pixmap.pixel(x, 8).expect("pixel");
+                (p.red(), p.green(), p.blue())
+            })
+            .collect();
+        let blue = row.iter().filter(|&&p| p == (0, 0, 255)).count();
+        assert!(blue > 20, "the background paints: {blue}");
+        assert!(
+            row.iter()
+                .all(|&p| p == (0, 0, 255) || p == (255, 255, 255)),
+            "inline backgrounds paint on whole pixels: {row:?}"
+        );
+        // The left edge at 11.4 rounds to pixel 11, as Blink snaps it.
+        assert_eq!((row[10], row[11]), ((255, 255, 255), (0, 0, 255)));
+    }
+
+    #[test]
+    fn three_d_transforms_project_with_perspective_and_depth_order() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;perspective:200px">
+                  <div style="width:100px;height:100px;background:rgb(255,0,0);transform:rotateY(45deg)"></div>
+                </div>
+                <div style="position:absolute;left:150px;top:0;width:100px;height:100px;perspective:300px">
+                  <div style="width:100px;height:100px;transform-style:preserve-3d">
+                    <div style="position:absolute;inset:0;background:rgb(255,0,0);transform:translateZ(40px)"></div>
+                    <div style="position:absolute;inset:0;background:rgb(0,0,255);transform:translateZ(-40px)"></div>
+                  </div>
+                </div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (260.0, 120.0), None).expect("3d paint");
+        let red_rows = |x: u32| {
+            (0..120u32)
+                .filter(|&y| {
+                    let p = pixmap.pixel(x, y).expect("pixel");
+                    p.red() > 200 && p.green() < 60 && p.blue() < 60
+                })
+                .count()
+        };
+        // rotateY(45deg) turns the right edge away from the viewer: under
+        // perspective it is shorter than the left edge (a trapezoid, which
+        // no affine map can produce).
+        let (near, far) = (red_rows(22), red_rows(70));
+        assert!(
+            near > far + 6,
+            "perspective: near edge {near} rows, far edge {far}"
+        );
+        // The plane at z=+40 is nearer than the one at z=-40 painted after
+        // it in tree order.
+        let centre = pixmap.pixel(200, 50).expect("pixel");
+        assert_eq!(
+            (centre.red(), centre.green(), centre.blue()),
+            (255, 0, 0),
+            "preserve-3d planes paint in depth order"
+        );
+    }
+
+    #[test]
+    fn hidden_backfaces_are_not_painted() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:relative;width:100px;height:50px;transform-style:preserve-3d">
+                  <div style="position:absolute;inset:0;background:rgb(0,128,0);
+                              backface-visibility:hidden"></div>
+                  <div style="position:absolute;inset:0;background:rgb(255,0,0);
+                              backface-visibility:hidden;transform:rotateY(180deg)"></div>
+                </div>
+                <div style="width:100px;height:50px;background:rgb(0,0,255);
+                            backface-visibility:hidden;transform:scaleX(-1)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (120.0, 120.0), None).expect("backface");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(50, 25), (0, 128, 0), "the turned face hides its back");
+        assert_eq!(rgb(50, 75), (0, 0, 255), "a 2D mirror keeps its front");
+    }
+
+    #[test]
+    fn inset_shadow_and_dashed_borders_follow_chrome() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:40px;
+                    box-shadow:inset 0 0 8px rgba(0,0,0,.5)"></div>
+                <div style="position:absolute;left:0;top:60px;width:200px;height:40px;
+                    border:10px dashed black"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (240.0, 130.0), None).expect("inset and dashes");
+        let gray = |x, y| pixmap.pixel(x, y).expect("pixel").red();
+        assert!(gray(50, 0) < 210, "the inset shadow darkens the inner edge");
+        assert!(gray(50, 4) > gray(50, 0), "and fades inward");
+        assert_eq!(gray(50, 20), 255, "the middle stays clear");
+        // Blink: 10px dashes are 20px long; gaps stretch so the side starts
+        // and ends with a dash (220px side: 8 dashes, gaps 160/7 px).
+        assert_eq!(gray(10, 65), 0, "the side starts with a dash");
+        assert_eq!(gray(24, 65), 255, "the first gap starts after 20px");
+        assert_eq!(gray(215, 65), 0, "and the side ends with a dash");
+    }
+
+    #[test]
+    fn gradient_mask_layers_mask_the_element_and_its_content() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    -webkit-mask-image:linear-gradient(black,transparent)">
+                  <div style="width:50px;height:100px;background:rgb(0,0,255)"></div>
+                </div>
+                <div style="position:absolute;left:110px;top:0;width:100px;height:100px;
+                    background:rgb(255,0,0);
+                    mask:linear-gradient(black,black) 0 0/50px 50px no-repeat,
+                         linear-gradient(black,black) right bottom/20px 20px no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (220.0, 110.0), None).expect("mask");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        let top = rgb(75, 0);
+        assert!(
+            top.0 == 255 && top.1 < 8,
+            "the mask is opaque at the top: {top:?}"
+        );
+        assert!(rgb(25, 0).2 > 245, "the child is masked with its parent");
+        let bottom = rgb(75, 99);
+        assert!(
+            bottom.1 > 245,
+            "the mask is transparent at the bottom: {bottom:?}"
+        );
+        let middle = rgb(75, 50);
+        assert!(
+            middle.1 > 100 && middle.1 < 160,
+            "half way down, half of the red shows: {middle:?}"
+        );
+        assert_eq!(rgb(120, 10), (255, 0, 0), "first mask layer");
+        assert_eq!(rgb(170, 10), (255, 255, 255), "outside both mask layers");
+        assert_eq!(rgb(205, 95), (255, 0, 0), "second mask layer");
+    }
+
+    #[test]
+    fn background_layers_each_take_their_own_size_position_and_repeat() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:60px;
+                    background:linear-gradient(rgb(255,0,0),rgb(255,0,0)) 0 0/20px 20px no-repeat,
+                               linear-gradient(rgb(0,0,255),rgb(0,0,255)) right top/10px 10px repeat-y,
+                               rgb(0,255,0)"></div>
+                <div style="position:absolute;left:0;top:70px;width:100px;height:40px;
+                    padding:10px;background-image:linear-gradient(rgb(255,0,0),rgb(255,0,0)),
+                                                  linear-gradient(rgb(0,0,255),rgb(0,0,255));
+                    background-clip:content-box,border-box;background-repeat:no-repeat"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (140.0, 140.0), None).expect("layers");
+        let rgb = |x, y| {
+            let p = pixmap.pixel(x, y).expect("pixel");
+            (p.red(), p.green(), p.blue())
+        };
+        assert_eq!(rgb(5, 5), (255, 0, 0), "top layer at 0 0, 20px");
+        assert_eq!(rgb(25, 5), (0, 255, 0), "top layer does not repeat");
+        assert_eq!(rgb(95, 5), (0, 0, 255), "second layer at the right edge");
+        assert_eq!(rgb(95, 55), (0, 0, 255), "second layer repeats down");
+        assert_eq!(
+            rgb(85, 30),
+            (0, 255, 0),
+            "second layer does not repeat across"
+        );
+        assert_eq!(
+            rgb(60, 100),
+            (255, 0, 0),
+            "first layer fills the content box"
+        );
+        assert_eq!(
+            rgb(3, 100),
+            (0, 0, 255),
+            "second layer fills the padding of the border box"
+        );
+    }
+
+    #[test]
+    fn positioned_boxes_paint_over_earlier_in_flow_text() {
+        // CSS 2.1 Appendix E: inline content (step 7) paints before
+        // positioned descendants with z-index auto or >= 0 (step 8).
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <p style="margin:0;font-size:40px;line-height:50px">MMMMMM</p>
+                <div style="position:absolute;left:0;top:0;width:80px;height:50px;
+                            background:rgb(0,0,255)"></div>
+                <div style="position:absolute;left:80px;top:0;width:80px;height:50px;
+                            z-index:1;background:rgb(0,255,0)"></div>
+                <div style="position:relative;top:-50px;margin-left:160px;width:80px;
+                            height:50px;background:rgb(255,0,0)"></div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (260.0, 120.0), None).expect("paint order");
+        for (x, expected, what) in [
+            (0, (0, 0, 255), "absolute z-index:auto"),
+            (80, (0, 255, 0), "absolute z-index:1"),
+            (160, (255, 0, 0), "relative z-index:auto"),
+        ] {
+            for dx in 0..80 {
+                for y in 0..50 {
+                    let p = pixmap.pixel(x + dx, y).expect("pixel");
+                    assert_eq!(
+                        (p.red(), p.green(), p.blue()),
+                        expected,
+                        "the {what} box must cover the paragraph's glyphs at {},{y}",
+                        x + dx
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn outset_box_shadow_stays_outside_transparent_and_opaque_border_boxes() {
         let tree = parse_html(
             r#"<html style="margin:0"><body style="margin:0;background:white">
@@ -13529,6 +16773,37 @@ mod tests {
     }
 
     #[test]
+    fn video_header_size_comes_from_a_prefix_request() {
+        // Cache-only (page) mode: the size needs only the header key, which
+        // the page transport fetches with a Range request; the whole video
+        // is never asked for when the prefix holds the moov.
+        let mut cache = RenderResourceCache::with_loader(|_: &str| None);
+        cache.set_sync_loading_enabled(false);
+        let url = "https://media.test/v.mp4";
+        assert_eq!(cache.video_header_dimensions(url), None);
+        let misses: Vec<String> = cache.take_sync_misses().into_iter().map(|m| m.0).collect();
+        let key = format!("{}{url}", crate::video_header::MEDIA_HEADER_PREFIX);
+        assert_eq!(misses, vec![key.clone()]);
+        let mp4_box = |kind: &[u8; 4], payload: &[u8]| {
+            let mut v = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+            v.extend_from_slice(kind);
+            v.extend_from_slice(payload);
+            v
+        };
+        let mut tkhd = vec![0u8; 76];
+        tkhd.extend_from_slice(&(320u32 << 16).to_be_bytes());
+        tkhd.extend_from_slice(&(176u32 << 16).to_be_bytes());
+        let mut file = mp4_box(b"ftyp", b"isom\0\0\0\0");
+        file.extend(mp4_box(
+            b"moov",
+            &mp4_box(b"trak", &mp4_box(b"tkhd", &tkhd)),
+        ));
+        cache.seed(key, file);
+        assert_eq!(cache.video_header_dimensions(url), Some((320.0, 176.0)));
+        assert!(cache.take_sync_misses().is_empty());
+    }
+
+    #[test]
     fn cache_only_mode_does_not_load_or_negative_cache_unknown_urls() {
         let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let observed = calls.clone();
@@ -13712,6 +16987,32 @@ mod tests {
                 assert_eq!((rect.width, rect.height), expected, "{display} {sizing}");
             }
         }
+    }
+
+    // Chrome (headless, unknown connection type): with an 800px viewport a
+    // loading=lazy image at y=3700 loads and one at y=3800 stays box-less
+    // until the viewport scrolls within 3000px of it.
+    #[test]
+    fn lazy_images_load_within_the_lazy_load_distance() {
+        let tree = parse_html(
+            r#"<body style="margin:0">
+            <img id=near loading=lazy src=https://assets.test/i.svg style="position:absolute;top:3700px">
+            <img id=far loading=LAZY src=https://assets.test/i.svg style="position:absolute;top:3800px">
+            <img id=eager src=https://assets.test/i.svg style="position:absolute;top:9000px">"#,
+        );
+        let id = |name: &str| tree.get_element_by_id(name).unwrap();
+        let mut resources = RenderResourceCache::with_loader(|_: &str| {
+            Some(br#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="30"/>"#.to_vec())
+        });
+        let prepared = prepare_dom(&tree, (800.0, 800.0), None, &mut resources).unwrap();
+        let width = |prepared: &PreparedRender, name: &str| prepared.layout.rects[&id(name)].width;
+        assert_eq!(width(&prepared, "near"), 40.0);
+        assert_eq!(width(&prepared, "far"), 0.0);
+        assert_eq!(width(&prepared, "eager"), 40.0);
+        assert!(!resources.note_viewport_bottom(800.0));
+        assert!(resources.note_viewport_bottom(900.0));
+        let prepared = prepare_dom(&tree, (800.0, 800.0), None, &mut resources).unwrap();
+        assert_eq!(width(&prepared, "far"), 40.0);
     }
 
     #[test]
@@ -15550,7 +18851,9 @@ mod tests {
             marker.green() > 220 && marker.red() < 40 && marker.blue() < 40,
             "a non-text box in the same clipped section must remain visible: {marker:?}"
         );
-        let svg_marker = scrolled.pixel(270, 50).expect("svg marker pixel");
+        // Probe the svg's right half: the LCD-filtered edge of the last
+        // glyph of "SECOND SHAPED LINE" reaches its left columns.
+        let svg_marker = scrolled.pixel(277, 50).expect("svg marker pixel");
         assert!(
             svg_marker.green() > 220 && svg_marker.blue() > 220 && svg_marker.red() < 40,
             "an inline svg in the same clipped section must remain visible: {svg_marker:?}"
@@ -19223,6 +22526,34 @@ mod tests {
     }
 
     #[test]
+    fn a_page_registers_more_than_sixteen_font_faces() {
+        // w3schools' css_font_google declares 16+ Google Fonts faces before
+        // its own button font; that face must still be registered.
+        let mut css = String::new();
+        for index in 0..20 {
+            css.push_str(&format!(
+                "@font-face {{ font-family: F{index}; src: url(f{index}.ttf) format(\"truetype\"); }}\n"
+            ));
+        }
+        css.push_str("@font-face { font-family: PS2P; src: url(ps2p.ttf) format(\"truetype\"); }");
+        let tree = parse_html(&format!(
+            "<html><head><style>{css}</style></head><body></body></html>"
+        ));
+        let mut resources =
+            RenderResourceCache::with_loader(|_url: &str| Some(SERIF_FONT_BYTES.to_vec()));
+        let fonts = collect_web_fonts(
+            &tree,
+            Some("https://example.test/page.html"),
+            &mut resources,
+            &[],
+        );
+        assert_eq!(fonts.len(), 21);
+        assert!(fonts
+            .iter()
+            .any(|font| font.family.as_deref() == Some("PS2P")));
+    }
+
+    #[test]
     fn font_face_uses_the_last_duplicate_src_descriptor() {
         let css = r#"@font-face {
             font-family: FontAwesome;
@@ -19271,7 +22602,7 @@ mod tests {
                 .lock()
                 .expect("font loads")
                 .push(url.to_string());
-            (url == "https://example.test/fonts/fixture.ttf").then(|| SERIF_FONT_BYTES.to_vec())
+            (url == "https://example.test/fonts/fixture.ttf").then(|| FONT_BYTES.to_vec())
         });
         let prepared = prepare_dom_with_dynamic_fonts(
             &tree,
@@ -20945,5 +24276,529 @@ mod tests {
         assert_eq!(at_end.layout.styles[&overlay].visibility_hidden, Some(true));
         assert!(at_end.layout.styles[&overlay].effectively_invisible);
         assert!(!at_end.has_active_css_animations());
+    }
+}
+
+/// Test helper: the ink bounding box (x0, y0, x1, y1) of dark pixels of
+/// `pixel(x, y) -> red` inside the rect.
+#[cfg(test)]
+fn ink_box(
+    pixel: impl Fn(u32, u32) -> u8,
+    rect: (u32, u32, u32, u32),
+) -> Option<(u32, u32, u32, u32)> {
+    let mut out: Option<(u32, u32, u32, u32)> = None;
+    for y in rect.1..rect.3 {
+        for x in rect.0..rect.2 {
+            if pixel(x, y) < 128 {
+                out = Some(match out {
+                    None => (x, y, x, y),
+                    Some((a, b, c, d)) => (a.min(x), b.min(y), c.max(x), d.max(y)),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Test helper: the dark row runs (start, end) of a column strip.
+#[cfg(test)]
+fn ink_rows(pixel: impl Fn(u32, u32) -> u8, x0: u32, x1: u32, y0: u32, y1: u32) -> Vec<(u32, u32)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for y in y0..y1 {
+        let ink = (x0..x1).any(|x| pixel(x, y) < 128);
+        match (ink, start) {
+            (true, None) => start = Some(y),
+            (false, Some(s)) => {
+                runs.push((s, y - 1));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        runs.push((s, y1 - 1));
+    }
+    runs
+}
+
+#[cfg(all(test, feature = "scene"))]
+mod scene_text_tests {
+    use super::*;
+
+    /// 3D planes reach the scene as projective reference frames, and the
+    /// scene rasterizer projects them like the CPU paint.
+    #[test]
+    fn scene_frame_carries_projective_planes_the_rasterizer_projects() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;perspective:200px">
+                  <div style="width:100px;height:100px;background:rgb(255,0,0);transform:rotateY(45deg)"></div>
+                </div>
+                <div style="position:absolute;left:150px;top:0;width:100px;height:100px;perspective:300px">
+                  <div style="width:100px;height:100px;transform-style:preserve-3d">
+                    <div style="position:absolute;inset:0;background:rgb(255,0,0);transform:translateZ(40px)"></div>
+                    <div style="position:absolute;inset:0;background:rgb(0,0,255);transform:translateZ(-40px)"></div>
+                  </div>
+                </div>
+            </body></html>"#,
+        );
+        let viewport = (260.0, 120.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let projective = built
+            .frame
+            .spatial
+            .iter()
+            .filter(|node| {
+                matches!(
+                    node.kind,
+                    redrob_scene::SpatialKind::Reference {
+                        projective: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert!(
+            projective >= 3,
+            "one projective frame per plane, found {projective}"
+        );
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &redrob_scene_raster::ResourceStore::new(),
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let red_rows = |x: u32| {
+            (0..120u32)
+                .filter(|&y| {
+                    let [r, g, b, _] = image.pixel(x, y);
+                    r > 200 && g < 60 && b < 60
+                })
+                .count()
+        };
+        let (near, far) = (red_rows(22), red_rows(70));
+        assert!(
+            near > far + 6,
+            "perspective: near edge {near} rows, far edge {far}"
+        );
+        assert_eq!(&image.pixel(200, 50)[..3], &[255, 0, 0], "depth order");
+        // The window's raster and the CPU screenshot agree.
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let differing = (0..120u32)
+            .flat_map(|y| (0..260u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let a = image.pixel(x, y);
+                let b = cpu.pixel(x, y).unwrap();
+                [b.red(), b.green(), b.blue()]
+                    .iter()
+                    .zip(&a[..3])
+                    .any(|(p, q)| (*p as i32 - *q as i32).abs() > 24)
+            })
+            .count();
+        // Plane edges are resampled from layers of different resolution.
+        assert!(
+            differing < 700,
+            "scene raster and CPU paint differ on {differing} pixels"
+        );
+    }
+
+    /// backdrop-filter reaches the scene as a Backdrop item, and the scene
+    /// rasterizer filters what is scrolled under a fixed header live, as the
+    /// CPU paint does.
+    #[test]
+    fn scene_backdrop_filters_content_scrolled_under_a_fixed_header() {
+        let rows: String = (0..30)
+            .map(|i| {
+                format!(
+                    r#"<div style="height:20px;background:{}"></div>"#,
+                    if i % 2 == 0 {
+                        "rgb(200,0,0)"
+                    } else {
+                        "rgb(255,255,255)"
+                    }
+                )
+            })
+            .collect();
+        let tree = obscura_dom::parse_html(&format!(
+            r#"<html style="margin:0"><body style="margin:0">
+                <div style="position:fixed;top:0;left:0;width:100px;height:60px;border-radius:10px;
+                    backdrop-filter:blur(6px) grayscale(1);background:rgba(255,255,255,0.2)"></div>{rows}
+            </body></html>"#
+        ));
+        let viewport = (200.0, 100.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let backdrop = built.frame.items.iter().find_map(|d| match &d.item {
+            redrob_scene::Item::Backdrop { filters, radii, .. } => Some((filters.clone(), *radii)),
+            _ => None,
+        });
+        assert_eq!(
+            backdrop,
+            Some((
+                vec![
+                    redrob_scene::FilterOp::Blur(6.0),
+                    redrob_scene::FilterOp::Grayscale(1.0)
+                ],
+                [10.0; 4]
+            ))
+        );
+        let raster = |scroll_y: f32| {
+            let scroll: HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
+            redrob_scene_raster::rasterize(
+                &built.frame,
+                &redrob_scene_raster::ResourceStore::new(),
+                &scroll,
+                redrob_scene::Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: viewport.0,
+                    h: viewport.1,
+                },
+                1.0,
+            )
+        };
+        let image = raster(0.0);
+        // Inside: grey (grayscale), between the stripe colors (blur).
+        let [r, g, b, _] = image.pixel(50, 20);
+        assert!(r == g && g == b, "grayscale under the header: {r},{g},{b}");
+        assert!(r > 120 && r < 240, "blurred under the header: {r}");
+        // Beside the header the stripes stay sharp red; the rounded corner
+        // shows them unfiltered too.
+        assert_eq!(&image.pixel(150, 10)[..3], &[200, 0, 0]);
+        assert_eq!(&image.pixel(0, 0)[..3], &[200, 0, 0]);
+        // The window's raster and the CPU screenshot agree.
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let differing = (0..100u32)
+            .flat_map(|y| (0..200u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let a = image.pixel(x, y);
+                let b = cpu.pixel(x, y).unwrap();
+                [b.red(), b.green(), b.blue()]
+                    .iter()
+                    .zip(&a[..3])
+                    .any(|(p, q)| (*p as i32 - *q as i32).abs() > 12)
+            })
+            .count();
+        assert!(
+            differing < 60,
+            "scene raster and CPU paint differ on {differing} pixels"
+        );
+        // Scrolled by half a stripe, the header filters the new content.
+        let row = |img: &redrob_scene_raster::RgbaImage| -> Vec<u8> {
+            (0..60).map(|y| img.pixel(50, y)[0]).collect()
+        };
+        let scrolled = raster(10.0);
+        assert_ne!(
+            row(&scrolled),
+            row(&image),
+            "the backdrop follows the scroll"
+        );
+        assert_eq!(&scrolled.pixel(150, 12)[..3], &[255, 255, 255]);
+    }
+
+    /// Vertical text reaches the scene turned (a rotated reference frame)
+    /// and the scene rasterizer draws it where the CPU paint does.
+    #[test]
+    fn scene_vertical_text_matches_the_cpu_paint() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:20px sans-serif;background:#fff">
+              <div style="position:absolute;left:0;top:0;height:220px;writing-mode:vertical-rl">vertical-rl Text</div>
+              <div style="position:absolute;left:60px;top:0;height:220px;writing-mode:vertical-lr;width:60px">vertical-lr two lines here</div>
+              <div style="position:absolute;left:140px;top:0;height:220px;writing-mode:sideways-lr">sideways-lr</div>
+              <div style="position:absolute;left:200px;top:0;height:220px;writing-mode:vertical-rl;text-orientation:upright">UPRIGHT</div>
+              <div style="position:absolute;left:250px;top:0;height:220px;writing-mode:vertical-rl">x<span style="text-combine-upright:all">12</span>x</div>
+            </body></html>"#,
+        );
+        let viewport = (300.0, 240.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let turned = built.frame.spatial.iter().any(|node| {
+            matches!(
+                node.kind,
+                redrob_scene::SpatialKind::Reference { transform, .. }
+                    if transform[0].abs() < 1e-3 && transform[1].abs() > 0.99
+            )
+        });
+        assert!(turned, "a reference frame turned 90 degrees");
+        let mut store = redrob_scene_raster::ResourceStore::new();
+        for font in &built.fonts {
+            store.apply(redrob_scene::Resource::Font {
+                id: font.id,
+                data: font.data.bytes().to_vec(),
+                index: font.data.index(),
+            });
+        }
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &store,
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let scene_red = |x: u32, y: u32| image.pixel(x, y)[0];
+        let cpu_red = |x: u32, y: u32| cpu.pixel(x, y).map_or(255, |p| p.red());
+        for (name, rect) in [
+            ("vertical-rl", (0, 0, 50, 230)),
+            ("vertical-lr", (60, 0, 130, 230)),
+            ("sideways-lr", (140, 0, 190, 230)),
+            ("upright", (200, 0, 240, 230)),
+            ("combine", (250, 0, 290, 230)),
+        ] {
+            let a = ink_box(scene_red, rect).expect(name);
+            let b = ink_box(cpu_red, rect).expect(name);
+            let close = |p: u32, q: u32| p.abs_diff(q) <= 2;
+            assert!(
+                close(a.0, b.0) && close(a.1, b.1) && close(a.2, b.2) && close(a.3, b.3),
+                "{name}: scene {a:?} cpu {b:?}"
+            );
+            assert!(a.3 - a.1 > a.2 - a.0, "{name} runs down the page: {a:?}");
+        }
+    }
+
+    /// The scene rasterizer draws text with the CPU paint's LCD coverage
+    /// and gamma, and keeps grayscale text where Skia does (a layer).
+    #[test]
+    fn scene_text_is_lcd_like_the_cpu_paint() {
+        let tree = obscura_dom::parse_html(
+            r#"<html style="margin:0"><body style="margin:0;font:16px sans-serif;background:#fff">
+              <p style="position:absolute;left:3px;top:0;margin:0">Hello LCD text, 0123</p>
+              <p style="position:absolute;left:0;top:30px;margin:0;color:#c33;background:#eef">Colored on blue</p>
+              <p style="position:absolute;left:0;top:60px;margin:0;opacity:0.6">In an opacity layer</p>
+            </body></html>"#,
+        );
+        let viewport = (240.0, 90.0);
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, viewport, None, &mut resources).unwrap();
+        let built = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let mut store = redrob_scene_raster::ResourceStore::new();
+        for font in &built.fonts {
+            store.apply(redrob_scene::Resource::Font {
+                id: font.id,
+                data: font.data.bytes().to_vec(),
+                index: font.data.index(),
+            });
+        }
+        let image = redrob_scene_raster::rasterize(
+            &built.frame,
+            &store,
+            &HashMap::new(),
+            redrob_scene::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: viewport.0,
+                h: viewport.1,
+            },
+            1.0,
+        );
+        let cpu = paint_dom(&tree, viewport, None).unwrap();
+        let fringed = |y0: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (0..240u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let [r, _, b, _] = image.pixel(x, y);
+                    (r as i32 - b as i32).abs() > 60
+                })
+                .count()
+        };
+        assert!(fringed(0, 25) > 20, "LCD fringes on black text");
+        let differing = |y0: u32, y1: u32| {
+            (y0..y1)
+                .flat_map(|y| (0..240u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| {
+                    let a = image.pixel(x, y);
+                    let b = cpu.pixel(x, y).unwrap();
+                    [b.red(), b.green(), b.blue()]
+                        .iter()
+                        .zip(&a[..3])
+                        .any(|(p, q)| (*p as i32 - *q as i32).abs() > 8)
+                })
+                .count()
+        };
+        // Same masks, gamma and blend as the CPU paint: a few pixels where
+        // the backgrounds' edges round differently at most.
+        assert!(
+            differing(0, 55) < 12,
+            "LCD text differs on {} px",
+            differing(0, 55)
+        );
+        // Text in an opacity layer is grayscale: neutral gray antialiasing.
+        assert_eq!(fringed(60, 85), 0, "grayscale text in a layer");
+    }
+
+    /// The compositor scene (what redrob-shell draws) carries the IFC's text
+    /// as glyph runs with font resources.
+    #[test]
+    fn scene_frame_paints_ifc_text_as_glyph_runs() {
+        let tree = obscura_dom::parse_html(
+            "<!doctype html><body style='margin:8px;font:16px sans-serif'><p>Hello <b>scene</b> text</p></body>",
+        );
+        let mut resources = RenderResourceCache::default();
+        let mut prepared = prepare_dom(&tree, (400.0, 200.0), None, &mut resources).unwrap();
+        let frame = scene::build_scene_prepared(
+            &tree,
+            &mut prepared,
+            &mut resources,
+            (0.0, 0.0),
+            &HashMap::new(),
+            [255, 255, 255, 255],
+            &EMPTY_CANVAS_SURFACES,
+            1.0,
+        )
+        .unwrap();
+        let glyphs: usize = frame
+            .frame
+            .items
+            .iter()
+            .filter_map(|item| match &item.item {
+                redrob_scene::Item::Text { glyphs, .. } => Some(glyphs.len()),
+                _ => None,
+            })
+            .sum();
+        // "Hello scene text" without the spaces.
+        assert!(glyphs >= 14, "{glyphs} glyphs");
+        assert!(!frame.fonts.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod pseudo_style_tests {
+    use super::*;
+
+    // Values from Chrome's getComputedStyle(el, '::before' / '::after') on
+    // the same markup.
+    #[test]
+    fn pseudo_element_computed_style_matches_chrome() {
+        let tree = obscura_dom::parse_html(
+            r#"<!doctype html><style>body{margin:0;font:16px/20px Arial}
+            .cf::after{content:"";display:table;clear:both}
+            #ab{position:relative;width:200px;height:50px}
+            #ab::before{content:"x";position:absolute;top:5px;left:10px;width:30px;height:12px;padding:2px;background:red}
+            #fl::before{content:"icon";float:left;margin-right:4px;font-weight:700;color:rgb(10,20,30)}
+            #ib::after{content:"->";display:inline-block;width:20px;vertical-align:middle;opacity:0.5}
+            </style><div id=cf class=cf><span>a</span></div><div id=ab></div><div id=fl>text</div><div id=ib>text</div>"#,
+        );
+        let mut resources = RenderResourceCache::default();
+        let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut resources).unwrap();
+        let style = |id: &str, before: bool| {
+            prepared
+                .computed_pseudo_style(tree.get_element_by_id(id).unwrap(), before)
+                .unwrap()
+        };
+        let check = |id: &str, before: bool, expected: &[(&str, &str)]| {
+            let style = style(id, before);
+            for (name, value) in expected {
+                assert_eq!(
+                    style.get(name).map(String::as_str),
+                    Some(*value),
+                    "{id} {name}"
+                );
+            }
+        };
+        check(
+            "cf",
+            false,
+            &[
+                ("content", "\"\""),
+                ("display", "table"),
+                ("clear", "both"),
+                ("position", "static"),
+                ("width", "0px"),
+                ("height", "0px"),
+            ],
+        );
+        check(
+            "ab",
+            true,
+            &[
+                ("content", "\"x\""),
+                ("display", "block"),
+                ("position", "absolute"),
+                ("width", "30px"),
+                ("height", "12px"),
+                ("top", "5px"),
+                ("left", "10px"),
+                ("padding-top", "2px"),
+                ("background-color", "rgb(255, 0, 0)"),
+            ],
+        );
+        check(
+            "fl",
+            true,
+            &[
+                ("display", "block"),
+                ("float", "left"),
+                ("margin-right", "4px"),
+                ("font-weight", "700"),
+                ("color", "rgb(10, 20, 30)"),
+                ("height", "20px"),
+            ],
+        );
+        check(
+            "ib",
+            false,
+            &[
+                ("display", "inline-block"),
+                ("width", "20px"),
+                ("opacity", "0.5"),
+                ("vertical-align", "middle"),
+            ],
+        );
     }
 }

@@ -106,6 +106,11 @@ impl InvalidationReaches {
     /// The selector needs a correctness-first fallback which phase 2 must not
     /// narrow to a local traversal.
     pub const CONSERVATIVE: Self = Self(1 << 3);
+    /// The key appears inside a `:has()` argument. A change can alter which
+    /// `:has()` anchors match; those anchors are ancestors of the changed
+    /// element or earlier siblings of it or of an ancestor, and the planner
+    /// restyles them through the rule's `RelationalInvalidation`.
+    pub const RELATIONAL: Self = Self(1 << 4);
 
     pub fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -155,6 +160,126 @@ pub(crate) struct RelationalInvalidation {
     pub structural_side_effect: bool,
     pub text_side_effect: bool,
     pub unrepresentable_outer_path: bool,
+    /// Every alternative is a chain of child combinators (`:has(> a > b)`):
+    /// an element of the chain is at most this many levels below the anchor,
+    /// so only that many ancestors of a changed element can be anchors.
+    /// `None` when any alternative uses a descendant or sibling combinator.
+    pub child_chain_depth: Option<usize>,
+    /// Keys of the subject compound of every alternative, when each
+    /// alternative relates its compounds only through child and descendant
+    /// combinators and its subject is a plain compound. Every element of such
+    /// a chain is an ancestor-or-self of the subject, so a change to a subtree
+    /// that holds no possible subject cannot change the match. `None` when
+    /// that does not hold; callers then use `relative_keys`.
+    subject_keys: Option<Vec<RelationalSelectorKey>>,
+}
+
+/// Subject keys of a `:has()` argument for `RelationalInvalidation::subject_keys`.
+fn descendant_chain_subject_keys(selector: &str) -> Option<Vec<RelationalSelectorKey>> {
+    let selector = selector.trim();
+    let mut quote: Option<char> = None;
+    let mut bracket = 0usize;
+    let mut escaped = false;
+    for ch in selector.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            // Sibling combinators anywhere (also inside :is()) relate elements
+            // that need not be ancestors of the subject.
+            '+' | '~' if bracket == 0 => return None,
+            _ => {}
+        }
+    }
+    let selector = selector.strip_prefix('>').unwrap_or(selector).trim_start();
+    let (compounds, malformed) = invalidation_compounds(selector);
+    if malformed {
+        return None;
+    }
+    let (subject, _) = compounds.last()?;
+    if subject.contains('(') {
+        return None;
+    }
+    let mut keys = Vec::new();
+    collect_relational_compound_keys(subject, &mut keys);
+    (!keys.is_empty()).then_some(keys)
+}
+
+/// Number of compounds when `selector` (a `:has()` argument) is a pure chain
+/// of child combinators starting with `>`; `None` for any other combinator.
+fn child_combinator_chain_depth(selector: &str) -> Option<usize> {
+    let selector = selector.trim();
+    let rest = selector.strip_prefix('>')?;
+    let mut depth = 1usize;
+    let mut paren = 0usize;
+    let mut bracket = 0usize;
+    let mut quote: Option<char> = None;
+    let mut pending_space = false;
+    let mut after_combinator = true;
+    let mut chars = rest.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if let Some(q) = quote {
+            if ch == '\\' {
+                chars.next();
+            } else if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            '\\' => {
+                chars.next();
+            }
+            '(' => paren += 1,
+            ')' => paren = paren.saturating_sub(1),
+            '[' => bracket += 1,
+            ']' => bracket = bracket.saturating_sub(1),
+            _ => {}
+        }
+        if paren > 0 || bracket > 0 || matches!(ch, '(' | ')' | '[' | ']' | '"' | '\'') {
+            if !ch.is_whitespace() {
+                if pending_space && !after_combinator {
+                    return None;
+                }
+                pending_space = false;
+                after_combinator = false;
+            }
+            continue;
+        }
+        match ch {
+            '>' => {
+                depth += 1;
+                pending_space = false;
+                after_combinator = true;
+            }
+            '+' | '~' | ',' => return None,
+            c if c.is_whitespace() => pending_space = true,
+            _ => {
+                if pending_space && !after_combinator {
+                    // Whitespace between two compounds is a descendant combinator.
+                    return None;
+                }
+                pending_space = false;
+                after_combinator = false;
+            }
+        }
+    }
+    Some(depth)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -210,6 +335,46 @@ fn relational_key_may_match(
 impl RelationalInvalidation {
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
+    }
+
+    /// Whether `node` may be the subject of this `:has()` argument. Falls back
+    /// to `relative_path_may_match` when the argument has no subject keys.
+    pub(crate) fn subject_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
+        match &self.subject_keys {
+            Some(keys) => keys
+                .iter()
+                .any(|key| relational_key_may_match(Some(key), tree, node)),
+            None => self.relative_path_may_match(tree, node),
+        }
+    }
+
+    /// Whether an attribute change (`name` from `old` to `new`) adds or removes
+    /// a key this invalidation filters candidate elements by, so the changed
+    /// element's own match against the argument may have flipped.
+    pub(crate) fn key_touched_by_attribute(
+        &self,
+        name: &str,
+        old: Option<&str>,
+        new: Option<&str>,
+    ) -> bool {
+        let keys = self.subject_keys.as_ref().unwrap_or(&self.relative_keys);
+        let values = || old.into_iter().chain(new);
+        keys.iter().any(|key| match key {
+            RelationalSelectorKey::Class(class) => {
+                name.eq_ignore_ascii_case("class")
+                    && values().any(|value| {
+                        value
+                            .split_ascii_whitespace()
+                            .any(|candidate| candidate.eq_ignore_ascii_case(class))
+                    })
+            }
+            RelationalSelectorKey::Id(id) => {
+                name.eq_ignore_ascii_case("id")
+                    && values().any(|value| value.eq_ignore_ascii_case(id))
+            }
+            RelationalSelectorKey::Attribute(attribute) => attribute.eq_ignore_ascii_case(name),
+            RelationalSelectorKey::LocalName(_) => false,
+        })
     }
 
     pub(crate) fn relative_path_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
@@ -481,6 +646,13 @@ fn compose_invalidation_reach(
     if outer == InvalidationReaches::SELF {
         inner
     } else if inner == InvalidationReaches::SELF || inner == outer {
+        outer
+    } else if outer == InvalidationReaches::RELATIONAL
+        && !inner.contains(InvalidationReaches::CONSERVATIVE)
+    {
+        // Inside a `:has()` argument the traversal between the changed key and
+        // the argument's subject stays below or after the anchor; the anchor
+        // search from the changed element covers every such path.
         outer
     } else {
         // A sibling traversal nested under an ancestor traversal (or vice
@@ -1254,6 +1426,18 @@ fn note_compound_dependencies(
                     "has" => {
                         // Relative selectors invalidate anchors upwards, which
                         // Self/Descendants/Siblings cannot express soundly.
+                        // Keys inside the argument are RELATIONAL: an attribute
+                        // change is answered by restyling matching anchors. A
+                        // `:has()` nested in another `:has()` argument styles an
+                        // outer anchor the inner search cannot find, so it
+                        // stays CONSERVATIVE.
+                        let nested = reaches.contains(InvalidationReaches::RELATIONAL)
+                            || reaches.contains(InvalidationReaches::CONSERVATIVE);
+                        let argument_reaches = if nested {
+                            InvalidationReaches::CONSERVATIVE
+                        } else {
+                            InvalidationReaches::RELATIONAL
+                        };
                         map.push_state(name.clone(), rule_order, InvalidationReaches::CONSERVATIVE);
                         map.mark_conservative(rule_order);
                         let alternatives = split_selector_list(&arguments);
@@ -1301,14 +1485,26 @@ fn note_compound_dependencies(
                             sibling_side_effect,
                             structural_side_effect,
                             text_side_effect,
-                            unrepresentable_outer_path: reaches
-                                .contains(InvalidationReaches::CONSERVATIVE),
+                            unrepresentable_outer_path: nested,
+                            child_chain_depth: alternatives
+                                .iter()
+                                .map(|alternative| child_combinator_chain_depth(alternative))
+                                .try_fold(0usize, |deepest, depth| Some(deepest.max(depth?))),
+                            subject_keys: alternatives.iter().try_fold(
+                                Vec::new(),
+                                |mut keys, alternative| {
+                                    for key in descendant_chain_subject_keys(alternative)? {
+                                        push_relational_selector_key(&mut keys, key);
+                                    }
+                                    Some(keys)
+                                },
+                            ),
                         });
                         for alternative in alternatives {
                             note_selector_dependencies(
                                 map,
                                 alternative.trim(),
-                                InvalidationReaches::CONSERVATIVE,
+                                argument_reaches,
                                 rule_order,
                                 false,
                             );
@@ -2484,6 +2680,14 @@ impl StylesheetCache {
 }
 
 impl Stylesheet {
+    /// Selector text of the rule with source order `order`, for diagnostics.
+    pub(crate) fn rule_selector_text(&self, order: usize) -> Option<String> {
+        self.rules
+            .iter()
+            .find(|rule| rule.order == order)
+            .map(|rule| rule.sel.to_css_text())
+    }
+
     /// Dependency metadata for conservative incremental-style invalidation.
     /// Building this map does not itself enable incremental cascade skipping.
     pub fn invalidation_map(&self) -> &InvalidationMap {
@@ -4950,6 +5154,7 @@ fn set_size_animation_value(
 }
 
 fn set_inset_animation_value(style: &mut LayoutStyle, index: usize, value: AnimatedLength) {
+    style.inset_calc[index] = None;
     match value {
         AnimatedLength::Auto => {
             style.inset[index] = None;
@@ -5037,6 +5242,7 @@ fn dimension_to_css(value: crate::Dimension) -> String {
         crate::Dimension::Percent(value) => format!("{}%", value * 100.0),
         crate::Dimension::Em(value) => format!("{value}em"),
         crate::Dimension::Ex(value) => format!("{value}ex"),
+        crate::Dimension::Ch(value) => format!("{value}ch"),
         crate::Dimension::Rem(value) => format!("{value}rem"),
         crate::Dimension::Vw(value) => format!("{value}vw"),
         crate::Dimension::Vh(value) => format!("{value}vh"),
@@ -5164,6 +5370,28 @@ fn identity_transform_operation(operation: &crate::TransformOp) -> crate::Transf
         crate::TransformOp::Rotate(_) => crate::TransformOp::Rotate(0.0),
         crate::TransformOp::Skew(_, _) => crate::TransformOp::Skew(0.0, 0.0),
         crate::TransformOp::Matrix(_) => crate::TransformOp::Matrix(crate::Affine2::IDENTITY),
+        crate::TransformOp::Translate3d(x, y, z) => crate::TransformOp::Translate3d(
+            zero_transform_length(x),
+            zero_transform_length(y),
+            zero_transform_length(z),
+        ),
+        crate::TransformOp::Scale3d(..) => crate::TransformOp::Scale3d(1.0, 1.0, 1.0),
+        crate::TransformOp::Rotate3d(x, y, z, _) => crate::TransformOp::Rotate3d(*x, *y, *z, 0.0),
+        crate::TransformOp::Perspective(_) => crate::TransformOp::Perspective(None),
+        crate::TransformOp::Matrix3d(_) => crate::TransformOp::Matrix3d(crate::Mat4::IDENTITY),
+    }
+}
+
+fn same_axis(a: (f32, f32, f32), b: (f32, f32, f32)) -> bool {
+    let norm = |(x, y, z): (f32, f32, f32)| {
+        let length = (x * x + y * y + z * z).sqrt();
+        (length > 0.0).then(|| (x / length, y / length, z / length))
+    };
+    match (norm(a), norm(b)) {
+        (Some(a), Some(b)) => {
+            (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-5 && (a.2 - b.2).abs() < 1e-5
+        }
+        _ => false,
     }
 }
 
@@ -5206,6 +5434,44 @@ fn interpolate_transform_operation(
         }
         (crate::TransformOp::Skew(from_x, from_y), crate::TransformOp::Skew(to_x, to_y)) => {
             crate::TransformOp::Skew(lerp(*from_x, *to_x), lerp(*from_y, *to_y))
+        }
+        (
+            crate::TransformOp::Translate3d(from_x, from_y, from_z),
+            crate::TransformOp::Translate3d(to_x, to_y, to_z),
+        ) => crate::TransformOp::Translate3d(
+            interpolate_transform_length(from_x, to_x, position)?,
+            interpolate_transform_length(from_y, to_y, position)?,
+            interpolate_transform_length(from_z, to_z, position)?,
+        ),
+        (
+            crate::TransformOp::Scale3d(from_x, from_y, from_z),
+            crate::TransformOp::Scale3d(to_x, to_y, to_z),
+        ) => crate::TransformOp::Scale3d(
+            lerp(*from_x, *to_x),
+            lerp(*from_y, *to_y),
+            lerp(*from_z, *to_z),
+        ),
+        // Same axis (CSS Transforms 2: rotate3d with equal normalized axes
+        // interpolates the angle; rotateX/Y/Z primitives share an axis).
+        (
+            crate::TransformOp::Rotate3d(x, y, z, from),
+            crate::TransformOp::Rotate3d(to_x, to_y, to_z, to),
+        ) if same_axis((*x, *y, *z), (*to_x, *to_y, *to_z)) => {
+            crate::TransformOp::Rotate3d(*x, *y, *z, lerp(*from, *to))
+        }
+        (crate::TransformOp::Perspective(from), crate::TransformOp::Perspective(to)) => {
+            // `none` interpolates as infinity: through 1/d.
+            let inverse = |d: &Option<f32>| d.map_or(0.0, |d| 1.0 / d.max(1.0));
+            let value = lerp(inverse(from), inverse(to));
+            crate::TransformOp::Perspective((value > 0.0).then(|| 1.0 / value))
+        }
+        (crate::TransformOp::Matrix3d(from), crate::TransformOp::Matrix3d(to)) => {
+            let (from, to) = (from.to_css(), to.to_css());
+            let mut values = [0.0f32; 16];
+            for index in 0..16 {
+                values[index] = lerp(from[index], to[index]);
+            }
+            crate::TransformOp::Matrix3d(crate::Mat4::from_css(&values))
         }
         (crate::TransformOp::Matrix(from), crate::TransformOp::Matrix(to)) => {
             crate::TransformOp::Matrix(crate::Affine2 {
@@ -6955,6 +7221,70 @@ fn single_media_query_applies_for_viewport(
     if compact.contains("orientation:landscape") && viewport_h > viewport_w {
         return false;
     }
+    // The screen is the viewport here (headless, no window chrome), at one
+    // device pixel per CSS pixel, with a fine hover-capable pointer.
+    for (prop, size, max) in [
+        ("max-device-width:", viewport_w, true),
+        ("min-device-width:", viewport_w, false),
+        ("max-device-height:", viewport_h, true),
+        ("min-device-height:", viewport_h, false),
+    ] {
+        let axis = if prop.contains("width") {
+            LengthAxis::Width
+        } else {
+            LengthAxis::Height
+        };
+        if let Some(px) = extract_length(compact, prop, viewport, axis) {
+            if (max && size > px) || (!max && size < px) {
+                return false;
+            }
+        }
+    }
+    for (prop, max) in [
+        ("-webkit-min-device-pixel-ratio:", false),
+        ("min-device-pixel-ratio:", false),
+        ("-webkit-max-device-pixel-ratio:", true),
+        ("max-device-pixel-ratio:", true),
+    ] {
+        if let Some(ratio) = compact.find(prop).and_then(|start| {
+            let rest = &compact[start + prop.len()..];
+            rest[..rest.find(')').unwrap_or(rest.len())]
+                .parse::<f32>()
+                .ok()
+        }) {
+            if (max && 1.0 > ratio) || (!max && 1.0 < ratio) {
+                return false;
+            }
+        }
+    }
+    for (prop, max) in [("min-resolution:", false), ("max-resolution:", true)] {
+        if let Some(dppx) = compact.find(prop).and_then(|start| {
+            let rest = &compact[start + prop.len()..];
+            let value = &rest[..rest.find(')').unwrap_or(rest.len())];
+            if let Some(v) = value
+                .strip_suffix("dppx")
+                .or_else(|| value.strip_suffix('x'))
+            {
+                v.parse::<f32>().ok()
+            } else if let Some(v) = value.strip_suffix("dpi") {
+                v.parse::<f32>().ok().map(|v| v / 96.0)
+            } else if let Some(v) = value.strip_suffix("dpcm") {
+                v.parse::<f32>().ok().map(|v| v * 2.54 / 96.0)
+            } else {
+                None
+            }
+        }) {
+            if (max && 1.0 > dppx) || (!max && 1.0 < dppx) {
+                return false;
+            }
+        }
+    }
+    if compact.contains("hover:none")
+        || compact.contains("pointer:coarse")
+        || compact.contains("pointer:none")
+    {
+        return false;
+    }
     true
 }
 
@@ -7581,13 +7911,15 @@ mod tests {
         assert!(map.requires_conservative_invalidation());
         assert!(map.conservative_rule_orders().len() >= 3);
         assert!(!map.has_unkeyed_relational_rules());
+        // Keys inside a :has() argument are handled relationally, not by a
+        // whole-document fallback.
         assert!(dependencies_reach(
             map.class_dependencies("badge"),
-            InvalidationReaches::CONSERVATIVE,
+            InvalidationReaches::RELATIONAL,
         ));
         assert!(dependencies_reach(
             map.class_dependencies("notice"),
-            InvalidationReaches::CONSERVATIVE,
+            InvalidationReaches::RELATIONAL,
         ));
         assert!(dependencies_reach(
             map.class_dependencies("eligible"),

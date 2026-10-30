@@ -28,6 +28,10 @@ pub use traits::LayoutBlockContainer;
 mod taffy_tree;
 #[cfg(feature = "taffy_tree")]
 pub use taffy_tree::{TaffyError, TaffyResult, TaffyTree};
+#[cfg(all(feature = "taffy_tree", feature = "block_layout"))]
+pub use taffy_tree::{InlineLayoutFn, InlineLayoutHost};
+#[cfg(all(feature = "taffy_tree", feature = "block_layout", feature = "float_layout", feature = "std"))]
+pub use taffy_tree::current_leaf_float_bands;
 
 #[cfg(feature = "detailed_layout_info")]
 pub use layout::DetailedLayoutInfo;

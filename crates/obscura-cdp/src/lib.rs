@@ -4,6 +4,8 @@
 pub mod cookie_params;
 pub mod dispatch;
 pub mod domains;
+#[cfg(feature = "render")]
+pub(crate) mod scene_channel;
 pub mod server;
 pub mod types;
 pub(crate) mod util;

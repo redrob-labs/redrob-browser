@@ -3,8 +3,9 @@
 ## One door: the window's CDP relay
 
 The engine gives every CDP connection its own pages, cookies' working copy and V8 isolates. A
-second connection would see none of the person's tabs. So the window is the only engine client,
-and it opens a relay on a loopback port (`crates/redrob-shell/src/relay.rs`):
+second connection would see none of the person's tabs. So the browser process is the only engine
+client, one process and one engine per profile for all its windows, and it opens a relay on a
+loopback port (`crates/redrob-shell/src/relay.rs`):
 
 - Each relay client's requests go over the window's own engine connection. Request ids are
   renumbered and the reply is sent back under the client's id.
@@ -15,7 +16,18 @@ and it opens a relay on a loopback port (`crates/redrob-shell/src/relay.rs`):
   the window closes. Anyone who can read that file can drive every tab, which is why it is
   private to the user.
 
-Playwright, Puppeteer and Redrob Code connect to that address like any CDP endpoint.
+Playwright, Puppeteer and Redrob Code connect to that address like any CDP endpoint. Tabs of every
+window are on it. `Target.getTargets` replies add `redrobWindow` (1 is the first window) and
+`redrobAgent` to each tab the window shows.
+
+## Windows
+
+The first launch takes `<data>/redrob-browser/Default/instance.lock` (an OS file lock, freed when
+the process ends) and starts the engine. A later launch finds the lock held, reads `ws-endpoint`
+and sends `Redrob.openWindow { url }` over the relay, which the browser answers by opening a
+window, then exits. Moving a tab to another window hands over the same target, so its history,
+scroll position and form state stay. Incognito windows share their own process and a
+memory-only engine (`incognito.lock`, `incognito-endpoint`).
 
 ## Agent tabs
 
@@ -28,7 +40,7 @@ and never offers to save a password typed in it.
 ```bash
 redrob-browser                      # open the window
 redrob-browser open https://example.com
-redrob-browser tab list             # id, URL, title
+redrob-browser tab list             # id, URL, title, window, agent
 redrob-browser tab open https://example.com
 redrob-browser tab read <id>        # outline with [ref=N] handles
 redrob-browser tab click <id> <ref>
