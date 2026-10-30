@@ -2572,6 +2572,9 @@ struct AnimationInstance {
     start_ms: f32,
     hold_time_ms: Option<f32>,
     was_paused: bool,
+    /// Paused by script (CSSAnimation.pause() / currentTime): the hold time
+    /// wins over animation-play-state until script plays it again.
+    script_paused: bool,
 }
 
 /// A normalized property keyframe supplied through the Web Animations API.
@@ -2691,6 +2694,69 @@ impl AnimationTimelineState {
     /// their existing instances.
     pub fn has_pending_start_candidates(&self) -> bool {
         !self.start_candidates.is_empty() || !self.subtree_start_candidates.is_empty()
+    }
+
+    /// The running CSS animation instances: (element, animation-name,
+    /// paused, current time in ms) at `document_time_ms`.
+    pub fn css_animations(
+        &self,
+        document_time_ms: f32,
+    ) -> Vec<(obscura_dom::tree::NodeId, String, bool, f32)> {
+        let mut out: Vec<_> = self
+            .instances
+            .iter()
+            .map(|(node, instance)| {
+                let current = instance
+                    .hold_time_ms
+                    .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+                (
+                    *node,
+                    instance.key.name.clone(),
+                    instance.script_paused || instance.was_paused,
+                    current,
+                )
+            })
+            .collect();
+        out.sort_by_key(|(node, ..)| node.index());
+        out
+    }
+
+    /// Script control of one CSS animation instance (CSSAnimation): pause,
+    /// play, or seek to `local_ms`. Returns whether the instance exists.
+    pub fn control_css_animation(
+        &mut self,
+        node: obscura_dom::tree::NodeId,
+        action: &str,
+        local_ms: f32,
+        document_time_ms: f32,
+    ) -> bool {
+        let Some(instance) = self.instances.get_mut(&node) else {
+            return false;
+        };
+        let current = instance
+            .hold_time_ms
+            .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+        match action {
+            "pause" => {
+                instance.hold_time_ms = Some(current);
+                instance.script_paused = true;
+            }
+            "play" => {
+                instance.start_ms = document_time_ms - current;
+                instance.hold_time_ms = None;
+                instance.script_paused = false;
+                instance.was_paused = false;
+            }
+            "currentTime" if local_ms.is_finite() => {
+                let local = local_ms.max(0.0);
+                instance.start_ms = document_time_ms - local;
+                if instance.script_paused || instance.was_paused {
+                    instance.hold_time_ms = Some(local);
+                }
+            }
+            _ => return false,
+        }
+        true
     }
 
     pub fn cancel_waapi(&mut self, id: u64) -> bool {
@@ -2838,6 +2904,7 @@ impl AnimationTimelineState {
                         start_ms: if paused { document_time_ms } else { candidate },
                         hold_time_ms: paused.then_some(0.0),
                         was_paused: paused,
+                        script_paused: false,
                     },
                 );
                 self.instances
@@ -2846,6 +2913,11 @@ impl AnimationTimelineState {
             }
         };
 
+        if instance.script_paused {
+            return AnimationSampleTime {
+                milliseconds: instance.hold_time_ms.unwrap_or(0.0),
+            };
+        }
         let paused = play_state == AnimationPlayState::Paused;
         if paused && !instance.was_paused {
             let paused_at = transition_time_ms.unwrap_or(document_time_ms);
