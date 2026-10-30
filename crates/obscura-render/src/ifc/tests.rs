@@ -1274,3 +1274,26 @@ fn min_height_that_grows_a_box_keeps_the_last_margin_inside() {
     );
     assert_eq!(laid.rects[&element(&tree, "b")].y, 116.0);
 }
+
+#[test]
+fn preserved_spaces_hanging_at_a_line_end_stay_in_the_inline_box() {
+    // Chrome: a pre-wrap span wrapping in a 100px box keeps the hanging
+    // space of its lines (84.03 = 10 monospace advances); with normal
+    // white-space it is removed (75.6 = 9).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:14px monospace'>\
+         <div style='width:100px;white-space:pre-wrap'><span id=a>aaaa bbbb cccc dddd</span></div>\
+         <div style='width:100px'><span id=b>aaaa bbbb cccc dddd</span></div>",
+        &[],
+    );
+    let w = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .width
+    };
+    assert!((w("a") - 84.03).abs() < 0.1, "{}", w("a"));
+    assert!((w("b") - 75.61).abs() < 0.1, "{}", w("b"));
+}

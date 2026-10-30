@@ -75,6 +75,13 @@ pub struct Style<B: Brush> {
     pub locale: Option<fontique::Language>,
 }
 
+impl<B: Brush> Style<B> {
+    /// The run's white-space collapsing.
+    pub fn white_space_collapse(&self) -> WhiteSpaceCollapse {
+        self.white_space_collapse
+    }
+}
+
 /// Underline or strikethrough decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Decoration<B: Brush> {

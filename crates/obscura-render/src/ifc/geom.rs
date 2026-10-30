@@ -33,6 +33,9 @@ struct Piece {
     baseline: f32,
     /// Text of a glyph run: (text node, byte range, ascent, descent).
     text: Option<(NodeId, std::ops::Range<usize>, f32, f32)>,
+    /// The run preserves white space (pre-wrap, break-spaces): spaces that
+    /// hang at a line end still belong to its inline box, as in Chrome.
+    preserves: bool,
 }
 
 impl Ifc {
@@ -230,6 +233,11 @@ impl Ifc {
                         };
                         let font = run.run().font_metrics();
                         pieces.push(Piece {
+                            preserves: matches!(
+                                run.style().white_space_collapse(),
+                                parley::WhiteSpaceCollapse::Preserve
+                                    | parley::WhiteSpaceCollapse::BreakSpaces
+                            ),
                             span: paint.span,
                             edge: None,
                             x0: run.offset(),
@@ -263,6 +271,7 @@ impl Ifc {
                                     (ibox.x, ibox.x + ibox.width - margin)
                                 };
                                 pieces.push(Piece {
+                                    preserves: false,
                                     span: Some(span),
                                     edge: Some(start),
                                     x0,
@@ -272,6 +281,7 @@ impl Ifc {
                                 });
                             }
                             BoxKind::Atomic { .. } => pieces.push(Piece {
+                                preserves: false,
                                 span: info.parent_span,
                                 edge: None,
                                 x0: ibox.x,
@@ -316,7 +326,7 @@ impl Ifc {
                 if piece.edge.is_some() {
                     continue;
                 }
-                if piece.text.is_none() {
+                if piece.text.is_none() || piece.preserves {
                     break;
                 }
                 let trim = hanging.min(piece.x1 - piece.x0);
