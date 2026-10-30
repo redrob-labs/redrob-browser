@@ -2550,12 +2550,6 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         }
         "transform-origin" => style.transform_origin = parse_transform_origin(value),
         "perspective-origin" => style.perspective_origin = parse_transform_origin(value),
-        "transform-style" => {
-            style.preserve_3d = value.trim().eq_ignore_ascii_case("preserve-3d");
-        }
-        "backface-visibility" => {
-            style.backface_hidden = value.trim().eq_ignore_ascii_case("hidden");
-        }
         "translate" => parse_individual_translate(style, value),
         "rotate" => parse_individual_rotate(style, value),
         "scale" => parse_individual_scale(style, value),
