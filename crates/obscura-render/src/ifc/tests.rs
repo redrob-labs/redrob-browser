@@ -1311,3 +1311,16 @@ fn negative_collapsed_first_child_margin_can_rise_above_the_content_edge() {
     );
     assert_eq!(laid.rects[&element(&tree, "h")].y, 60.0);
 }
+
+#[test]
+fn atomic_with_negative_margin_box_keeps_the_line_and_sits_on_the_baseline() {
+    // Chrome: a 5px image with margin-top:-20px still makes a 24px line
+    // (16px/24px Arial) and its bottom edge stays on the baseline (y 12).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+         <div id=d><img id=s style='width:10px;height:5px;margin-top:-20px'></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "d"), 24.0);
+    assert_eq!(laid.rects[&element(&tree, "s")].y, 12.0);
+}
