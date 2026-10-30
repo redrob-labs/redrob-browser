@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use redrob_scene::lcd::{blend_lcd, gray_preblend, lcd_preblend, LcdGlyph};
+use redrob_scene::lcd::{gray_preblend, lcd_preblend, LcdGlyph};
 use redrob_scene::{DisplayItem, FontId, Item, Verb};
 use swash::scale::{Render, ScaleContext, Source};
 use swash::zeno::{Angle, Format, Transform, Vector};
@@ -493,6 +493,86 @@ fn is_axis_aligned(a: &Affine) -> bool {
     (c[1].abs() < 1e-6 && c[2].abs() < 1e-6) || (c[0].abs() < 1e-6 && c[3].abs() < 1e-6)
 }
 
+/// One run's coverage, ready to blend: per pixel the LCD channel weights
+/// in 1/32 (Skia's LCD16 blend scale, the text alpha applied) and the
+/// grayscale coverage (0..=255, alpha applied). Overlapping glyph masks of
+/// the run combine as `1 - (1 - a)(1 - b)`, which is what blending them one
+/// after the other in the same color does.
+pub struct RunMask {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    /// [r, g, b] in 0..=32, gray in 0..=255.
+    pub data: Vec<[u8; 4]>,
+}
+
+/// The coverage of `run`, clipped to its clip and to `width` x `height`.
+pub fn run_mask(run: &LcdRun, width: i32, height: i32) -> Option<RunMask> {
+    let [cx0, cy0, cx1, cy1] = run.clip.unwrap_or([0, 0, width, height]);
+    let (cx0, cy0, cx1, cy1) = (cx0.max(0), cy0.max(0), cx1.min(width), cy1.min(height));
+    let mut x0 = i32::MAX;
+    let mut y0 = i32::MAX;
+    let mut x1 = i32::MIN;
+    let mut y1 = i32::MIN;
+    for g in &run.glyphs {
+        x0 = x0.min(g.x);
+        y0 = y0.min(g.y);
+        x1 = x1.max(g.x + g.mask.width);
+        y1 = y1.max(g.y + g.mask.height);
+    }
+    let (x0, y0, x1, y1) = (x0.max(cx0), y0.max(cy0), x1.min(cx1), y1.min(cy1));
+    if x1 <= x0 || y1 <= y0 {
+        return None;
+    }
+    let (w, h) = (x1 - x0, y1 - y0);
+    let mut data = vec![[0u8; 4]; (w * h) as usize];
+    let lcd = lcd_preblend(run.color);
+    let gray = gray_preblend(run.color);
+    let alpha = run.color[3] as u32;
+    for g in &run.glyphs {
+        let m = &g.mask;
+        for row in 0..m.height {
+            let py = g.y + row;
+            if py < y0 || py >= y1 {
+                continue;
+            }
+            for col in 0..m.width {
+                let px = g.x + col;
+                if px < x0 || px >= x1 {
+                    continue;
+                }
+                let c = m.data[(row * m.width + col) as usize];
+                if c == [0, 0, 0] {
+                    continue;
+                }
+                let out = &mut data[((py - y0) * w + px - x0) as usize];
+                for k in 0..3 {
+                    let v = lcd[k][c[k] as usize] as u32 >> 3;
+                    let mut v = v + (v >> 4);
+                    if alpha < 255 {
+                        v = (v * (alpha + 1)) >> 8;
+                    }
+                    let old = out[k] as u32;
+                    out[k] = (32 - ((32 - old) * (32 - v) + 16) / 32) as u8;
+                }
+                let coverage =
+                    gray[((c[0] as u32 + c[1] as u32 + c[2] as u32) / 3) as usize] as u32;
+                let v = alpha * coverage / 255;
+                let old = out[3] as u32;
+                out[3] = (255 - ((255 - old) * (255 - v) + 127) / 255) as u8;
+            }
+        }
+    }
+    Some(RunMask {
+        x: x0,
+        y: y0,
+        width: w,
+        height: h,
+        data,
+    })
+}
+
 /// Blend the planned runs onto premultiplied RGBA8 `pixels` (`width` x
 /// `height`), in order: LCD on opaque pixels, grayscale elsewhere.
 pub fn composite(pixels: &mut [u8], width: usize, height: usize, plan: &LcdPlan) {
@@ -500,62 +580,34 @@ pub fn composite(pixels: &mut [u8], width: usize, height: usize, plan: &LcdPlan)
         return;
     }
     for run in &plan.runs {
-        let lcd = lcd_preblend(run.color);
-        let gray = gray_preblend(run.color);
-        let [x0, y0, x1, y1] = run.clip.unwrap_or([0, 0, width as i32, height as i32]);
-        let (x0, y0) = (x0.max(0), y0.max(0));
-        let (x1, y1) = (x1.min(width as i32), y1.min(height as i32));
-        for g in &run.glyphs {
-            let m = &g.mask;
-            for row in 0..m.height {
-                let py = g.y + row;
-                if py < y0 || py >= y1 {
+        let Some(mask) = run_mask(run, width as i32, height as i32) else {
+            continue;
+        };
+        for row in 0..mask.height {
+            for col in 0..mask.width {
+                let m = mask.data[(row * mask.width + col) as usize];
+                if m == [0; 4] {
                     continue;
                 }
-                for col in 0..m.width {
-                    let px = g.x + col;
-                    if px < x0 || px >= x1 {
-                        continue;
-                    }
-                    let c = m.data[(row * m.width + col) as usize];
-                    if c == [0, 0, 0] {
-                        continue;
-                    }
-                    let i = (py as usize * width + px as usize) * 4;
-                    blend_pixel(&mut pixels[i..i + 4], run.color, c, lcd, gray);
-                }
+                let i = (((mask.y + row) as usize) * width + (mask.x + col) as usize) * 4;
+                blend_pixel(&mut pixels[i..i + 4], run.color, m);
             }
         }
     }
 }
 
-/// One mask pixel onto a premultiplied pixel, as the CPU paint blends it.
-pub fn blend_pixel(
-    dst: &mut [u8],
-    color: [u8; 4],
-    c: [u8; 3],
-    lcd: [&[u8; 256]; 3],
-    gray: &[u8; 256],
-) {
+/// One run-mask pixel onto a premultiplied pixel: Skia's LCD16 blend on
+/// an opaque pixel, grayscale source-over elsewhere. The window's GPU pass
+/// does the same arithmetic.
+pub fn blend_pixel(dst: &mut [u8], color: [u8; 4], m: [u8; 4]) {
     if dst[3] == 255 {
-        let mask = [
-            lcd[0][c[0] as usize],
-            lcd[1][c[1] as usize],
-            lcd[2][c[2] as usize],
-        ];
-        let [r, g, b] = blend_lcd(
-            [color[0], color[1], color[2]],
-            color[3] as u32,
-            mask,
-            [dst[0], dst[1], dst[2]],
-        );
-        dst[0] = r;
-        dst[1] = g;
-        dst[2] = b;
+        for k in 0..3 {
+            let (s, d) = (color[k] as i32, dst[k] as i32);
+            dst[k] = (d + (((s - d) * m[k] as i32) >> 5)) as u8;
+        }
         return;
     }
-    let coverage = gray[((c[0] as u32 + c[1] as u32 + c[2] as u32) / 3) as usize] as u32;
-    let a = color[3] as u32 * coverage / 255;
+    let a = m[3] as u32;
     if a == 0 {
         return;
     }
@@ -566,4 +618,62 @@ pub fn blend_pixel(
         dst[k] = v.min(out_a) as u8;
     }
     dst[3] = out_a as u8;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn glyph(x: i32, value: u8) -> PlacedGlyph {
+        PlacedGlyph {
+            x,
+            y: 0,
+            mask: Arc::new(LcdGlyph {
+                left: 0,
+                top: 0,
+                width: 3,
+                height: 1,
+                data: vec![[value, value / 2, value / 3]; 3],
+            }),
+        }
+    }
+
+    fn plan_of(runs: Vec<LcdRun>) -> LcdPlan {
+        LcdPlan {
+            runs,
+            skip: HashSet::new(),
+        }
+    }
+
+    /// A run's combined mask blends like its glyphs one after the other,
+    /// which is what the CPU paint does (to rounding).
+    #[test]
+    fn run_mask_matches_sequential_glyph_blends() {
+        let run = LcdRun {
+            item: 0,
+            color: [20, 40, 200, 255],
+            clip: None,
+            glyphs: vec![glyph(0, 200), glyph(2, 150)],
+        };
+        let mut combined = vec![255u8; 6 * 4];
+        composite(&mut combined, 6, 1, &plan_of(vec![run.clone()]));
+        let mut sequential = vec![255u8; 6 * 4];
+        for g in &run.glyphs {
+            let one = LcdRun {
+                glyphs: vec![g.clone()],
+                ..run.clone()
+            };
+            composite(&mut sequential, 6, 1, &plan_of(vec![one]));
+        }
+        for (a, b) in combined.iter().zip(&sequential) {
+            assert!(a.abs_diff(*b) <= 2, "{combined:?} vs {sequential:?}");
+        }
+        // The LCD channels differ (subpixel coverage); alpha stays opaque.
+        assert_ne!(combined[0], combined[2]);
+        assert_eq!(combined[3], 255);
+        // On a transparent pixel the run blends grayscale.
+        let mut clear = vec![0u8; 6 * 4];
+        composite(&mut clear, 6, 1, &plan_of(vec![run]));
+        assert!(clear[3] > 0 && clear[3] < 255);
+    }
 }
