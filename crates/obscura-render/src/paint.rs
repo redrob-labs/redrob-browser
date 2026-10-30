@@ -15,6 +15,7 @@ mod damage;
 pub(crate) mod lcd;
 #[cfg(feature = "scene")]
 pub mod scene;
+mod three_d;
 pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
@@ -5065,7 +5066,8 @@ fn paint_laid_dom_scrolled(
                 .is_some_and(|opacity| opacity.clamp(0.0, 1.0) < 1.0)
                 || layer_mask(tree, laid, nid).is_some());
         let is_transform_root = suppress_transform_for != Some(nid)
-            && laid.styles.get(&nid).is_some_and(has_authored_transform);
+            && (laid.styles.get(&nid).is_some_and(has_authored_transform)
+                || three_d::is_context_root(tree, laid, nid));
         let z = (suppress_stacking_for != Some(nid))
             .then(|| paint_layer_z(tree, laid, nid))
             .flatten();
@@ -5187,6 +5189,7 @@ fn paint_laid_dom_scrolled(
                 if svg_subtree_skip.contains(&nid)
                     || opacity_subtree_skip.contains(&nid)
                     || positive_members.contains(&nid)
+                    || three_d::is_excluded(nid)
                 {
                     continue;
                 }
@@ -5251,6 +5254,10 @@ fn paint_laid_dom_scrolled(
         }
         scene_node(nid);
         if svg_subtree_skip.contains(&nid) {
+            continue;
+        }
+        if three_d::is_excluded(nid) {
+            opacity_subtree_skip.insert(nid);
             continue;
         }
         if suppress_stacking_for != Some(nid) && paint_layer_z(tree, laid, nid).is_some() {
@@ -5373,6 +5380,138 @@ fn paint_laid_dom_scrolled(
         if style.backface_hidden && faces_back(laid, nid) {
             opacity_subtree_skip.insert(nid);
             opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            continue;
+        }
+        // A 3D rendering context: every plane painted flat, culled, depth
+        // sorted and projected through its own homography.
+        if suppress_transform_for != Some(nid) && three_d::is_context_root(tree, laid, nid) {
+            opacity_subtree_skip.insert(nid);
+            opacity_subtree_skip.extend(crate::dom::rendered_descendants(tree, nid));
+            // Planes map into the surface of the context root's parent:
+            // its accumulated transform, flattened, is the surface frame.
+            let surface = crate::dom::rendered_parent(tree, nid)
+                .map_or(crate::Mat4::IDENTITY, |parent| {
+                    three_d::accumulated(laid, parent).flatten()
+                });
+            let Some(surface_inverse) = three_d::invert(&surface) else {
+                continue;
+            };
+            let surface_movement = scroll_state.translation_for(laid, nid);
+            let mut layers: Vec<(f64, usize, Pixmap, three_d::Homography)> = Vec::new();
+            for (order, (plane, own_only)) in three_d::context_planes(tree, laid, nid)
+                .into_iter()
+                .enumerate()
+            {
+                let (Some(plane_style), Some(plane_rect)) =
+                    (laid.styles.get(&plane), laid.rects.get(&plane).copied())
+                else {
+                    continue;
+                };
+                let accumulated = three_d::accumulated(laid, plane);
+                if plane_style.backface_hidden && accumulated.is_back_face_visible() {
+                    continue;
+                }
+                let relative = surface_inverse.then(accumulated);
+                let movement = scroll_state.translation_for(laid, plane);
+                let bounds = if own_only {
+                    let ink = non_text_ink_bounds(&plane_rect, plane_style);
+                    Some(crate::Rect {
+                        x: ink.x + movement.0,
+                        y: ink.y + movement.1,
+                        ..ink
+                    })
+                } else {
+                    transform_subtree_source_bounds(tree, laid, &scroll_state, plane)
+                };
+                let Some(bounds) = bounds else {
+                    continue;
+                };
+                let left = bounds.x.floor();
+                let top = bounds.y.floor();
+                let width = ((bounds.x + bounds.width).ceil() - left).max(1.0) as u32;
+                let height = ((bounds.y + bounds.height).ceil() - top).max(1.0) as u32;
+                if width > 4096
+                    || height > 4096
+                    || u64::from(width) * u64::from(height) > MAX_CAPTURE_PIXELS
+                {
+                    continue;
+                }
+                let Some(layer) = Pixmap::new(width, height) else {
+                    continue;
+                };
+                let excluded = if own_only {
+                    three_d::exclude(tree, &three_d::plane_children(tree, laid, plane))
+                } else {
+                    Vec::new()
+                };
+                crate::canvas::begin_layer(&layer);
+                let painted = paint_laid_dom_scrolled(
+                    tree,
+                    viewport,
+                    base_url,
+                    scroll,
+                    resolved_scroll,
+                    Some(&scroll_state),
+                    layer,
+                    image_cache,
+                    selected_images,
+                    canvas_surfaces,
+                    svg_fonts,
+                    content_size,
+                    viewport_fixed,
+                    sticky,
+                    scroll_tree,
+                    laid,
+                    Some(plane),
+                    suppress_opacity_for,
+                    suppress_stacking_for,
+                    Some(plane),
+                    Some(plane),
+                    surface_extent,
+                    (surface_offset.0 - left, surface_offset.1 - top),
+                    raster_scale,
+                    print_economy,
+                    canvas_background,
+                );
+                three_d::restore(excluded);
+                let layer = painted?;
+                // layer pixel -> plane space -> surface space -> surface pixel.
+                let h = three_d::multiply(
+                    &three_d::translation(surface_movement.0 as f64, surface_movement.1 as f64),
+                    &three_d::multiply(
+                        &three_d::homography(&relative),
+                        &three_d::translation(
+                            left as f64 - movement.0 as f64,
+                            top as f64 - movement.1 as f64,
+                        ),
+                    ),
+                );
+                // Depth of the plane's centre, larger is nearer the viewer.
+                let (cx, cy) = (
+                    plane_rect.x + plane_rect.width / 2.0,
+                    plane_rect.y + plane_rect.height / 2.0,
+                );
+                let m = &relative.m;
+                let w = m[3][0] * cx + m[3][1] * cy + m[3][3];
+                let z = m[2][0] * cx + m[2][1] * cy + m[2][3];
+                let depth = if w.abs() > 1e-6 { (z / w) as f64 } else { 0.0 };
+                layers.push((depth, order, layer, h));
+            }
+            layers.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let outside_overflow_clip = scroll_state.overflow_clip_for(laid, nid);
+            let clip_mask = outside_overflow_clip.as_ref().and_then(|clip| {
+                cached_overflow_clip_mask(
+                    &mut overflow_mask_cache,
+                    pixmap.width(),
+                    pixmap.height(),
+                    clip,
+                    scroll_state.surface_extent.unwrap_or(viewport),
+                )
+            });
+            for (_, _, layer, h) in &layers {
+                three_d::draw_projective(&mut pixmap, layer, h, clip_mask.as_deref());
+            }
+            scene_node(nid);
             continue;
         }
         if suppress_transform_for != Some(nid) && has_authored_transform(style) {
@@ -14777,6 +14916,48 @@ mod tests {
         );
         let outside = pixmap.pixel(60, 10).expect("pixel");
         assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[test]
+    fn three_d_transforms_project_with_perspective_and_depth_order() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <div style="position:absolute;left:0;top:0;width:100px;height:100px;perspective:200px">
+                  <div style="width:100px;height:100px;background:rgb(255,0,0);transform:rotateY(45deg)"></div>
+                </div>
+                <div style="position:absolute;left:150px;top:0;width:100px;height:100px;perspective:300px">
+                  <div style="width:100px;height:100px;transform-style:preserve-3d">
+                    <div style="position:absolute;inset:0;background:rgb(255,0,0);transform:translateZ(40px)"></div>
+                    <div style="position:absolute;inset:0;background:rgb(0,0,255);transform:translateZ(-40px)"></div>
+                  </div>
+                </div>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (260.0, 120.0), None).expect("3d paint");
+        let red_rows = |x: u32| {
+            (0..120u32)
+                .filter(|&y| {
+                    let p = pixmap.pixel(x, y).expect("pixel");
+                    p.red() > 200 && p.green() < 60 && p.blue() < 60
+                })
+                .count()
+        };
+        // rotateY(45deg) turns the right edge away from the viewer: under
+        // perspective it is shorter than the left edge (a trapezoid, which
+        // no affine map can produce).
+        let (near, far) = (red_rows(22), red_rows(70));
+        assert!(
+            near > far + 6,
+            "perspective: near edge {near} rows, far edge {far}"
+        );
+        // The plane at z=+40 is nearer than the one at z=-40 painted after
+        // it in tree order.
+        let centre = pixmap.pixel(200, 50).expect("pixel");
+        assert_eq!(
+            (centre.red(), centre.green(), centre.blue()),
+            (255, 0, 0),
+            "preserve-3d planes paint in depth order"
+        );
     }
 
     #[test]
