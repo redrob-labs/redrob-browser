@@ -2057,6 +2057,10 @@ pub struct LayoutStyle {
     pub perspective: Option<f32>,
     /// `perspective-origin`; `None` is 50% 50%.
     pub perspective_origin: Option<(Dimension, Dimension)>,
+    /// `transform-style: preserve-3d`.
+    pub preserve_3d: bool,
+    /// `backface-visibility: hidden`.
+    pub backface_hidden: bool,
     /// `box-shadow` (first layer only). Painted behind the element's own
     /// background/border box: cards, buttons, menus, and modals across the
     /// modern web rely on it for depth, and without it those elements paint
