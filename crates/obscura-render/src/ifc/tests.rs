@@ -1394,3 +1394,17 @@ fn whitespace_only_inline_runs_make_no_line_fragments() {
     let r = laid.rects[&element(&tree, "s")];
     assert_eq!(r.y, 0.0, "{r:?}");
 }
+
+#[test]
+fn functional_flex_basis_resolves_against_the_container() {
+    // Chrome: `flex: 0 0 calc(41.6667% - 16px)` in a 768px row is 304
+    // wide (the shorthand split calc() at its spaces and dropped it).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='display:flex;width:768px;gap:32px'>\
+         <div id=a style='flex:0 0 calc(58.3333% - 16px)'>a</div>\
+         <div id=b style='flex-basis:calc(41.6667% - 16px);flex-grow:0;flex-shrink:0'>b</div></div>",
+        &[],
+    );
+    assert!((width(&tree, &laid, "a") - 432.0).abs() < 0.5);
+    assert!((width(&tree, &laid, "b") - 304.0).abs() < 0.5);
+}

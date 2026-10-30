@@ -7069,6 +7069,13 @@ fn layout_dom_once(
                     style.line_height = Some(crate::LineHeight::Px(pixels));
                 }
                 let cb_w = inh.cb_width;
+                if let Some(expression) = style.flex_basis_expression.as_deref() {
+                    if let Some(px) = crate::style::resolve_contextual_length(
+                        expression, em_px, root_fs, vw, vh, cb_w,
+                    ) {
+                        style.flex_basis = crate::Dimension::Px(px);
+                    }
+                }
                 for index in 0..6 {
                     let Some(expression) = style.size_expressions[index].as_deref() else {
                         continue;
