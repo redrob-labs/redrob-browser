@@ -1381,3 +1381,16 @@ fn inline_fragment_around_a_middle_aligned_image_stands_on_the_baseline() {
     let first = laid.inline_fragments[&element(&tree, "a")][0];
     assert!((first.y - 187.73).abs() < 0.1, "{first:?}");
 }
+
+#[test]
+fn whitespace_only_inline_runs_make_no_line_fragments() {
+    // Chrome: <span><span>\n</span> <div>x</div></span> is just the
+    // block (0, 22.5): the whitespace before it makes no line box.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:15px/22.5px monospace'>\
+         <div><span id=s><span>\n</span> <div>x</div>\n </span></div>",
+        &[],
+    );
+    let r = laid.rects[&element(&tree, "s")];
+    assert_eq!(r.y, 0.0, "{r:?}");
+}

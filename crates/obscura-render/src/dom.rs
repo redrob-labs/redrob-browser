@@ -9450,12 +9450,31 @@ fn place_inline_content(
         ifc.origin = origin;
         let root = ifc.root;
         let parts = ifc.fragments(origin);
+        // An IFC with only collapsible whitespace and empty inlines makes no
+        // line box (CSS 2 9.4.2): its inlines get an empty rect at the
+        // content edge, which a wrapper's union ignores (Chrome).
+        let collapsed = !ifc.has_content;
+        let empty = |rect: Rect| {
+            if collapsed {
+                Rect {
+                    x: rect.x,
+                    y: origin.1,
+                    width: 0.0,
+                    height: 0.0,
+                }
+            } else {
+                rect
+            }
+        };
         for (element, rect) in parts.elements {
-            fragments.entry(element).or_default().push(rect);
+            fragments.entry(element).or_default().push(empty(rect));
         }
         for (text, rect, content) in parts.texts {
-            fragments.entry(text).or_default().push(rect);
-            text_runs.entry(text).or_default().push((rect, content));
+            fragments.entry(text).or_default().push(empty(rect));
+            text_runs
+                .entry(text)
+                .or_default()
+                .push((empty(rect), content));
         }
         for (br, rect) in parts.breaks {
             rects.insert(br, rect);
