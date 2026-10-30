@@ -17348,22 +17348,31 @@ const _svgLocalBounds = (el) => {
       const x = _svgNum(el, 'x') + shift('dx'), y = _svgNum(el, 'y') + shift('dy');
       let w = text.length * size * 0.55, ascent = size * 0.9, descent = size * 0.25;
       // The document's own fonts (web fonts included), so the box spans the
-      // font's ascent and descent like Chrome's text bounding box.
+      // font's ascent and descent like Chrome's text bounding box. Chrome
+      // lays SVG text out at its on-screen font size (the user-space size
+      // times the CTM scale) with whole-pixel ascent and descent, then maps
+      // the box back to user space.
+      const scale = _svgTextScale > 0 && Number.isFinite(_svgTextScale) ? _svgTextScale : 1;
       let run = null;
       try {
         if (typeof __obscuraCore.ops.op_text_run_metrics === 'function') {
           run = JSON.parse(__obscuraCore.ops.op_text_run_metrics(text, String(family), String(weight),
-            /italic|oblique/.test(cs.fontStyle || ''), size, 0));
+            /italic|oblique/.test(cs.fontStyle || ''), size * scale, 0));
         }
       } catch (_e) { run = null; }
       if (Array.isArray(run)) {
-        [w, ascent, descent] = run;
+        w = run[0] / scale;
+        ascent = Math.round(run[1]) / scale;
+        descent = Math.round(run[2]) / scale;
       } else {
         try {
           const ctx = (globalThis.__obscuraSvgMeasure ||= document.createElement('canvas').getContext('2d'));
           if (ctx) { ctx.font = `${weight} ${size}px ${family}`; w = ctx.measureText(text).width; }
         } catch (_e) {}
       }
+      // letter-spacing follows every character (attribute or CSS).
+      const spacing = parseFloat(svgAttr('letter-spacing') ?? cs.letterSpacing);
+      if (Number.isFinite(spacing) && spacing !== 0) w += spacing * [...text].length;
       const anchor = svgAttr('text-anchor') || cs.textAnchor;
       const left = anchor === 'middle' ? x - w / 2 : anchor === 'end' ? x - w : x;
       return [left, y - ascent, left + w, y + descent];
@@ -17404,6 +17413,8 @@ const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
 };
 const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker', 'linearGradient',
   'radialGradient', 'filter', 'symbol']);
+// The CTM scale of the SVG text being measured (1 for getBBox()).
+let _svgTextScale = 1;
 // Screen rect of an SVG descendant, from its outermost <svg> box.
 const _svgClientRect = (el) => {
   if (_SVG_UNRENDERED.has(el.localName)) return null;
@@ -17444,7 +17455,10 @@ const _svgClientRect = (el) => {
     m = _svgMul(m, _svgTransform(p.getAttribute('transform')));
     if (p.localName === 'svg') m = _svgMul(m, [1, 0, 0, 1, _svgNum(p, 'x'), _svgNum(p, 'y')]);
   }
-  const b = _svgSubtreeBounds(el, m);
+  const previousScale = _svgTextScale;
+  _svgTextScale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+  let b;
+  try { b = _svgSubtreeBounds(el, m); } finally { _svgTextScale = previousScale; }
   if (!b) {
     // A rendered element with nothing to draw (an empty <g>, a path
     // without data) still has a box: an empty rect at its user-space
