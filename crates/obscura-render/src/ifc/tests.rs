@@ -1261,3 +1261,16 @@ fn stretched_row_flex_items_are_definite_for_percentage_children() {
     );
     assert_eq!(height(&tree, &laid, "p"), 300.0);
 }
+
+#[test]
+fn min_height_that_grows_a_box_keeps_the_last_margin_inside() {
+    // Chrome: a min-height:100px box over a 50px child with margin-bottom
+    // 20px is 100 tall and the next sibling's 16px margin starts at 100.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='min-height:100px'>\
+         <div style='height:50px;margin-bottom:20px'></div></div>\
+         <div id=b style='margin-top:16px;height:5px'></div>",
+        &[],
+    );
+    assert_eq!(laid.rects[&element(&tree, "b")].y, 116.0);
+}
