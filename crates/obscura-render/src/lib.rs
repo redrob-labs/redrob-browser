@@ -2076,6 +2076,10 @@ pub struct LayoutStyle {
     /// line count but tightens the effective line-breaking width during the
     /// inline formatter's final shaping pass.
     pub text_wrap_style: Option<TextWrapStyle>,
+    /// `orphans` / `widows` (inherited, initial 2): the fewest lines of a
+    /// block left before / after a column break.
+    pub orphans: Option<u16>,
+    pub widows: Option<u16>,
     /// Deferred functional line-height (`calc()`, `min()`, `clamp()`) resolved
     /// after the element font and live viewport are known.
     pub line_height_expression: Option<String>,

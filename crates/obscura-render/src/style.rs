@@ -2499,6 +2499,8 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
                 _ => None,
             };
         }
+        "orphans" => style.orphans = value.trim().parse::<u16>().ok().filter(|v| *v > 0),
+        "widows" => style.widows = value.trim().parse::<u16>().ok().filter(|v| *v > 0),
         "column-span" | "-webkit-column-span" => {
             style.column_span_all = value.trim().eq_ignore_ascii_case("all");
         }

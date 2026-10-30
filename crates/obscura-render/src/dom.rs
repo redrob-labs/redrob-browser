@@ -6539,6 +6539,8 @@ fn layout_dom_once(
             overflow_wrap: crate::OverflowWrap,
             word_break: crate::WordBreak,
             text_wrap_style: crate::TextWrapStyle,
+            orphans: u16,
+            widows: u16,
             text_transform: crate::TextTransform,
             italic: bool,
             box_sizing: crate::BoxSizing,
@@ -6612,6 +6614,8 @@ fn layout_dom_once(
                     overflow_wrap: crate::OverflowWrap::Normal,
                     word_break: crate::WordBreak::Normal,
                     text_wrap_style: crate::TextWrapStyle::Auto,
+                    orphans: 2,
+                    widows: 2,
                     text_transform: crate::TextTransform::None,
                     italic: false,
                     box_sizing: crate::BoxSizing::ContentBox,
@@ -6794,6 +6798,12 @@ fn layout_dom_once(
                     }
                     if let Some(value) = style.text_wrap_style {
                         inh.text_wrap_style = value;
+                    }
+                    if let Some(value) = style.orphans {
+                        inh.orphans = value;
+                    }
+                    if let Some(value) = style.widows {
+                        inh.widows = value;
                     }
                     if let Some(value) = style.text_transform {
                         inh.text_transform = value;
@@ -7407,6 +7417,14 @@ fn layout_dom_once(
                 match style.text_wrap_style {
                     Some(v) => inh.text_wrap_style = v,
                     None => style.text_wrap_style = Some(inh.text_wrap_style),
+                }
+                match style.orphans {
+                    Some(v) => inh.orphans = v,
+                    None => style.orphans = Some(inh.orphans),
+                }
+                match style.widows {
+                    Some(v) => inh.widows = v,
+                    None => style.widows = Some(inh.widows),
                 }
                 match style.text_transform {
                     Some(v) => inh.text_transform = v,
@@ -11439,15 +11457,24 @@ fn multicol_flow_pieces(
                 if let Some(index) = context {
                     let lines = crate::ifc::with_active_ifc(index, |ifc| {
                         let offset = ifc.content_offset.1;
-                        ifc.final_layout()
+                        let root = ifc.root;
+                        let lines = ifc
+                            .final_layout()
                             .lines()
                             .map(|line| {
                                 let m = line.metrics();
                                 (offset + m.block_min_coord, offset + m.block_max_coord)
                             })
-                            .collect::<Vec<_>>()
+                            .collect::<Vec<_>>();
+                        (lines, root)
                     })
-                    .unwrap_or_default();
+                    .map(|(lines, root)| {
+                        let limits = styles.get(&root).map_or((2, 2), |style| {
+                            (style.orphans.unwrap_or(2), style.widows.unwrap_or(2))
+                        });
+                        (lines, limits)
+                    });
+                    let (lines, (orphans, widows)) = lines.unwrap_or_else(|| (Vec::new(), (2, 2)));
                     if !lines.is_empty() {
                         let count = lines.len();
                         let first = out.len();
@@ -11459,7 +11486,8 @@ fn multicol_flow_pieces(
                                 },
                                 top: top + line_top,
                                 bottom: top + line_bottom,
-                                break_before: i == 0 || (i >= 2 && count - i >= 2),
+                                break_before: i == 0
+                                    || (i >= orphans as usize && count - i >= widows as usize),
                                 forced: i == 0 && forced,
                             });
                         }
@@ -11519,17 +11547,24 @@ fn multicol_flow_pieces(
         .filter(|context| context & crate::ifc::IFC_CONTEXT_BIT != 0)
         .map(|context| context & !crate::ifc::IFC_CONTEXT_BIT);
     if let Some(index) = own {
-        let lines = crate::ifc::with_active_ifc(index, |ifc| {
+        let (lines, root) = crate::ifc::with_active_ifc(index, |ifc| {
             let offset = ifc.content_offset.1;
-            ifc.final_layout()
+            let lines = ifc
+                .final_layout()
                 .lines()
                 .map(|line| {
                     let m = line.metrics();
                     (offset + m.block_min_coord, offset + m.block_max_coord)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            (lines, Some(ifc.root))
         })
         .unwrap_or_default();
+        let (orphans, widows) = root
+            .and_then(|root| styles.get(&root))
+            .map_or((2, 2), |style| {
+                (style.orphans.unwrap_or(2), style.widows.unwrap_or(2))
+            });
         let count = lines.len();
         for (i, (top, bottom)) in lines.into_iter().enumerate() {
             out.push(FlowPiece {
@@ -11539,7 +11574,7 @@ fn multicol_flow_pieces(
                 },
                 top,
                 bottom,
-                break_before: i == 0 || (i >= 2 && count - i >= 2),
+                break_before: i == 0 || (i >= orphans as usize && count - i >= widows as usize),
                 forced: false,
             });
         }
@@ -21729,6 +21764,33 @@ mod tests {
         assert!((first.width - 92.0).abs() < 0.1, "{first:?}");
         assert!((second.x - first.x - 108.0).abs() < 0.1, "{second:?}");
         assert!((second.y - first.y).abs() < 0.1, "{second:?}");
+    }
+
+    #[test]
+    fn multicol_breaks_honour_orphans_and_widows() {
+        // Chrome: column-fill:auto at 70px with a 50px spacer leaves room
+        // for one line; orphans 2 (initial) moves the paragraph to column
+        // 2, orphans:1 keeps a line, widows:3 keeps three in the last.
+        let text = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat.";
+        let mut html = String::from("<html><body style=\"margin:0;font:16px/20px Arial\">");
+        for (id, extra) in [("a", ""), ("b", "orphans:1"), ("c", "orphans:1;widows:3")] {
+            html.push_str(&format!(
+                "<div style=\"width:400px;columns:3;column-fill:auto;height:70px;margin-bottom:200px;{extra}\">\
+                 <div style=\"height:50px\"></div><p id={id} style=\"margin:0\">{text}</p></div>"
+            ));
+        }
+        html.push_str("</body></html>");
+        let tree = parse_html(&html);
+        let laid = layout_dom(&tree, (800.0, 1200.0));
+        let heights = |id: &str| -> Vec<f32> {
+            laid.inline_fragments[&tree.get_element_by_id(id).unwrap()]
+                .iter()
+                .map(|r| r.height.round())
+                .collect()
+        };
+        assert_eq!(heights("a"), vec![70.0, 70.0, 70.0, 40.0]);
+        assert_eq!(heights("b"), vec![20.0, 70.0, 70.0, 70.0, 40.0]);
+        assert_eq!(heights("c"), vec![20.0, 70.0, 70.0, 70.0, 60.0]);
     }
 
     #[test]
