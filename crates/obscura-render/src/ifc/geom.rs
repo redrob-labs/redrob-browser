@@ -386,10 +386,35 @@ impl Ifc {
                     .iter()
                     .all(|piece| piece.edge.is_some() && piece.x1 - piece.x0 <= 0.0);
             let mut line_rects = self.line_span_rects(&pieces, &line_spans, &depths);
+            // After a forced break, a span that only closes on this line
+            // (`<b>x<br></b>`) ends on the line of its break: Chrome gives
+            // it no fragment here.
+            let after_break = line_index > 0
+                && layout
+                    .get(line_index - 1)
+                    .is_some_and(|prev| prev.break_reason() == parley::BreakReason::Explicit);
+            let mut content_spans: std::collections::HashSet<u32> = Default::default();
+            if after_break {
+                for piece in &pieces {
+                    if piece.edge == Some(false) && piece.x1 - piece.x0 <= 0.0 {
+                        continue;
+                    }
+                    let mut current = piece.span;
+                    while let Some(i) = current {
+                        if !content_spans.insert(i) {
+                            break;
+                        }
+                        current = self.spans.get(i as usize).and_then(|span| span.parent);
+                    }
+                }
+            }
             for index in line_spans {
                 let Some(span) = self.spans.get(index as usize) else {
                     continue;
                 };
+                if after_break && placed.contains(&index) && !content_spans.contains(&index) {
+                    continue;
+                }
                 placed.insert(index);
                 for (x0, x1, baseline, source) in line_rects.remove(&index).unwrap_or_default() {
                     // A culled span's rect over a child inline has the

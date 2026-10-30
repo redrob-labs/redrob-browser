@@ -1662,3 +1662,17 @@ fn culled_inline_over_a_bigger_or_shifted_child_keeps_its_own_font_box() {
     let h = |id: &str| laid.inline_fragments[&element(&tree, id)][0].height;
     assert_eq!((h("a"), h("g"), h("f")), (17.0, 17.0, 33.0));
 }
+
+#[test]
+fn inline_ending_at_a_forced_break_has_no_fragment_on_the_next_line() {
+    // Chrome: abc <strong><br></strong>def has one 0x17 fragment at the end
+    // of the first line; <span style=background:red><br></span> likewise.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'><div style='width:300px'>abc \
+         <strong id=a><br></strong>def <span id=c style='background:red'><br></span>ij</div>",
+        &[],
+    );
+    let frags = |id: &str| laid.inline_fragments[&element(&tree, id)].len();
+    assert_eq!((frags("a"), frags("c")), (1, 1));
+    assert_eq!(laid.inline_fragments[&element(&tree, "a")][0].y, 3.0);
+}
