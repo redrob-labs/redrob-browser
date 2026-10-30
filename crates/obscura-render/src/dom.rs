@@ -2678,6 +2678,9 @@ struct MulticolBuild {
     flow: bool,
     /// `column-fill: auto` under a definite height: fill in order.
     fill_auto: bool,
+    /// `column-width`: the used count is fitted to the container width, at
+    /// most `columns.len()` (column-count, or a cap of 16).
+    column_width: Option<f32>,
 }
 
 /// Walk the tree top-down accumulating the clip rect imposed by ancestor
@@ -9062,12 +9065,15 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                if apply_multicol_column_heights(
-                    &mut taffy_tree,
-                    &ifc_items.multicol,
-                    &id_map,
-                    &styles,
-                ) {
+                for _ in 0..3 {
+                    if !apply_multicol_column_heights(
+                        &mut taffy_tree,
+                        &ifc_items.multicol,
+                        &id_map,
+                        &styles,
+                    ) {
+                        break;
+                    }
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
@@ -9218,12 +9224,15 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                if apply_multicol_column_heights(
-                    &mut taffy_tree,
-                    &ifc_items.multicol,
-                    &id_map,
-                    &styles,
-                ) {
+                for _ in 0..3 {
+                    if !apply_multicol_column_heights(
+                        &mut taffy_tree,
+                        &ifc_items.multicol,
+                        &id_map,
+                        &styles,
+                    ) {
+                        break;
+                    }
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
@@ -11503,6 +11512,39 @@ fn multicol_flow_pieces(
     let mut out = Vec::new();
     let mut groups = Vec::new();
     let mut forced_next = false;
+    // All-inline content: the first column is the IFC itself.
+    let own = taffy_tree
+        .get_node_context(column)
+        .copied()
+        .filter(|context| context & crate::ifc::IFC_CONTEXT_BIT != 0)
+        .map(|context| context & !crate::ifc::IFC_CONTEXT_BIT);
+    if let Some(index) = own {
+        let lines = crate::ifc::with_active_ifc(index, |ifc| {
+            let offset = ifc.content_offset.1;
+            ifc.final_layout()
+                .lines()
+                .map(|line| {
+                    let m = line.metrics();
+                    (offset + m.block_min_coord, offset + m.block_max_coord)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+        let count = lines.len();
+        for (i, (top, bottom)) in lines.into_iter().enumerate() {
+            out.push(FlowPiece {
+                kind: FlowPieceKind::Line {
+                    ifc: index,
+                    line: i,
+                },
+                top,
+                bottom,
+                break_before: i == 0 || (i >= 2 && count - i >= 2),
+                forced: false,
+            });
+        }
+        return (out, groups);
+    }
     walk(
         taffy_tree,
         column,
@@ -11571,6 +11613,20 @@ fn multicol_balanced_height(pieces: &[FlowPiece], count: usize, content_end: f32
     height
 }
 
+/// The columns of a set that take part in layout (column-width can hide
+/// the trailing ones).
+fn multicol_used_columns(taffy_tree: &TaffyTree<usize>, set: &MulticolBuild) -> usize {
+    set.columns
+        .iter()
+        .filter(|column| {
+            taffy_tree
+                .style(**column)
+                .is_ok_and(|style| style.display != taffy::style::Display::None)
+        })
+        .count()
+        .max(1)
+}
+
 /// Balance each breakable multicol flow and set the result as the first
 /// column's height, so the container and the content after it are laid
 /// out at it.
@@ -11585,7 +11641,49 @@ fn apply_multicol_column_heights(
         let Some(&first) = set.columns.first() else {
             continue;
         };
-        let count = set.columns.len();
+        if let Some(width) = set.column_width {
+            // N = max(1, floor((W + gap) / (column-width + gap))), at most
+            // column-count; the unused columns take no space.
+            let Some(parent) = taffy_tree.parent(first) else {
+                continue;
+            };
+            let outer = *taffy_tree.unrounded_layout(parent);
+            let available = (outer.size.width
+                - outer.padding.left
+                - outer.padding.right
+                - outer.border.left
+                - outer.border.right)
+                .max(0.0);
+            let gap = match taffy_tree.style(parent).map(|s| s.gap.width.into_raw()) {
+                Ok(raw) if raw.tag() == taffy::CompactLength::LENGTH_TAG => raw.value(),
+                _ => 16.0,
+            };
+            let fitted =
+                (((available + gap) / (width + gap)).floor() as usize).clamp(1, set.columns.len());
+            let mut count_changed = false;
+            for (index, column) in set.columns.iter().enumerate() {
+                let display = if index < fitted {
+                    taffy::style::Display::Block
+                } else {
+                    taffy::style::Display::None
+                };
+                if let Ok(current) = taffy_tree.style(*column) {
+                    if current.display != display {
+                        let mut style = current.clone();
+                        style.display = display;
+                        if taffy_tree.set_style(*column, style).is_ok() {
+                            count_changed = true;
+                        }
+                    }
+                }
+            }
+            if count_changed {
+                // Lay out at the new column width before balancing.
+                changed = true;
+                continue;
+            }
+        }
+        let count = multicol_used_columns(taffy_tree, set);
         let (pieces, _) = multicol_flow_pieces(taffy_tree, first, id_map, styles);
         if pieces.is_empty() {
             continue;
@@ -11648,6 +11746,9 @@ fn apply_multicol_fragmentation(
         let (Some(&first), Some(&second)) = (set.columns.first(), set.columns.get(1)) else {
             continue;
         };
+        if multicol_used_columns(taffy_tree, set) < 2 {
+            continue;
+        }
         let height = taffy_tree.unrounded_layout(first).size.height;
         let step = taffy_tree.unrounded_layout(second).location.x
             - taffy_tree.unrounded_layout(first).location.x;
@@ -16473,7 +16574,11 @@ fn build(
                         && !matches!(child_style.position, Some(taffy::Position::Absolute))
                 })
         });
-    let taffy_id = if let Some(column_count) = multicol_count.filter(|_| atomic_multicol_children) {
+    let width_columns =
+        style.column_width.is_some() && style.column_count.is_none_or(|count| count > 1);
+    let taffy_id = if let Some(column_count) =
+        multicol_count.filter(|_| atomic_multicol_children && !width_columns)
+    {
         // A multicol container keeps its ordinary outer/block box, but its
         // inner formatting context is a horizontal sequence of equal-width
         // fragmentainers. Taffy does not expose CSS fragmentation, so build
@@ -16515,10 +16620,15 @@ fn build(
             children: child_ids,
             flow: false,
             fill_auto: false,
+            column_width: None,
         });
         multicol
-    } else if let Some(column_count) =
-        multicol_count.filter(|_| !child_ids.is_empty() || own_ifc.is_some())
+    } else if let Some(column_count) = (if width_columns {
+        Some(style.column_count.map_or(16, usize::from))
+    } else {
+        multicol_count
+    })
+    .filter(|_| !child_ids.is_empty() || own_ifc.is_some())
     {
         // Breakable multicol content (CSS Multi-column 1, fragmented like
         // LayoutNG): the flow is laid out in the first column at the column
@@ -16582,6 +16692,7 @@ fn build(
                 children,
                 flow: true,
                 fill_auto,
+                column_width: style.column_width,
             });
             Some(set)
         };

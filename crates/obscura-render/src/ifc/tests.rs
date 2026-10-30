@@ -1604,3 +1604,22 @@ fn vertical_writing_mode_inline_becomes_an_upright_inline_block() {
     assert_eq!(s.width, 24.0, "{s:?}");
     assert!(s.height > 60.0 && p.height > s.height, "{s:?} {p:?}");
 }
+
+#[test]
+fn column_width_fits_the_column_count_and_fragments_inline_text() {
+    // Chrome: column-width:150px in 600px gives 3 columns (gap 1em), and
+    // all-inline text balances to 160px; columns:100px 3 in 500px is capped
+    // at 3; column-width wider than the box leaves one column.
+    let t = "Lorem ipsum dolor sit amet, consectetuer adipiscing elit, sed diam nonummy nibh euismod tincidunt ut laoreet dolore magna aliquam erat volutpat. Ut wisi enim ad minim veniam, quis nostrud exerci tation ullamcorper suscipit lobortis nisl ut aliquip ex ea commodo consequat.";
+    let (tree, laid) = layout(
+        &format!(
+            "<!doctype html><body style='margin:0;font:16px/20px Arial'>\
+             <div id=a style='width:600px;column-width:150px'>{t} {t}</div>\
+             <div id=b style='width:500px;columns:100px 3'>{t} {t}</div>\
+             <div id=c style='width:200px;column-width:150px'>{t}</div>"
+        ),
+        &[],
+    );
+    let h = |id: &str| laid.rects[&element(&tree, id)].height;
+    assert_eq!((h("a"), h("b"), h("c")), (160.0, 200.0, 220.0));
+}

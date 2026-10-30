@@ -1834,6 +1834,9 @@ pub struct LayoutStyle {
     /// `column-span: all`: the box spans every column of its multicol
     /// container, splitting the column flow above and below it.
     pub column_span_all: bool,
+    /// `column-width` in px: the used column count follows the container's
+    /// width (CSS Multi-column 1 §3.4).
+    pub column_width: Option<f32>,
     /// `column-fill: auto` (fill columns in order instead of balancing).
     pub column_fill_auto: bool,
     /// `break-before: column | page` (forced column break before the box).

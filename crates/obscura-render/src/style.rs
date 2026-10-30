@@ -2485,6 +2485,19 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
             style.column_count = split_ws_paren(value)
                 .into_iter()
                 .find_map(parse_column_count);
+            style.column_width =
+                split_ws_paren(value)
+                    .into_iter()
+                    .find_map(|token| match dimension_value(token) {
+                        crate::Dimension::Px(px) if px > 0.0 => Some(px),
+                        _ => None,
+                    });
+        }
+        "column-width" | "-webkit-column-width" => {
+            style.column_width = match dimension_value(value.trim()) {
+                crate::Dimension::Px(px) if px > 0.0 => Some(px),
+                _ => None,
+            };
         }
         "column-span" | "-webkit-column-span" => {
             style.column_span_all = value.trim().eq_ignore_ascii_case("all");
