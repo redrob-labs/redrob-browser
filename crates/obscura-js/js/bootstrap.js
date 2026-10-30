@@ -17124,7 +17124,30 @@ const _svgLocalBounds = (el) => {
     return [a, b, c, d];
   };
   switch (tag) {
-    case 'rect': case 'image': case 'foreignObject':
+    case 'image': {
+      // SVG 2: an auto width/height is the image's natural size, the other
+      // axis following its ratio when only one is given.
+      let w = el.getAttribute('width'), h = el.getAttribute('height');
+      w = w == null || w === '' || w === 'auto' ? null : _svgNum(el, 'width');
+      h = h == null || h === '' || h === 'auto' ? null : _svgNum(el, 'height');
+      if (w == null || h == null) {
+        const href = el.getAttribute('href') || el.getAttributeNS?.('http://www.w3.org/1999/xlink', 'href')
+          || el.getAttribute('xlink:href');
+        let natural = null;
+        try {
+          if (href && typeof __obscuraCore.ops.op_svg_image_natural_size === 'function') {
+            natural = JSON.parse(__obscuraCore.ops.op_svg_image_natural_size(String(href), _realmFrameId));
+          }
+        } catch (_e) { natural = null; }
+        if (Array.isArray(natural) && natural[0] > 0 && natural[1] > 0) {
+          if (w == null && h == null) { w = natural[0]; h = natural[1]; }
+          else if (w == null) w = h * natural[0] / natural[1];
+          else h = w * natural[1] / natural[0];
+        }
+      }
+      return box(_svgNum(el, 'x'), _svgNum(el, 'y'), w || 0, h || 0);
+    }
+    case 'rect': case 'foreignObject':
       return box(_svgNum(el, 'x'), _svgNum(el, 'y'), _svgNum(el, 'width'), _svgNum(el, 'height'));
     case 'circle': { const r = _svgNum(el, 'r'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - r, cy - r, cx + r, cy + r]; }
     case 'ellipse': { const rx = _svgNum(el, 'rx'), ry = _svgNum(el, 'ry'), cx = _svgNum(el, 'cx'), cy = _svgNum(el, 'cy'); return [cx - rx, cy - ry, cx + rx, cy + ry]; }
@@ -17197,12 +17220,18 @@ const _svgSubtreeBounds = (el, m, skipOwnTransform) => {
   }
   return acc;
 };
+const _SVG_UNRENDERED = new Set(['defs', 'mask', 'clipPath', 'pattern', 'marker', 'linearGradient',
+  'radialGradient', 'filter', 'symbol']);
 // Screen rect of an SVG descendant, from its outermost <svg> box.
 const _svgClientRect = (el) => {
   let outer = null;
   const chain = [];
   for (let p = el.parentElement; p; p = p.parentElement) {
     if (p.namespaceURI !== _SVG_NS) break;
+    // Content of a never-rendered container (a mask, clip path, pattern,
+    // marker, gradient or <defs>) has no box of its own: Chrome reports an
+    // all-zero rect for it.
+    if (_SVG_UNRENDERED.has(p.localName)) return null;
     if (p.localName === 'svg') outer = p;
     chain.push(p);
   }

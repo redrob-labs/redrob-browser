@@ -18877,6 +18877,31 @@ mod tests {
     }
 
     #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn svg_image_without_size_uses_natural_size_and_mask_content_has_no_rect() {
+        // Chrome: <image href> with no width/height is the image's natural
+        // size (css3_masking_svg: 600x400); one given axis scales the other
+        // by the natural ratio; a shape inside <mask> reports a zero rect.
+        let mut rt = parser_image_runtime(
+            r##"<html><body style="margin:0"><svg width="600" height="400">
+                <mask id="m"><circle id="c" r="5" cx="10" cy="10" fill="#fff"/></mask>
+                <image id="a" href="p.png" mask="url(#m)"/>
+                <image id="b" href="p.png" width="20"/>
+            </svg></body></html>"##,
+            |url: &str| (url == "http://example.com/page/p.png").then(two_by_three_png),
+        );
+        let result = rt
+            .evaluate(
+                r##"["a", "b", "c"].map((id) => {
+                    const r = document.getElementById(id).getBoundingClientRect();
+                    return [r.width, r.height];
+                })"##,
+            )
+            .unwrap();
+        assert_eq!(result, serde_json::json!([[2, 3], [20, 30], [0, 0]]));
+    }
+
+    #[cfg(feature = "render")]
     fn parser_image_runtime(
         html: &str,
         loader: impl obscura_render::RenderResourceLoader + 'static,

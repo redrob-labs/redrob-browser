@@ -8365,6 +8365,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_resize_observer_measurements());
         ops.push(op_intersection_observer_measurements());
         ops.push(op_measure_text());
+        ops.push(op_svg_image_natural_size());
         ops.push(op_font_face_states());
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
@@ -9836,6 +9837,22 @@ fn op_font_face_states(state: &OpState, #[string] faces: String, frame_id: u32) 
 #[op2(fast)]
 fn op_measure_text(#[string] text: String, #[string] font: String) -> f64 {
     obscura_render::measure_text_with_font_shorthand(&text, &font).map_or(-1.0, f64::from)
+}
+
+/// `[width, height]` of the cached image an SVG `<image>` names, or `null`
+/// while its bytes are not loaded.
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_svg_image_natural_size(state: &OpState, #[string] href: String, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
+    let mut gs = shared.borrow_mut();
+    let base_url = document_base_url(&gs);
+    obscura_render::cached_image_natural_size(&href, base_url.as_deref(), &mut gs.render_resources)
+        .map_or_else(
+            || "null".to_string(),
+            |(width, height)| serde_json::json!([width, height]).to_string(),
+        )
 }
 
 /// currently generates no layout box (for example, it is detached or hidden).
