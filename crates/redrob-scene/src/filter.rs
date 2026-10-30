@@ -386,7 +386,12 @@ fn blur(rgba: &mut [u8], w: usize, h: usize, sigma: f32) {
         return;
     }
     for c in 0..4 {
-        let mut plane: Vec<f32> = rgba.as_chunks::<4>().0.iter().map(|p| p[c] as f32).collect();
+        let mut plane: Vec<f32> = rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| p[c] as f32)
+            .collect();
         blur_plane(&mut plane, w, h, sigma);
         for (px, v) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(plane) {
             px[c] = v.round().clamp(0.0, 255.0) as u8;
