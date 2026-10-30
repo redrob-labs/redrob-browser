@@ -127,7 +127,9 @@ mod tests;
 
 pub use linebender_resource_handle::FontData;
 pub use parlance::BaseDirection;
-pub use parley_engine::whole_pixel::{is_whole_pixel, mark_whole_pixel_advances};
+pub use parley_engine::whole_pixel::{
+    is_whole_pixel, mark_whole_pixel_advances, unmark_whole_pixel_advances,
+};
 pub use parley_engine::break_overrides::{
     AsciiLineBreakTable, AsciiLineBreakTableBuilder, CHROMIUM_LINE_BREAK_OVERRIDE,
     LineBreakContext, LineBreakOverrideFn,

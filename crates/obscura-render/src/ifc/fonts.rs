@@ -194,6 +194,16 @@ pub(crate) struct Fonts {
     signature: u64,
     web_fonts: Vec<WebFont>,
     load_emoji: bool,
+    /// Blobs of this set marked for whole-pixel advances; unmarked on drop.
+    whole_pixel_blobs: Vec<u64>,
+}
+
+impl Drop for Fonts {
+    fn drop(&mut self) {
+        for &id in &self.whole_pixel_blobs {
+            parley::unmark_whole_pixel_advances(id);
+        }
+    }
 }
 
 const CACHED_FONT_SETS: usize = 8;
@@ -206,7 +216,8 @@ fn static_blob(bytes: &'static [u8]) -> Blob<u8> {
     Blob::new(Arc::new(bytes))
 }
 
-fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
+fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> (Collection, Vec<u64>) {
+    let mut whole_pixel_blobs: Vec<u64> = Vec::new();
     let mut collection = Collection::new(CollectionOptions {
         shared: false,
         system_fonts: false,
@@ -258,6 +269,7 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
         let blob = Blob::new(Arc::clone(&font.data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
         // Chromium on Linux shapes web fonts with whole-pixel advances.
         parley::mark_whole_pixel_advances(blob.id());
+        whole_pixel_blobs.push(blob.id());
         register(&mut collection, &mut order, blob, Some(info));
     }
     if load_emoji {
@@ -332,6 +344,7 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
     for bytes in copies {
         let blob = Blob::new(Arc::clone(bytes) as Arc<dyn AsRef<[u8]> + Send + Sync>);
         parley::mark_whole_pixel_advances(blob.id());
+        whole_pixel_blobs.push(blob.id());
         let info = FontInfoOverride {
             family_name: Some(FALLBACK_FAMILY),
             width: None,
@@ -352,6 +365,7 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
     for (index, data) in host_fallback_font_files().iter().enumerate() {
         let blob = Blob::new(Arc::clone(data) as Arc<dyn AsRef<[u8]> + Send + Sync>);
         parley::mark_whole_pixel_advances(blob.id());
+        whole_pixel_blobs.push(blob.id());
         let name = format!("Obscura Host Fallback {index}");
         let info = FontInfoOverride {
             family_name: Some(&name),
@@ -388,7 +402,7 @@ fn build_collection(web_fonts: &[WebFont], load_emoji: bool) -> Collection {
     for script in scripts {
         collection.set_fallbacks(FallbackKey::new(script, None), fallback.iter().copied());
     }
-    collection
+    (collection, whole_pixel_blobs)
 }
 
 impl Fonts {
@@ -408,14 +422,18 @@ impl Fonts {
             })
             .ok()
             .flatten();
-        cached.unwrap_or_else(|| Fonts {
-            context: FontContext {
-                collection: build_collection(web_fonts, load_emoji),
-                source_cache: SourceCache::default(),
-            },
-            signature,
-            web_fonts: web_fonts.to_vec(),
-            load_emoji,
+        cached.unwrap_or_else(|| {
+            let (collection, whole_pixel_blobs) = build_collection(web_fonts, load_emoji);
+            Fonts {
+                context: FontContext {
+                    collection,
+                    source_cache: SourceCache::default(),
+                },
+                signature,
+                web_fonts: web_fonts.to_vec(),
+                load_emoji,
+                whole_pixel_blobs,
+            }
         })
     }
 

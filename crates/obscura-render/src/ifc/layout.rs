@@ -195,7 +195,10 @@ fn size_atomic_boxes(
                     if baseline.is_some() {
                         margin_box_height.min(f32::MAX)
                     } else {
-                        margin_box_height.max(0.0).min(f32::MAX)
+                        // A negative margin box still makes a line box with
+                        // the strut (Chrome); a zero-height box would leave
+                        // the line empty, so keep it a hair above zero.
+                        margin_box_height.max(1.0 / 64.0).min(f32::MAX)
                     },
                     baseline,
                 )
@@ -994,6 +997,11 @@ fn place_inline_boxes(
         let margin = child_style
             .margin
             .resolve_or_zero(child_inputs.parent_size.width, calc_fn);
+        let parley_height = ifc
+            .layout
+            .inline_boxes()
+            .nth(index)
+            .map_or(0.0, |parley_box| parley_box.height);
         match ibox.kind {
             BoxKind::Atomic { .. } => {
                 let output = layout_shrink_to_fit(
@@ -1030,7 +1038,15 @@ fn place_inline_boxes(
                         order: index as u32,
                         location: Point {
                             x: x + margin.left + container_pb.left + relative.x + span_offset.0,
-                            y: y + margin.top + line_box_top + relative.y + span_offset.1,
+                            // The border box sits above the margin box's
+                            // bottom edge; for a box whose margin box is
+                            // negative (clamped to zero height in the line)
+                            // this keeps its bottom margin edge on the line
+                            // (Chrome: margin-top:-20px on a 5px image).
+                            y: y + parley_height - margin.bottom - output.size.height
+                                + line_box_top
+                                + relative.y
+                                + span_offset.1,
                         },
                         size: output.size,
                         content_size: output.content_size,

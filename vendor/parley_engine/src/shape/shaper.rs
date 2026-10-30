@@ -182,6 +182,7 @@ impl Shaper {
                     self,
                     text,
                     &segment,
+                    item.join_next && segment.range.char_range.end == item.char_end as usize,
                     &item.options,
                     &mut select_font,
                     analysis.char_info(),
@@ -228,6 +229,7 @@ fn shape_segment(
     scx: &mut Shaper,
     text: &str,
     segment: &Segment,
+    join_next: bool,
     options: &ShapeOptions<'_>,
     select_font: &mut impl FontSelector,
     char_info: &[CharInfo],
@@ -272,6 +274,8 @@ fn shape_segment(
     }));
 
     // Shape a run of the segment with a single font, appending it to `shaped_text`.
+    let segment_end = segment.range.byte_range.end;
+    let rtl = segment.bidi_level.is_rtl();
     let mut shape_run = |font: &FontInstance, range: TextRange| {
         // TODO: How do we want to handle errors like this?
         let font_ref =
@@ -342,9 +346,20 @@ fn shape_segment(
             // index in `data.rs`.
             buffer.add(ch, i as u32);
         }
+        let run_chars = range.char_range.len() as u32;
+        // Shape the next item's first character along (see Item::join_next);
+        // its glyphs are dropped below.
+        let joined = (join_next && !rtl && range.byte_range.end == segment_end)
+            .then(|| text[range.byte_range.end..].chars().next())
+            .flatten()
+            .filter(|ch| !ch.is_control());
+        if let Some(ch) = joined {
+            buffer.add(ch, run_chars);
+        }
 
         buffer.set_pre_context(&text[..range.byte_range.start]);
-        buffer.set_post_context(&text[range.byte_range.end..]);
+        let post_start = range.byte_range.end + joined.map_or(0, char::len_utf8);
+        buffer.set_post_context(&text[post_start..]);
         buffer.set_direction(direction);
         buffer.set_script(hb_script);
 
@@ -359,6 +374,17 @@ fn shape_segment(
                 .features(&scx.features)
                 .point_size(Some(options.font_size)),
         );
+        let mut glyph_limit = usize::MAX;
+        if joined.is_some() {
+            // The joined character's glyphs come last (LTR, monotone
+            // clusters).
+            let keep = glyph_buffer
+                .glyph_infos()
+                .iter()
+                .position(|info| info.cluster >= run_chars)
+                .unwrap_or(glyph_buffer.len());
+            glyph_limit = keep;
+        }
 
         shaped_text.push_run(
             text,
@@ -370,6 +396,7 @@ fn shape_segment(
             font,
             &glyph_buffer,
             harf_shaper.coords(),
+            glyph_limit,
         );
 
         // Replace buffer to reuse allocation in the next run.

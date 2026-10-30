@@ -566,7 +566,13 @@ fn compute_inner(
         let margin_top = raw_margin.top.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
         CollapsibleMarginSet::from_margin(margin_top)
     };
-    let bottom_margin = if own_margins_collapse_with_children.end {
+    // A min-height that made the box taller than its content ends the
+    // collapse: the last child's end margin stays inside the box (Chrome: a
+    // min-height:280px quiz box over 269.4px of content and a 20px trailing
+    // margin is 280 tall and adds no margin after it).
+    let min_height_grew = known_dimensions.height.is_none()
+        && min_size.height.is_some_and(|min| min > intrinsic_outer_height + 0.01);
+    let bottom_margin = if own_margins_collapse_with_children.end && !min_height_grew {
         last_child_bottom_margin_set
     } else {
         let margin_bottom = raw_margin.bottom.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
@@ -1020,9 +1026,11 @@ fn perform_final_layout_on_in_flow_children(
             };
 
             #[cfg(feature = "float_layout")]
-            let clear_pos = block_ctx.cleared_threshold(item.clear).unwrap_or(0.0);
+            // No clearance: no lower bound (a negative collapsed top margin
+            // may put the child above the content edge, as in Chrome).
+            let clear_pos = block_ctx.cleared_threshold(item.clear).unwrap_or(f32::MIN);
             #[cfg(not(feature = "float_layout"))]
-            let clear_pos = 0.0;
+            let clear_pos = f32::MIN;
 
             // Clearance separates a box's top margin from its parent's: a cleared first child
             // whose collapsed position would sit above the floats does not collapse through.

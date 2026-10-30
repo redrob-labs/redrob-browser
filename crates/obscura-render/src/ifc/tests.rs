@@ -1230,3 +1230,97 @@ fn overflowing_atomic_at_line_start_keeps_trailing_space_on_its_line() {
     // "word x" is on the second line, below the image line.
     assert!(w.x < 50.0 && w.y > height(&tree, &laid, "a"), "{w:?}");
 }
+
+#[test]
+fn kerning_applies_across_undecorated_inline_boundaries() {
+    // Chrome (42px Arial, Liberation Sans): "L" before <span> " T" kerns
+    // with the space: the span starts at 21.813, not 23.359. A span with
+    // padding breaks shaping (23.359).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:42px Arial'>\
+         <div>L<span id=a> T</span></div><div>L<span id=b style='padding-left:2px'> T</span></div>",
+        &[],
+    );
+    let x = |id: &str| {
+        let node = element(&tree, id);
+        laid.inline_fragments[&node][0].x
+    };
+    assert!((x("a") - 21.81).abs() < 0.05, "{}", x("a"));
+    assert!((x("b") - 23.36).abs() < 0.05, "{}", x("b"));
+}
+
+#[test]
+fn stretched_row_flex_items_are_definite_for_percentage_children() {
+    // Chrome: in a row flex container of indefinite height, a stretched
+    // item (300px from its sibling) lets a height:100% child be 300.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='display:flex'>\
+         <div style='height:300px;width:100px'>a</div>\
+         <div><div id=p style='height:100%;width:50px'></div></div></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "p"), 300.0);
+}
+
+#[test]
+fn min_height_that_grows_a_box_keeps_the_last_margin_inside() {
+    // Chrome: a min-height:100px box over a 50px child with margin-bottom
+    // 20px is 100 tall and the next sibling's 16px margin starts at 100.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='min-height:100px'>\
+         <div style='height:50px;margin-bottom:20px'></div></div>\
+         <div id=b style='margin-top:16px;height:5px'></div>",
+        &[],
+    );
+    assert_eq!(laid.rects[&element(&tree, "b")].y, 116.0);
+}
+
+#[test]
+fn preserved_spaces_hanging_at_a_line_end_stay_in_the_inline_box() {
+    // Chrome: a pre-wrap span wrapping in a 100px box keeps the hanging
+    // space of its lines (84.03 = 10 monospace advances); with normal
+    // white-space it is removed (75.6 = 9).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:14px monospace'>\
+         <div style='width:100px;white-space:pre-wrap'><span id=a>aaaa bbbb cccc dddd</span></div>\
+         <div style='width:100px'><span id=b>aaaa bbbb cccc dddd</span></div>",
+        &[],
+    );
+    let w = |id: &str| {
+        let node = element(&tree, id);
+        laid.fractional_rects
+            .get(&node)
+            .copied()
+            .unwrap_or(laid.rects[&node])
+            .width
+    };
+    assert!((w("a") - 84.03).abs() < 0.1, "{}", w("a"));
+    assert!((w("b") - 75.61).abs() < 0.1, "{}", w("b"));
+}
+
+#[test]
+fn negative_collapsed_first_child_margin_can_rise_above_the_content_edge() {
+    // Chrome: in a padding-top:25px box, a child whose own first child has
+    // margin-top:-40px (collapsing through it) starts 15px above the box's
+    // border edge: y 60 for a box at 75.
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0'><div style='height:100px'></div>\
+         <div style='margin-top:-25px;padding-top:25px'><div id=h>\
+         <h2 style='margin-top:-40px;padding-top:40px;margin-bottom:0'>x</h2></div></div>",
+        &[],
+    );
+    assert_eq!(laid.rects[&element(&tree, "h")].y, 60.0);
+}
+
+#[test]
+fn atomic_with_negative_margin_box_keeps_the_line_and_sits_on_the_baseline() {
+    // Chrome: a 5px image with margin-top:-20px still makes a 24px line
+    // (16px/24px Arial) and its bottom edge stays on the baseline (y 12).
+    let (tree, laid) = layout(
+        "<!doctype html><body style='margin:0;font:16px/24px Arial'>\
+         <div id=d><img id=s style='width:10px;height:5px;margin-top:-20px'></div>",
+        &[],
+    );
+    assert_eq!(height(&tree, &laid, "d"), 24.0);
+    assert_eq!(laid.rects[&element(&tree, "s")].y, 12.0);
+}

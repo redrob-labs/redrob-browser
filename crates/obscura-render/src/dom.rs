@@ -6626,25 +6626,34 @@ fn layout_dom_once(
             let mut child_cb_height = inh.cb_height;
             let mut child_cb_height_definite = false;
             let mut abs_inset_height: Option<f32> = None;
-            let mut child_cb_height_deferred = (inh.cb_height_definite || inh.cb_height_deferred)
-                && styles.get(&id).is_some_and(|style| {
-                    style.height == crate::Dimension::Auto
-                        && !style.display_contents
-                        && !matches!(style.position, Some(taffy::Position::Absolute))
-                        && rendered_parent(tree, id)
-                            .and_then(|parent| styles.get(&parent))
-                            .is_some_and(|parent| {
-                                parent.display == crate::Display::Flex
-                                    && !parent.internal_flex_container
-                                    && (matches!(
-                                        parent.flex_direction,
-                                        Some(
-                                            taffy::FlexDirection::Column
-                                                | taffy::FlexDirection::ColumnReverse
-                                        )
-                                    ) || stretched_row_flex_item(parent, style))
-                            })
-                });
+            // A stretched item of a row flex container has a definite height
+            // even when the container's own height is indefinite (Chrome
+            // treats the stretched size as definite for percentage children,
+            // CSS Flexbox 9.4.11); a column flex item needs a definite
+            // containing block.
+            let parent_definite = inh.cb_height_definite || inh.cb_height_deferred;
+            let mut child_cb_height_deferred = styles.get(&id).is_some_and(|style| {
+                style.height == crate::Dimension::Auto
+                    && !style.display_contents
+                    && !matches!(style.position, Some(taffy::Position::Absolute))
+                    && rendered_parent(tree, id)
+                        .and_then(|parent| styles.get(&parent))
+                        .is_some_and(|parent| {
+                            parent.display == crate::Display::Flex
+                                && !parent.internal_flex_container
+                                && if matches!(
+                                    parent.flex_direction,
+                                    Some(
+                                        taffy::FlexDirection::Column
+                                            | taffy::FlexDirection::ColumnReverse
+                                    )
+                                ) {
+                                    parent_definite
+                                } else {
+                                    stretched_row_flex_item(parent, style)
+                                }
+                        })
+            });
             let reused_computed_style = fresh_styles
                 .as_ref()
                 .is_some_and(|fresh| !fresh.contains(&id));
