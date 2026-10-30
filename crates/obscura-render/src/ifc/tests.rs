@@ -1689,3 +1689,20 @@ fn space_after_an_atomic_inline_at_a_line_start_is_kept() {
     let s = laid.inline_fragments[&element(&tree, "s")][0];
     assert!(s.x > 60.0, "{s:?}");
 }
+
+#[test]
+fn push_button_inputs_without_native_appearance_use_the_cascaded_line_height() {
+    // Chrome: under `font: inherit` from a 16px/24px parent, a button input
+    // whose author background/border drops its native appearance is 54
+    // tall with 15px padding (line-height 24); a native one stays at
+    // line-height normal (24 tall).
+    let (tree, laid) = layout(
+        "<!doctype html><style>input{font:inherit;margin:0}\
+         .b{padding:15px 32px;border:none;background:green}</style>\
+         <body style='margin:0;font:16px/24px Arial'><input id=a type=button value=Button class=b>\
+         <br><input id=c type=button value=Go>",
+        &[],
+    );
+    let h = |id: &str| laid.rects[&element(&tree, id)].height;
+    assert_eq!((h("a"), h("c")), (54.0, 24.0));
+}

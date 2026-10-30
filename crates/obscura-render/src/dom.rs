@@ -8023,7 +8023,12 @@ fn layout_dom_once(
             // Chromium's push-button inputs use `line-height: normal` (an
             // inherited 24px line-height leaves a 16px Arial button 24 tall,
             // where text inputs and <button> follow the cascade).
-            if matches!(input_type.as_str(), "submit" | "reset" | "button") {
+            // Only with their native appearance: an author background or
+            // border drops it and the cascade's line-height applies (Chrome:
+            // w3schools' .button under `font: inherit` is 54 tall).
+            if matches!(input_type.as_str(), "submit" | "reset" | "button")
+                && !style.native_appearance_dropped
+            {
                 style.line_height = Some(crate::LineHeight::Normal);
             }
             if input_type == "hidden" {
