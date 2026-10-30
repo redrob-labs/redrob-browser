@@ -16,6 +16,7 @@ pub(crate) mod lcd;
 #[cfg(feature = "scene")]
 pub mod scene;
 mod three_d;
+pub mod video;
 pub use damage::DamageSnapshot;
 use tiny_skia::{
     Color, FillRule, FilterQuality, Paint, PathBuilder, Pattern, Pixmap, Point, Rect, SpreadMode,
@@ -111,6 +112,16 @@ impl CachedResource {
     }
 }
 
+/// A decoded `<video>` frame (see `RenderResourceCache::video_frame`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VideoFrameEntry {
+    pub width: u32,
+    pub height: u32,
+    pub duration: f64,
+    pub has_audio: bool,
+    pub data_url: Arc<str>,
+}
+
 /// Fetch credentials/CORS identity for an HTML image request. No-CORS uses
 /// the ordinary URL cache key so CSS images can share the same response;
 /// CORS variants use private keys and can never contaminate one another.
@@ -197,6 +208,11 @@ pub struct RenderResourceCache {
     /// whether the consumer is a font.
     /// Deduplicated so repeated layouts do not grow the list.
     sync_misses: Vec<(String, Option<ImageRequestProfile>, bool)>,
+    /// Decoded `<video>` frames by (media URL, time bits): size, duration and
+    /// the frame as a PNG data URL, or None when the media did not decode.
+    video_frames: HashMap<(String, u64), Option<VideoFrameEntry>>,
+    /// The playback position script set on each `<video>` (seconds).
+    video_times: HashMap<obscura_dom::tree::NodeId, f64>,
     sync_miss_keys: HashSet<String>,
     loader: Box<dyn RenderResourceLoader>,
     /// Keys whose bytes, miss or cancellation changed since the last
@@ -259,6 +275,8 @@ impl RenderResourceCache {
             content_image_layout_retries: 0,
             sync_loading_enabled: true,
             sync_misses: Vec::new(),
+            video_frames: HashMap::new(),
+            video_times: HashMap::new(),
             sync_miss_keys: HashSet::new(),
             loader: Box::new(loader),
             changed: Vec::new(),
@@ -608,6 +626,55 @@ impl RenderResourceCache {
                 dimensions.map(|(_, width, height)| (width, height)),
             )),
         }
+    }
+
+    /// The frame a paused video at `url` shows at `time`, decoding it from
+    /// the media bytes once they are cached (a cache-only miss requests
+    /// them). None until then, or when the media does not decode.
+    pub fn video_frame(&mut self, url: &str, time: f64) -> Option<VideoFrameEntry> {
+        let key = (network_resource_url(url), time.to_bits());
+        if let Some(entry) = self.video_frames.get(&key) {
+            return entry.clone();
+        }
+        if !cfg!(feature = "media") {
+            return None;
+        }
+        let bytes = self.get_or_load(url, false)?;
+        let entry = video::decode_frame(bytes, time).and_then(|frame| {
+            let image = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            image.write_to(&mut png, image::ImageFormat::Png).ok()?;
+            use base64::Engine;
+            let data_url = format!(
+                "data:image/png;base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(png.into_inner())
+            );
+            Some(VideoFrameEntry {
+                width: frame.width,
+                height: frame.height,
+                duration: frame.duration,
+                has_audio: frame.has_audio,
+                data_url: Arc::from(data_url),
+            })
+        });
+        if self.video_frames.len() >= 64 {
+            self.video_frames.clear();
+        }
+        self.video_frames.insert(key, entry.clone());
+        entry
+    }
+
+    /// Script moved `<video>` `node` to `time` seconds.
+    pub fn set_video_time(&mut self, node: obscura_dom::tree::NodeId, time: f64) {
+        if time.is_finite() && time > 0.0 {
+            self.video_times.insert(node, time);
+        } else {
+            self.video_times.remove(&node);
+        }
+    }
+
+    pub fn video_time(&self, node: obscura_dom::tree::NodeId) -> f64 {
+        self.video_times.get(&node).copied().unwrap_or(0.0)
     }
 
     fn profiled_image_intrinsic(
@@ -6311,6 +6378,39 @@ fn paint_laid_dom_scrolled(
                         }
                     }
                 }
+            }
+        }
+
+        // Headless captures draw Chrome's default controls bar; the window
+        // draws its own (docs/MEDIA.md).
+        if box_on_surface
+            && name.local.as_ref() == "video"
+            && node.get_attribute("controls").is_some()
+        {
+            #[cfg(feature = "display-list")]
+            let window_draws = crate::display_list::scene_active();
+            #[cfg(not(feature = "display-list"))]
+            let window_draws = false;
+            if !window_draws {
+                let frame = video_source_url(tree, nid)
+                    .and_then(|src| resolve_resource_url(&src, base_url))
+                    .and_then(|url| image_cache.video_frame(&url, image_cache.video_time(nid)));
+                let content = inset_rect(
+                    &rect,
+                    crate::Sides {
+                        top: style.border.top + style.padding.top,
+                        right: style.border.right + style.padding.right,
+                        bottom: style.border.bottom + style.padding.bottom,
+                        left: style.border.left + style.padding.left,
+                    },
+                );
+                paint_video_controls(
+                    &mut pixmap,
+                    &content,
+                    image_cache.video_time(nid),
+                    frame.as_ref(),
+                    element_clip_mask,
+                );
             }
         }
 
@@ -12203,6 +12303,142 @@ fn image_is_lazy(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> bool {
     .unwrap_or(false)
 }
 
+/// `m:ss` (or `h:mm:ss`), as Chrome's media controls show times.
+fn media_time_label(seconds: f64) -> String {
+    let total = if seconds.is_finite() && seconds > 0.0 {
+        seconds.floor() as u64
+    } else {
+        0
+    };
+    let (h, m, s) = (total / 3600, total / 60 % 60, total % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// Chrome's default `<video controls>` bar for a paused video, over the
+/// content box `rect`: the bottom gradient, play, time, timeline, volume,
+/// fullscreen and overflow buttons. Geometry and colours are measured from
+/// headless Chrome; icons are the Material icons Chromium's controls use.
+fn paint_video_controls(
+    pixmap: &mut Pixmap,
+    rect: &crate::Rect,
+    time: f64,
+    frame: Option<&VideoFrameEntry>,
+    clip: Option<&tiny_skia::Mask>,
+) {
+    let (w, h) = (rect.width.round(), rect.height.round());
+    if w < 48.0 || h < 40.0 || !rect_intersects_paint_surface(rect, pixmap, 1.0) {
+        return;
+    }
+    // Gradient alpha by distance from the bottom edge, every 6 px.
+    const GRADIENT: [u8; 19] = [
+        255, 253, 248, 242, 232, 215, 198, 178, 156, 133, 110, 87, 66, 48, 32, 20, 10, 4, 1,
+    ];
+    let height = 110.0f32.min(h);
+    let mut stops = String::new();
+    // Top to bottom: SVG stop offsets must not decrease.
+    for (i, alpha) in GRADIENT.iter().enumerate().rev() {
+        let distance = i as f32 * 6.0;
+        if distance > height {
+            continue;
+        }
+        stops.push_str(&format!(
+            r#"<stop offset="{:.4}" stop-color="black" stop-opacity="{:.4}"/>"#,
+            1.0 - distance / height,
+            *alpha as f32 / 255.0
+        ));
+    }
+    let duration = frame.map_or(0.0, |frame| frame.duration);
+    let label = format!(
+        "{} / {}",
+        media_time_label(time),
+        media_time_label(duration)
+    );
+    let volume_opacity = if frame.is_some_and(|frame| frame.has_audio) {
+        1.0
+    } else {
+        0.38
+    };
+    let icon = |x: f32, path: &str, opacity: f32| {
+        format!(
+            r#"<path transform="translate({x:.2} {:.2}) scale(0.8333)" fill="white" fill-opacity="{opacity}" d="{path}"/>"#,
+            h - 58.17
+        )
+    };
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}">
+<defs><linearGradient id="g" x1="0" y1="{y0}" x2="0" y2="{h}" gradientUnits="userSpaceOnUse">{stops}</linearGradient></defs>
+<rect x="0" y="{y0}" width="{w}" height="{height}" fill="url(#g)"/>
+{play}
+<text x="47.4" y="{ty}" font-family="Liberation Sans, Arial, sans-serif" font-size="14" fill="white">{label}</text>
+{volume}{fullscreen}{menu}
+<rect x="16" y="{tl}" width="{tw}" height="4" rx="2" fill="rgb(178,178,178)" fill-opacity="0.97"/>
+</svg>"#,
+        y0 = h - height,
+        play = icon(13.33, "M8 5v14l11-7z", 1.0),
+        ty = h - 43.0,
+        volume = icon(
+            w - 129.5,
+            "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z",
+            volume_opacity
+        ),
+        fullscreen = icon(
+            w - 82.17,
+            "M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z",
+            1.0
+        ),
+        menu = icon(
+            w - 34.33,
+            "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
+            1.0
+        ),
+        tl = h - 24.0,
+        tw = w - 32.0,
+    );
+    let Some(overlay) = render_svg(svg.as_bytes(), w as u32, h as u32) else {
+        return;
+    };
+    pixmap.canvas().draw_image(
+        rect.x.round() as i32,
+        rect.y.round() as i32,
+        overlay.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        Transform::identity(),
+        clip,
+    );
+}
+
+/// The absolute media URL of `<video>` `nid`, resolved against `base_url`.
+pub fn video_media_url(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    base_url: Option<&str>,
+) -> Option<String> {
+    resolve_resource_url(&video_source_url(tree, nid)?, base_url)
+}
+
+/// The media URL of a `<video>`: its `src`, else its first `<source src>`.
+pub(crate) fn video_source_url(tree: &DomTree, nid: obscura_dom::tree::NodeId) -> Option<String> {
+    let own = tree
+        .get_node(nid)?
+        .get_attribute("src")
+        .map(str::trim)
+        .filter(|src| !src.is_empty())
+        .map(str::to_owned);
+    own.or_else(|| {
+        tree.children(nid).into_iter().find_map(|child| {
+            let node = tree.get_node(child)?;
+            (node.as_element()?.local.as_ref() == "source")
+                .then(|| node.get_attribute("src").map(str::trim).map(str::to_owned))
+                .flatten()
+                .filter(|src| !src.is_empty())
+        })
+    })
+}
+
 /// Fetch every `<img>` once (seeding `cache` for the paint pass) and record its
 /// intrinsic (width, height) so layout can size replaced elements that have no
 /// explicit dimensions. Video posters are image resources too: before a
@@ -12221,6 +12457,7 @@ fn collect_image_intrinsics(
     enum Source {
         Image,
         VideoPoster(String),
+        VideoFrame(String),
     }
     let mut out = std::collections::HashMap::new();
     let mut selected = HashMap::new();
@@ -12232,7 +12469,16 @@ fn collect_image_intrinsics(
                     .get_attribute("poster")
                     .map(str::trim)
                     .filter(|poster| !poster.is_empty())
-                    .map(|poster| Source::VideoPoster(poster.to_owned())),
+                    .map(|poster| Source::VideoPoster(poster.to_owned()))
+                    .or_else(|| {
+                        // Without a poster a paused video shows its frame at
+                        // the playback position.
+                        if !cfg!(feature = "media") || node.get_attribute("preload") == Some("none")
+                        {
+                            return None;
+                        }
+                        video_source_url(tree, nid).map(Source::VideoFrame)
+                    }),
                 _ => None,
             })
             .flatten();
@@ -12245,6 +12491,16 @@ fn collect_image_intrinsics(
                 candidate
             }
             Some(Source::VideoPoster(poster)) => (poster, 1.0),
+            Some(Source::VideoFrame(src)) => {
+                let Some(media_url) = resolve_resource_url(&src, base_url) else {
+                    continue;
+                };
+                let time = cache.video_time(nid);
+                let Some(frame) = cache.video_frame(&media_url, time) else {
+                    continue;
+                };
+                (frame.data_url.to_string(), 1.0)
+            }
             None => continue,
         };
         let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
@@ -14963,6 +15219,68 @@ mod tests {
         );
         let outside = pixmap.pixel(60, 10).expect("pixel");
         assert_eq!(outside.green(), 255, "and only there");
+    }
+
+    #[cfg(feature = "media")]
+    #[test]
+    fn video_frames_decode_at_the_playback_position() {
+        const WEBM: &[u8] = include_bytes!("../tests/fixtures/two-phase.webm");
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <video id="v" src="v.webm"></video></body></html>"#,
+        );
+        let mut resources = RenderResourceCache::with_loader(|url: &str| {
+            url.ends_with("v.webm").then(|| WEBM.to_vec())
+        });
+        let base = Some("https://media.test/page.html");
+        let video = tree.get_element_by_id("v").expect("video");
+        let mut prepared = prepare_dom(&tree, (200.0, 100.0), base, &mut resources).unwrap();
+        let rect = prepared.layout.rects[&video];
+        assert_eq!(
+            (rect.width, rect.height),
+            (64.0, 36.0),
+            "the frame sizes the video"
+        );
+        let frame = paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).unwrap();
+        let p = frame.pixel(10, 18).unwrap();
+        assert!(p.blue() > 150 && p.red() < 80, "first frame is blue: {p:?}");
+        resources.set_video_time(video, 0.7);
+        let mut prepared = prepare_dom(&tree, (200.0, 100.0), base, &mut resources).unwrap();
+        let frame = paint_prepared(&tree, &mut prepared, &mut resources, (0.0, 0.0)).unwrap();
+        let p = frame.pixel(10, 18).unwrap();
+        assert!(
+            p.red() > 150 && p.blue() < 100,
+            "the frame at 0.7s has a red left half: {p:?}"
+        );
+        let info = resources
+            .video_frame("https://media.test/v.webm", 0.0)
+            .expect("metadata");
+        assert!(
+            (info.duration - 1.0).abs() < 0.15,
+            "duration {}",
+            info.duration
+        );
+        assert!(!info.has_audio);
+    }
+
+    #[test]
+    fn video_controls_paint_chrome_bar_over_the_content_box() {
+        let tree = parse_html(
+            r#"<html style="margin:0"><body style="margin:0;background:white">
+                <video controls style="display:block;width:320px;height:180px;background:white"></video>
+            </body></html>"#,
+        );
+        let pixmap = paint_dom(&tree, (340.0, 200.0), None).expect("controls");
+        let p = |x, y| pixmap.pixel(x, y).expect("pixel");
+        assert!(p(160, 60).red() > 250, "above the gradient the video shows");
+        assert!(
+            p(160, 178).red() < 10,
+            "the bottom of the gradient is black"
+        );
+        let mid = p(160, 125).red();
+        assert!(mid > 100 && mid < 160, "half way up the gradient: {mid}");
+        assert!(p(24, 129).red() > 240, "the play icon is white");
+        assert!(p(160, 157).red() > 150, "the timeline track");
     }
 
     #[test]

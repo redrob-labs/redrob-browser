@@ -17,6 +17,7 @@ stealth = ["obscura-net/stealth"]
 render = ["dep:obscura-render", "obscura-render/paint", "obscura-render/scene"]
 # Page display lists for GPU raster (docs/GPU-PAINT.md, phase B).
 display-list = ["render", "obscura-render/display-list"]
+media = ["render", "obscura-render/media"]
 
 [build-dependencies]
 deno_core = "0.412"

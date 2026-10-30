@@ -18,6 +18,10 @@ display-list = ["paint", "dep:serde"]
 # Build GPU compositor frames (crates/redrob-scene): a display list with a
 # spatial tree and hit regions, recorded from the same paint as screenshots.
 scene = ["display-list"]
+# Decode the frame a paused <video> shows through GStreamer (docs/MEDIA.md).
+# Needs the GStreamer development files at build time and its runtime when
+# running, as redrob-shell's `media` feature.
+media = ["paint", "dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]
 
 [dependencies]
 taffy = { workspace = true }
@@ -51,6 +55,10 @@ avif-decode = { version = "3.0.0", default-features = false, optional = true }
 avif-parse = { version = "2.1.0", optional = true }
 # Same `log` instance usvg emits glyph-fallback warnings through, so tests can
 # install a collector and assert on them.
+gstreamer = { version = "0.25", optional = true }
+gstreamer-app = { version = "0.25", optional = true }
+gstreamer-video = { version = "0.25", optional = true }
+
 [dev-dependencies]
 log = "0.4"
 # Rasterizes scene frames in tests, as the window does.

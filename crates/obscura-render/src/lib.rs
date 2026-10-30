@@ -166,6 +166,7 @@ pub mod canvas;
 pub mod display_list;
 #[cfg(feature = "display-list")]
 pub use paint::record_prepared_region_with_scroll_and_surface_color_and_canvas_surfaces;
+pub use paint::{video_media_url, VideoFrameEntry};
 #[cfg(feature = "paint")]
 mod paint;
 #[cfg(feature = "scene")]

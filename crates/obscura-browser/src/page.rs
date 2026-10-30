@@ -4339,6 +4339,19 @@ impl Page {
                     if let Some(style) = node.get_attribute("style") {
                         sources.push(style.to_string());
                     }
+                    // Video media: a headless capture paints its frame.
+                    if node
+                        .as_element()
+                        .is_some_and(|element| matches!(element.local.as_ref(), "video" | "source"))
+                        && node.get_attribute("preload") != Some("none")
+                    {
+                        if let Some(src) = node
+                            .get_attribute("src")
+                            .filter(|src| !src.trim().is_empty())
+                        {
+                            sources.push(format!("url({src})"));
+                        }
+                    }
                     if node.as_element().is_some_and(|element| {
                         matches!(element.local.as_ref(), "use" | "image" | "feImage")
                     }) {
