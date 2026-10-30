@@ -2013,6 +2013,10 @@ function _eventTargetAdd(target, type, callback, options) {
     abortHandler: null,
   };
   listeners.push(entry);
+  if ((type === 'animationstart' || type === 'webkitAnimationStart')
+      && typeof globalThis._watchAnimationStart === 'function') {
+    globalThis._watchAnimationStart(target);
+  }
   _eventTargetListenerChanged.get(target)?.();
   if (signal && typeof signal.addEventListener === "function") {
     entry.abortHandler = () => _eventTargetRemove(target, type, callback, capture);
@@ -4153,6 +4157,39 @@ function _cssAnimations() {
   for (const [key, wrapper] of live) _cssAnimationWrappers.set(key, wrapper);
   return Array.from(live.values());
 }
+// animationstart: Chromium fires it at the frame after a CSS animation
+// starts. An element with a listener is checked each frame (~16ms) for CSS
+// animation instances it has not reported yet; libraries such as Chart.js
+// use the event to detect that a node was rendered.
+const _animationStartWatched = new Set();
+const _animationStartFired = new WeakMap();
+let _animationStartTimer = null;
+function _animationStartTick() {
+  _animationStartTimer = null;
+  for (const el of [..._animationStartWatched]) {
+    if (!el.isConnected) continue;
+    try { void el.offsetWidth; } catch (_e) {}
+    const live = new Set(_cssAnimations()
+      .filter(animation => animation._nid === (el._nid | 0))
+      .map(animation => animation.animationName));
+    const fired = _animationStartFired.get(el) || new Set();
+    for (const name of [...fired]) if (!live.has(name)) fired.delete(name);
+    for (const name of live) {
+      if (fired.has(name)) continue;
+      fired.add(name);
+      try { el.dispatchEvent(new AnimationEvent('animationstart', { animationName: name, bubbles: true })); }
+      catch (e) { console.error(e); }
+    }
+    _animationStartFired.set(el, fired);
+  }
+  if (_animationStartWatched.size) _animationStartTimer = setTimeout(_animationStartTick, 16);
+}
+globalThis._watchAnimationStart = function (el) {
+  if (!el || typeof el._nid !== 'number' || _animationStartWatched.has(el)) return;
+  if (_animationStartWatched.size >= 256) return;
+  _animationStartWatched.add(el);
+  if (_animationStartTimer == null) _animationStartTimer = setTimeout(_animationStartTick, 16);
+};
 function _animationsForTarget(target) {
   const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
   return css.concat(Array.from(_waapiAnimations).filter(animation => {
@@ -12419,7 +12456,14 @@ globalThis.PointerEvent = class extends MouseEvent {
     this.isPrimary=!!o.isPrimary;
   }
 };
-globalThis.AnimationEvent = class extends Event {};
+globalThis.AnimationEvent = class AnimationEvent extends Event {
+  constructor(type, init = {}) {
+    super(type, init);
+    this.animationName = String(init.animationName ?? '');
+    this.elapsedTime = Number(init.elapsedTime) || 0;
+    this.pseudoElement = String(init.pseudoElement ?? '');
+  }
+};
 globalThis.TransitionEvent = class extends Event {};
 globalThis.UIEvent = class extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0; }

@@ -10801,6 +10801,36 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "render")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn animationstart_fires_for_a_css_animation_started_by_a_class() {
+        // Chrome: Chart.js adds a class with a 0.001s animation and waits for
+        // animationstart (its render monitor) before inserting its resizer.
+        let dom = parse_html(
+            r##"<html><head><style>
+                @keyframes k { from { opacity: .99 } to { opacity: 1 } }
+                .m { animation: k .001s }
+            </style></head><body><div><canvas id="c"></canvas></div></body></html>"##,
+        );
+        let mut rt = ObscuraJsRuntime::new();
+        rt.set_dom(dom);
+        rt.set_viewport(400.0, 300.0);
+        rt.run_page_init();
+        rt.evaluate(
+            r##"(() => {
+                globalThis.__seen = [];
+                const c = document.getElementById("c");
+                c.addEventListener("animationstart", (e) => __seen.push(e.animationName));
+                c.classList.add("m");
+                return true;
+            })()"##,
+        )
+        .unwrap();
+        let _ = rt.run_event_loop_bounded(300).await;
+        let seen = rt.evaluate("__seen").unwrap();
+        assert_eq!(seen, serde_json::json!(["k"]));
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn window_listeners_survive_garbage_collection() {
         // A window load listener added during parsing must still run after a
