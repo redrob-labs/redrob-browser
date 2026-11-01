@@ -157,6 +157,23 @@ pub enum Op {
         username: String,
         password: zeroize::Zeroizing<String>,
     },
+    /// Find `text` in the page; `next` continues the search it started.
+    /// Answered with `Event::FindResult`.
+    Find {
+        text: String,
+        forward: bool,
+        match_case: bool,
+        next: bool,
+    },
+    /// Close find: clear the highlight, keep the selection.
+    StopFind,
+    /// Ctrl +, Ctrl -, Ctrl 0. The level is remembered for the site.
+    Zoom(crate::cef::handlers::zoom::Step),
+    Print,
+    /// Open Chromium's DevTools, inspecting the element at this page point.
+    Inspect {
+        at: Option<(i32, i32)>,
+    },
 }
 
 /// The browser window a command came from. Every window of the process
@@ -268,6 +285,32 @@ pub enum Event {
         bytes: u64,
     },
     Error(String),
+    /// A page asks for camera, microphone, location, notifications or the
+    /// clipboard; the window asks the person (cef/handlers/permission.rs).
+    Permission(crate::cef::handlers::permission::Prompt),
+    /// alert, confirm, prompt or "leave this page?" (cef/handlers/jsdialog.rs).
+    Dialog(crate::cef::handlers::jsdialog::Dialog),
+    /// The page's context menu, for the window to draw (cef/handlers/context_menu.rs).
+    ContextMenu(crate::cef::handlers::context_menu::Menu),
+    /// Matches for `Op::Find`: how many, which one is selected (1-based),
+    /// and whether the count is final.
+    FindResult {
+        count: i32,
+        active: i32,
+        done: bool,
+    },
+    /// The page's zoom changed, in percent.
+    Zoom(u32),
+    /// Put this text on the clipboard ("Copy link address").
+    Clipboard(String),
+    /// A page opened a window that needs `window.opener` (a sign-in popup):
+    /// CEF already made its browser, `browser_id`; show it as a new tab and
+    /// bind the id to it (`Sink::bind`).
+    Popup {
+        browser_id: i32,
+        url: String,
+        opener: Option<TabId>,
+    },
 }
 
 pub struct Update {
@@ -996,6 +1039,8 @@ async fn handle(st: &mut State, window: WindowId, tab: TabId, op: Op) -> anyhow:
                 .to_string();
             st.emit(tab, Event::Filled(outcome));
         }
+        // Answered by the CEF backend (cef/handlers); the Obscura engine has none.
+        Op::Find { .. } | Op::StopFind | Op::Zoom(_) | Op::Print | Op::Inspect { .. } => {}
     }
     Ok(())
 }

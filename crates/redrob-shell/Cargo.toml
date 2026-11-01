@@ -48,6 +48,8 @@ redrob-scene-raster = { path = "../redrob-scene-raster" }
 gstreamer-app = { version = "0.25", optional = true }
 gstreamer-video = { version = "0.25", optional = true }
 open = "5"
+# Chromium in the window tabs (docs/CEF.md). Binaries come from CEF_PATH.
+cef = { version = "=156.3.0+156.0.15", default-features = false }
 
 # The protected tab: WebView2 on Windows, WKWebView on macOS. Linux does not offer it.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]

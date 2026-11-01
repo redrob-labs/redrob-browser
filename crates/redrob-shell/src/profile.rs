@@ -388,6 +388,136 @@ impl Profile {
     }
 }
 
+/// Per-site choices the person made: permissions and zoom. CEF handlers read
+/// and write them on CEF's UI thread, so they have their own connection to
+/// the profile's database. An incognito window keeps them in memory only.
+#[derive(Clone)]
+pub struct SiteSettings {
+    db: std::sync::Arc<std::sync::Mutex<Connection>>,
+}
+
+impl SiteSettings {
+    /// The choices saved in the profile at `dir`.
+    pub fn open(dir: &Path) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        Self::with(Connection::open(dir.join("profile.sqlite"))?)
+    }
+
+    /// Choices that last until the window closes (incognito).
+    pub fn memory() -> Self {
+        Self::with(Connection::open_in_memory().expect("in-memory SQLite"))
+            .expect("in-memory site settings")
+    }
+
+    fn with(db: Connection) -> anyhow::Result<Self> {
+        db.busy_timeout(std::time::Duration::from_secs(2))?;
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS site_settings (
+                 origin TEXT NOT NULL,
+                 key TEXT NOT NULL,
+                 value TEXT NOT NULL,
+                 PRIMARY KEY (origin, key)
+             );",
+        )?;
+        Ok(Self {
+            db: std::sync::Arc::new(std::sync::Mutex::new(db)),
+        })
+    }
+
+    pub fn get(&self, origin: &str, key: &str) -> Option<String> {
+        self.db
+            .lock()
+            .ok()?
+            .query_row(
+                "SELECT value FROM site_settings WHERE origin = ?1 AND key = ?2",
+                params![origin, key],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
+    /// Save `value`, or forget the choice when it is None.
+    pub fn set(&self, origin: &str, key: &str, value: Option<&str>) {
+        let Ok(db) = self.db.lock() else {
+            return;
+        };
+        let _ = match value {
+            Some(v) => db.execute(
+                "INSERT INTO site_settings (origin, key, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(origin, key) DO UPDATE SET value = excluded.value",
+                params![origin, key, v],
+            ),
+            None => db.execute(
+                "DELETE FROM site_settings WHERE origin = ?1 AND key = ?2",
+                params![origin, key],
+            ),
+        };
+    }
+
+    /// Every saved choice for `key`, for the settings page: (origin, value).
+    pub fn all(&self, key: &str) -> Vec<(String, String)> {
+        let Ok(db) = self.db.lock() else {
+            return Vec::new();
+        };
+        let Ok(mut q) =
+            db.prepare("SELECT origin, value FROM site_settings WHERE key = ?1 ORDER BY origin")
+        else {
+            return Vec::new();
+        };
+        q.query_map(params![key], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.filter_map(Result::ok).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// Where Chromium keeps a profile's cookies, localStorage, IndexedDB and HTTP
+/// cache: a folder inside the profile, so Chromium's own files never meet
+/// ours. CEF's `root_cache_path` must be `root_cache_dir()`, a parent of it.
+pub fn chromium_dir(profile_dir: &Path) -> PathBuf {
+    profile_dir.join("chromium")
+}
+
+/// CEF's `root_cache_path`: every profile's Chromium folder sits under it.
+pub fn root_cache_dir() -> PathBuf {
+    data_dir().join("redrob-browser")
+}
+
+/// The Accept-Language list for the window language.
+pub fn accept_language(lang: crate::i18n::Lang) -> &'static str {
+    match lang {
+        crate::i18n::Lang::Ko => "ko-KR,ko,en-US,en",
+        crate::i18n::Lang::En => "en-US,en",
+    }
+}
+
+/// The settings a profile's CEF request context is made with.
+pub fn request_context_settings(profile_dir: Option<&Path>) -> cef::RequestContextSettings {
+    let cache = profile_dir
+        .map(|d| chromium_dir(d).to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Some(d) = profile_dir {
+        let _ = std::fs::create_dir_all(chromium_dir(d));
+        restrict(&chromium_dir(d));
+    }
+    cef::RequestContextSettings {
+        cache_path: cache.as_str().into(),
+        // Session cookies come back after a restart, as with Chrome's
+        // "continue where you left off". Incognito keeps nothing.
+        persist_session_cookies: profile_dir.is_some() as i32,
+        accept_language_list: accept_language(crate::i18n::current()).into(),
+        ..Default::default()
+    }
+}
+
+/// One CEF request context per profile: cookies, storage and the cache live
+/// in the profile's Chromium folder. `None` is incognito: memory only.
+/// Call it on CEF's UI thread after CEF started.
+pub fn request_context(profile_dir: Option<&Path>) -> cef::RequestContext {
+    let settings = request_context_settings(profile_dir);
+    cef::request_context_create_context(Some(&settings), None)
+        .expect("CEF makes a request context once it has started")
+}
+
 /// The default profile's folder.
 pub fn default_dir() -> PathBuf {
     data_dir().join("redrob-browser").join("Default")

@@ -530,6 +530,13 @@ impl Window {
                     }
                 }
                 Event::Opened { .. }
+                | Event::Permission(_)
+                | Event::Dialog(_)
+                | Event::ContextMenu(_)
+                | Event::FindResult { .. }
+                | Event::Zoom(_)
+                | Event::Clipboard(_)
+                | Event::Popup { .. }
                 | Event::Download { .. }
                 | Event::LoginSubmitted { .. }
                 | Event::DrmRequested { .. }
