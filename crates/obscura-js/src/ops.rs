@@ -1189,6 +1189,130 @@ fn op_performance_now(state: &OpState, frame_id: u32) -> f64 {
     (micros / 100) as f64 / 10.0
 }
 
+/// `navigator.hardwareConcurrency` and `navigator.deviceMemory` of the
+/// machine the engine runs on, as `[cores, gibibytes]` (0 when unknown).
+/// Chrome reports the real logical core count and the physical memory
+/// rounded to a power of two; a random pick from a list contradicts the
+/// worker, WebGL and timing surfaces that also reflect the real machine.
+#[op2]
+#[serde]
+fn op_host_hardware() -> (u32, f64) {
+    host_hardware()
+}
+
+fn host_hardware() -> (u32, f64) {
+    static HOST: std::sync::OnceLock<(u32, f64)> = std::sync::OnceLock::new();
+    *HOST.get_or_init(|| {
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(0);
+        let gib = host_memory_bytes().map_or(0.0, |bytes| bytes as f64 / (1u64 << 30) as f64);
+        (cores, gib)
+    })
+}
+
+/// A per-machine seed for the values the engine has to pick rather than
+/// measure (canvas text glyphs, screen and GPU from a pool). A browser gives
+/// the same answers on every page, frame and run on one machine; a seed drawn
+/// per page made each frame and each reload a different "device".
+#[op2(fast)]
+fn op_fingerprint_seed() -> u32 {
+    static SEED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SEED.get_or_init(|| {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            if let Ok(id) = std::fs::read_to_string(path) {
+                hasher.update(id.trim().as_bytes());
+                break;
+            }
+        }
+        for var in ["COMPUTERNAME", "HOSTNAME", "USER", "USERNAME"] {
+            if let Ok(value) = std::env::var(var) {
+                hasher.update(value.as_bytes());
+            }
+        }
+        let (cores, gib) = host_hardware();
+        hasher.update(cores.to_le_bytes());
+        hasher.update(gib.to_le_bytes());
+        let digest = hasher.finalize();
+        u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn host_memory_bytes() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+#[cfg(target_os = "macos")]
+fn host_memory_bytes() -> Option<u64> {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            oldp: *mut std::ffi::c_void,
+            oldlenp: *mut usize,
+            newp: *mut std::ffi::c_void,
+            newlen: usize,
+        ) -> std::ffi::c_int;
+    }
+    let mut bytes: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    // SAFETY: hw.memsize is a u64; `bytes` and `len` describe that buffer.
+    let status = unsafe {
+        sysctlbyname(
+            c"hw.memsize".as_ptr(),
+            (&mut bytes as *mut u64).cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (status == 0 && bytes > 0).then_some(bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn host_memory_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+    }
+    let mut status = MemoryStatusEx {
+        length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_phys: 0,
+        avail_phys: 0,
+        total_page_file: 0,
+        avail_page_file: 0,
+        total_virtual: 0,
+        avail_virtual: 0,
+        avail_extended_virtual: 0,
+    };
+    // SAFETY: `status` is a MEMORYSTATUSEX with its length field set.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
+    (ok != 0 && status.total_phys > 0).then_some(status.total_phys)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn host_memory_bytes() -> Option<u64> {
+    None
+}
+
 /// What kind of value console formatting is looking at, answered by V8
 /// without running page code: `"proxy"`, `"error"`, `"array"` or `""`.
 ///
@@ -8468,6 +8592,8 @@ pub fn build_extension() -> Extension {
         op_run_classic_script(),
         op_console_value_kind(),
         op_performance_now(),
+        op_host_hardware(),
+        op_fingerprint_seed(),
         op_fetch_script_sync(),
         op_fetch_body(),
         op_get_cookies(),

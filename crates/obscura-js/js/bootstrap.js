@@ -7259,7 +7259,8 @@ class Document extends Node {
   write(...args) {
     const method = _documentRealmMember(this, 'write');
     if (method) return Reflect.apply(method, this, args);
-    var html = args.join('');
+    // Each argument is a DOMString: null writes "null", undefined "undefined".
+    var html = args.map(String).join('');
     if (!html) return;
     // While a parser-inserted script runs, the text goes into the document
     // parser at the insertion point and is parsed now. An inline script the
@@ -7282,7 +7283,7 @@ class Document extends Node {
     _insertWrittenNodes(this, _domParse("document_write", "", html) || []);
   }
   writeln(...args) {
-    this.write(args.join('') + '\n');
+    this.write(args.map(String).join('') + '\n');
   }
   open() {
     const method = _documentRealmMember(this, 'open');
@@ -7716,14 +7717,23 @@ class HTMLImageElement extends HTMLElement {
     }
   }
 
+  // A broken image without alt text renders as Chrome's 16x16 broken-image
+  // icon while it is in the document, and `width`/`height` report that box.
+  // 0x0 is the classic headless tell.
+  _brokenIconSize() {
+    return this._imageComplete && !this._imageDecoded && !!this.getAttribute("src")
+      && !this.hasAttribute("alt") && this.isConnected ? 16 : 0;
+  }
   get width() {
     const value = Number.parseInt(this.getAttribute("width") || "", 10);
-    return Number.isFinite(value) && value >= 0 ? value : this._imageNaturalWidth;
+    if (Number.isFinite(value) && value >= 0) return value;
+    return this._imageNaturalWidth || this._brokenIconSize();
   }
   set width(value) { this.setAttribute("width", Math.max(0, Number(value) || 0)); }
   get height() {
     const value = Number.parseInt(this.getAttribute("height") || "", 10);
-    return Number.isFinite(value) && value >= 0 ? value : this._imageNaturalHeight;
+    if (Number.isFinite(value) && value >= 0) return value;
+    return this._imageNaturalHeight || this._brokenIconSize();
   }
   set height(value) { this.setAttribute("height", Math.max(0, Number(value) || 0)); }
 
@@ -8044,11 +8054,37 @@ class HTMLMediaElement extends HTMLElement {
     };
     setTimeout(tick, 0);
   }
+  // Chrome's answers, container by container. Pages read these as a
+  // capability fingerprint; "" for H.264 is what a codec-less headless
+  // browser says.
   canPlayType(type) {
-    if (typeof globalThis.redrobMedia !== 'function') return '';
-    const t = String(type).toLowerCase();
-    if (/^(video|audio)\/(mp4|webm|ogg|mpeg|x-m4a|aac|wav)/.test(t)) return 'maybe';
-    return '';
+    const parts = String(type).split(';');
+    const mime = parts[0].trim().toLowerCase();
+    const codecsParam = parts.slice(1).map((p) => p.trim()).find((p) => /^codecs\s*=/i.test(p));
+    const containers = {
+      'video/mp4': /^(avc1\..+|av01\..+|vp09\..+|mp4a\.40\.\d+|flac|opus)$/,
+      'audio/mp4': /^(mp4a\.40\.\d+|flac|opus)$/,
+      'audio/x-m4a': /^(mp4a\.40\.\d+|flac|opus)$/,
+      'video/webm': /^(vp8|vp8\.0|vp9|vp9\.0|vp09\..+|av01\..+|vorbis|opus)$/,
+      'audio/webm': /^(vorbis|opus)$/,
+      'video/ogg': /^(vorbis|opus|flac)$/,
+      'audio/ogg': /^(vorbis|opus|flac)$/,
+      'audio/wav': /^1$/,
+      'audio/x-wav': /^1$/,
+      'video/x-matroska': /^(avc1\..+|av01\..+|vp8|vp9|vp09\..+|vorbis|opus|flac)$/,
+      'video/3gpp': null, 'video/x-m4v': null,
+      'application/x-mpegurl': null, 'application/vnd.apple.mpegurl': null,
+    };
+    const sureWithoutCodecs = new Set(['audio/mpeg', 'audio/mp3', 'audio/aac', 'audio/flac']);
+    if (!codecsParam) {
+      if (sureWithoutCodecs.has(mime)) return 'probably';
+      return Object.prototype.hasOwnProperty.call(containers, mime) ? 'maybe' : '';
+    }
+    const allowed = containers[mime];
+    if (!allowed) return '';
+    const codecs = codecsParam.replace(/^codecs\s*=\s*/i, '').replace(/^["']|["']$/g, '')
+      .split(',').map((c) => c.trim()).filter(Boolean);
+    return codecs.length && codecs.every((c) => allowed.test(c)) ? 'probably' : '';
   }
   load() {
     const m = this.__media;
@@ -8613,78 +8649,89 @@ for (let i = 0; i < 50; i++) {
 
 // Navigator constructor so that typeof Navigator !== 'undefined' and
 // navigatorPrototype checks don't throw a ReferenceError.
-function Navigator() {}
+function Navigator() { throw new TypeError("Illegal constructor"); }
 _markNative(Navigator);
 
 // PluginArray must exist before navigator is built so the plugins getter can use it.
-function PluginArray(items) {
-  for (var _pi = 0; _pi < items.length; _pi++) this[_pi] = items[_pi];
-  this.length = items.length;
-}
-PluginArray.prototype = Object.create(Array.prototype);
-PluginArray.prototype.constructor = PluginArray;
-PluginArray.prototype.item = function(i) { return this[i] || null; };
-PluginArray.prototype.namedItem = function(name) {
-  for (var _pi = 0; _pi < this.length; _pi++) {
-    if (this[_pi].name === name) return this[_pi];
+// PluginArray, Plugin, MimeTypeArray and MimeType as Chrome has them: the
+// interfaces cannot be constructed, members are getters and operations on
+// the prototypes, entries are own indexed properties and names resolve as
+// named properties. Chrome lists the same five PDF viewers everywhere since
+// version 94, each carrying both PDF MIME types, and the MIME types point
+// back at the first viewer. Plain function declarations so they survive the
+// V8 snapshot.
+const _pluginKey = {};
+const _pluginData = new WeakMap();
+function PluginArray(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function Plugin(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function MimeTypeArray(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function MimeType(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+(function _definePluginInterfaces() {
+  const data = (self, name) => {
+    const d = _pluginData.get(self);
+    if (!d) throw new TypeError('Illegal invocation');
+    return d[name];
+  };
+  const define = (Ctor, tag, getters, methods) => {
+    for (const name of getters) {
+      const get = _markNativeAs(function () { return data(this, name); }, 'function get ' + name + '() { [native code] }');
+      Object.defineProperty(Ctor.prototype, name, { get, set: undefined, enumerable: true, configurable: true });
+    }
+    for (const [name, fn] of Object.entries(methods)) {
+      Object.defineProperty(fn, 'name', { value: name, configurable: true });
+      _markNative(fn);
+      Object.defineProperty(Ctor.prototype, name, { value: fn, writable: true, enumerable: true, configurable: true });
+    }
+    Object.defineProperty(Ctor.prototype, Symbol.toStringTag, { value: tag, configurable: true });
+    _markNative(Ctor);
+  };
+  const listMethods = (nameOf) => ({
+    item(index) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'item' on '" + Object.prototype.toString.call(this).slice(8, -1) + "': 1 argument required, but only 0 present.");
+      return data(this, 'items')[index >>> 0] || null;
+    },
+    namedItem(name) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'namedItem' on '" + Object.prototype.toString.call(this).slice(8, -1) + "': 1 argument required, but only 0 present.");
+      return data(this, 'items').find((entry) => nameOf(entry) === String(name)) || null;
+    },
+  });
+  define(PluginArray, 'PluginArray', ['length'], Object.assign(listMethods((p) => _pluginData.get(p).name), { refresh() {} }));
+  define(Plugin, 'Plugin', ['name', 'filename', 'description', 'length'], listMethods((m) => _pluginData.get(m).type));
+  define(MimeTypeArray, 'MimeTypeArray', ['length'], listMethods((m) => _pluginData.get(m).type));
+  define(MimeType, 'MimeType', ['type', 'suffixes', 'description', 'enabledPlugin'], {});
+  for (const Ctor of [PluginArray, Plugin, MimeTypeArray]) {
+    Object.defineProperty(Ctor.prototype, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true });
   }
-  return null;
-};
-PluginArray.prototype.refresh = function() {};
-PluginArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(PluginArray.prototype, Symbol.toStringTag, {value: 'PluginArray', configurable: true});
-_markNative(PluginArray);
-_markNative(PluginArray.prototype.item);
-_markNative(PluginArray.prototype.namedItem);
-_markNative(PluginArray.prototype.refresh);
-
-// Plugin / MimeType / MimeTypeArray global interfaces. Chrome exposes these as
-// global constructors; their absence threw "ReferenceError: Plugin is not
-// defined" in site bundles that reference them (issue #305). Plain function
-// declarations (no globalThis assignment) so they survive the V8 snapshot, the
-// same pattern PluginArray uses.
-function Plugin(name, filename, description, mimeTypes) {
-  this.name = name;
-  this.filename = filename;
-  this.description = description;
-  var mt = mimeTypes || [];
-  for (var _i = 0; _i < mt.length; _i++) this[_i] = mt[_i];
-  this.length = mt.length;
+})();
+// Builds an indexed list: entries as own enumerable index properties and
+// named access by `nameOf` as non-enumerable own properties.
+function _pluginList(Ctor, items, nameOf, extra) {
+  const list = new Ctor(_pluginKey);
+  _pluginData.set(list, Object.assign({ items, length: items.length }, extra || {}));
+  items.forEach((entry, i) => Object.defineProperty(list, i, { value: entry, enumerable: true, configurable: true }));
+  for (const entry of items) {
+    const name = nameOf(entry);
+    if (name && !Object.prototype.hasOwnProperty.call(list, name)) {
+      Object.defineProperty(list, name, { value: entry, enumerable: false, configurable: true });
+    }
+  }
+  return list;
 }
-Plugin.prototype.item = function(i) { return this[i] || null; };
-Plugin.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-Plugin.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(Plugin.prototype, Symbol.toStringTag, {value: 'Plugin', configurable: true});
-_markNative(Plugin);
-_markNative(Plugin.prototype.item);
-_markNative(Plugin.prototype.namedItem);
-
-function MimeType(type, description, suffixes, plugin) {
-  this.type = type;
-  this.description = description;
-  this.suffixes = suffixes;
-  this.enabledPlugin = plugin || null;
+function _makePdfPlugins() {
+  const desc = 'Portable Document Format';
+  const mimes = [new MimeType(_pluginKey), new MimeType(_pluginKey)];
+  const names = ['PDF Viewer', 'Chrome PDF Viewer', 'Chromium PDF Viewer', 'Microsoft Edge PDF Viewer', 'WebKit built-in PDF'];
+  const typeOf = (m) => _pluginData.get(m).type;
+  _pluginData.set(mimes[0], { type: 'application/pdf', suffixes: 'pdf', description: desc, enabledPlugin: null });
+  _pluginData.set(mimes[1], { type: 'text/pdf', suffixes: 'pdf', description: desc, enabledPlugin: null });
+  const plugins = names.map((name) => _pluginList(Plugin, mimes, typeOf,
+    { name, filename: 'internal-pdf-viewer', description: desc }));
+  for (const mime of mimes) _pluginData.get(mime).enabledPlugin = plugins[0];
+  return {
+    plugins: _pluginList(PluginArray, plugins, (p) => _pluginData.get(p).name),
+    mimeTypes: _pluginList(MimeTypeArray, mimes, typeOf),
+  };
 }
-Object.defineProperty(MimeType.prototype, Symbol.toStringTag, {value: 'MimeType', configurable: true});
-_markNative(MimeType);
-
-function MimeTypeArray(items) {
-  for (var _i = 0; _i < items.length; _i++) this[_i] = items[_i];
-  this.length = items.length;
-}
-MimeTypeArray.prototype.item = function(i) { return this[i] || null; };
-MimeTypeArray.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-MimeTypeArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(MimeTypeArray.prototype, Symbol.toStringTag, {value: 'MimeTypeArray', configurable: true});
-_markNative(MimeTypeArray);
-_markNative(MimeTypeArray.prototype.item);
-_markNative(MimeTypeArray.prototype.namedItem);
 
 globalThis.Navigator = Navigator;
 globalThis.PluginArray = PluginArray;
@@ -8886,17 +8933,9 @@ globalThis.navigator = {
   });
 
   // Cache plugins/mimeTypes so navigator.plugins === navigator.plugins.
-  var _plugins = new PluginArray([
-    new Plugin("PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chrome PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chromium PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Microsoft Edge PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("WebKit built-in PDF", "internal-pdf-viewer", "Portable Document Format", []),
-  ]);
-  var _mimeTypes = new MimeTypeArray([
-    new MimeType("application/pdf", "Portable Document Format", "pdf", null),
-    new MimeType("text/pdf", "Portable Document Format", "pdf", null),
-  ]);
+  var _pdf = _makePdfPlugins();
+  var _plugins = _pdf.plugins;
+  var _mimeTypes = _pdf.mimeTypes;
   defGetter('plugins', function() { return _plugins; });
   defGetter('mimeTypes', function() { return _mimeTypes; });
 
@@ -10385,7 +10424,13 @@ function _splitMediaAnd(input) {
 }
 
 function _mediaViewportDimension(name) {
-  const value = name === 'width' ? Number(globalThis.innerWidth) : Number(globalThis.innerHeight);
+  // device-width/height are the screen's, as in Chrome; width/height the viewport's.
+  if (name === 'device-width' || name === 'device-height') {
+    const scr = globalThis.screen;
+    const v = scr ? Number(name === 'device-width' ? scr.width : scr.height) : NaN;
+    if (Number.isFinite(v)) return v;
+  }
+  const value = name === 'width' || name === 'device-width' ? Number(globalThis.innerWidth) : Number(globalThis.innerHeight);
   if (Number.isFinite(value)) return value;
   return name === 'width' ? 1440 : 900;
 }
@@ -10406,7 +10451,7 @@ function _compareMediaValues(left, operator, right) {
 }
 
 function _evaluateMediaDimension(feature) {
-  let match = feature.match(/^(min|max)-(width|height)\s*:\s*(.+)$/);
+  let match = feature.match(/^(min|max)-((?:device-)?(?:width|height))\s*:\s*(.+)$/);
   if (match) {
     const expected = _parseMediaPx(match[3]);
     if (expected === null) return false;
@@ -10414,7 +10459,7 @@ function _evaluateMediaDimension(feature) {
     return match[1] === 'min' ? actual >= expected : actual <= expected;
   }
 
-  match = feature.match(/^(width|height)\s*:\s*(.+)$/);
+  match = feature.match(/^((?:device-)?(?:width|height))\s*:\s*(.+)$/);
   if (match) {
     const expected = _parseMediaPx(match[2]);
     return expected !== null && _mediaViewportDimension(match[1]) === expected;
@@ -10479,8 +10524,52 @@ function _evaluateMediaFeature(raw) {
   if (match) return match[2] === 'hover';
 
   if (feature === 'color') return true;
-  match = feature.match(/^color\s*:\s*(\d+)$/);
-  if (match) return Number(match[1]) === 8;
+  match = feature.match(/^(min-|max-)?color\s*:\s*(\d+)$/);
+  if (match) return _compareMediaValues(8, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  // The rest of Chrome's answers for an ordinary sRGB desktop screen.
+  match = feature.match(/^(min-|max-)?(device-)?aspect-ratio\s*:\s*(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?$/);
+  if (match) {
+    const dims = match[2] ? ['device-width', 'device-height'] : ['width', 'height'];
+    const actual = _mediaViewportDimension(dims[0]) / _mediaViewportDimension(dims[1]);
+    const expected = Number(match[3]) / (match[4] === undefined ? 1 : Number(match[4]));
+    return _compareMediaValues(actual, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', expected);
+  }
+  match = feature.match(/^(min-|max-)?(?:-webkit-)?(?:device-pixel-ratio|resolution)\s*:\s*(\d+(?:\.\d+)?)(dppx|x|dpi|dpcm)?$/);
+  if (match) {
+    let expected = Number(match[2]);
+    if (match[3] === 'dpi') expected /= 96;
+    else if (match[3] === 'dpcm') expected /= 96 / 2.54;
+    const dpr = Number(globalThis.devicePixelRatio) || 1;
+    return _compareMediaValues(dpr, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', expected);
+  }
+  match = feature.match(/^color-gamut\s*:\s*(srgb|p3|rec2020)$/);
+  if (match) return match[1] === 'srgb';
+  match = feature.match(/^(dynamic-range|video-dynamic-range)\s*:\s*(standard|high)$/);
+  if (match) return match[2] === 'standard';
+  match = feature.match(/^forced-colors\s*:\s*(none|active)$/);
+  if (match) return match[1] === 'none';
+  match = feature.match(/^prefers-contrast\s*:\s*(no-preference|more|less|custom)$/);
+  if (match) return match[1] === 'no-preference';
+  match = feature.match(/^prefers-reduced-transparency\s*:\s*(no-preference|reduce)$/);
+  if (match) return match[1] === 'no-preference';
+  match = feature.match(/^display-mode\s*:\s*(browser|minimal-ui|standalone|fullscreen|window-controls-overlay|picture-in-picture|tabbed|borderless)$/);
+  if (match) return match[1] === 'browser';
+  match = feature.match(/^(min-|max-)?monochrome(?:\s*:\s*(\d+))?$/);
+  if (match) return match[2] === undefined ? false : _compareMediaValues(0, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  match = feature.match(/^(min-|max-)?color-index(?:\s*:\s*(\d+))?$/);
+  if (match) return match[2] === undefined ? false : _compareMediaValues(0, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  match = feature.match(/^scripting\s*:\s*(none|initial-only|enabled)$/);
+  if (match) return match[1] === 'enabled';
+  match = feature.match(/^update\s*:\s*(none|slow|fast)$/);
+  if (match) return match[1] === 'fast';
+  match = feature.match(/^overflow-(block|inline)\s*:\s*(none|scroll|paged|optional-paged)$/);
+  if (match) return match[2] === 'scroll';
+  if (feature === 'hover' || feature === 'any-hover' || feature === 'pointer' || feature === 'any-pointer'
+      || feature === 'grid' || feature === 'device-width' || feature === 'device-height') {
+    return feature !== 'grid';
+  }
+  match = feature.match(/^grid\s*:\s*([01])$/);
+  if (match) return match[1] === '0';
   return false;
 }
 
@@ -19189,13 +19278,35 @@ if (typeof EventSource === 'undefined') {
 if (typeof WebSocket === 'undefined') {
   globalThis.WebSocket = class WebSocket {
     constructor(url, protocols) {
-      // Validate URL scheme per spec — Chrome throws SyntaxError for non-ws/wss URLs
-      if (typeof url !== 'string' || !/^wss?:\/\//i.test(url)) {
+      // The URL resolves against the document like any other, and http(s)
+      // maps to ws(s), as Chrome does; only an unparseable URL or another
+      // scheme is a SyntaxError.
+      if (arguments.length < 1) {
+        throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
+      }
+      let parsed = null;
+      try { parsed = new URL(String(url), globalThis.document ? document.baseURI : undefined); } catch (_e) {}
+      if (!parsed) {
         throw new DOMException(
           "Failed to construct 'WebSocket': The URL '" + url + "' is invalid.",
           'SyntaxError'
         );
       }
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+      else if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+        throw new DOMException(
+          "Failed to construct 'WebSocket': The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '" + parsed.protocol.slice(0, -1) + "' is not allowed.",
+          'SyntaxError'
+        );
+      }
+      if (parsed.hash) {
+        throw new DOMException(
+          "Failed to construct 'WebSocket': The URL contains a fragment identifier ('" + parsed.hash.slice(1) + "'). Fragment identifiers are not allowed in WebSocket URLs.",
+          'SyntaxError'
+        );
+      }
+      url = parsed.href;
       this.url = url;
       this.readyState = 0; // CONNECTING
       this.bufferedAmount = 0;
@@ -20196,7 +20307,7 @@ globalThis.__obscura_init = function() {
     _realmFrameId);
   _browserPostedTaskWakePending = false;
   for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
-  _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
+  _fpSeed = __obscuraCore.ops.op_fingerprint_seed() | 0;
   _fpCache = null;
   // A real navigation just completed (this runs after set_url), so drop any
   // URL a location setter previewed synchronously and let document_url drive
@@ -20245,10 +20356,25 @@ globalThis.__obscura_init = function() {
   globalThis.innerWidth = vw; globalThis.innerHeight = vh;
   globalThis.outerWidth = sw; globalThis.outerHeight = sh - 40;
 
-  var hwValues = globalThis.__obscura_stealth ? [4, 6, 8, 12, 16] : [2, 4, 6, 8, 12, 16];
-  globalThis.__obscura_hw = hwValues[Math.floor(_fpRand(400) * hwValues.length)];
-  var memValues = globalThis.__obscura_stealth ? [4, 8] : [0.25, 0.5, 1, 2, 4, 8];
-  globalThis.__obscura_mem = memValues[Math.floor(_fpRand(401) * memValues.length)];
+  // The machine's own core count and memory, as Chrome reports them: memory
+  // in GiB rounded to the nearest power of two, between 0.25 and 32.
+  const [hostCores, hostGib] = __obscuraCore.ops.op_host_hardware();
+  globalThis.__obscura_hw = hostCores > 0 ? hostCores : 8;
+  globalThis.__obscura_mem = hostGib > 0
+    ? Math.min(32, Math.max(0.25, Math.pow(2, Math.round(Math.log2(hostGib)))))
+    : 8;
+  // navigator.share exists in Chrome on Windows, macOS and ChromeOS only.
+  if ((globalThis.__obscura_ua_platform || '') === 'Linux') {
+    delete Navigator.prototype.share;
+    delete Navigator.prototype.canShare;
+  }
+  // A window that is not maximized: as wide as the viewport (plus the frame
+  // on Windows) and taller by the tab strip and toolbar.
+  {
+    const windows = (globalThis.__obscura_ua_platform || '') === 'Windows';
+    globalThis.outerWidth = Math.min(screen.availWidth || sw, vw + (windows ? 16 : 0));
+    globalThis.outerHeight = Math.min(screen.availHeight || sh, vh + (windows ? 87 : 85));
+  }
 
   const timing = {};
   for (const name of Object.keys(JSON.parse(_dom('performance_timing')))) {
@@ -21430,6 +21556,319 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
   }
 })();
 
+// Navigator, shaped like Chrome's. Every member of `navigator` is an
+// accessor or operation on Navigator.prototype, in Chrome's order, and the
+// instance itself has no own properties: `Object.keys(navigator)` is [] and
+// `Object.prototype.toString.call(navigator)` is "[object Navigator]" in a
+// browser, and fingerprinting scripts compare both. The member objects
+// (`navigator.mediaDevices`, `navigator.permissions`, ...) are instances of
+// their own interfaces, with their members on the interface prototype.
+(function _shapeNavigator() {
+  const nav = globalThis.navigator;
+  const navProto = Navigator.prototype;
+  const hop = Object.getPrototypeOf(nav);
+  const values = new Map();
+  for (const key of Reflect.ownKeys(nav)) {
+    values.set(key, Object.getOwnPropertyDescriptor(nav, key).value);
+    delete nav[key];
+  }
+  const getters = new Map();
+  if (hop && hop !== navProto) {
+    for (const key of Reflect.ownKeys(hop)) {
+      const d = Object.getOwnPropertyDescriptor(hop, key);
+      if (d.get) getters.set(key, d.get);
+      else if (typeof d.value === 'function') values.set(key, d.value);
+    }
+  }
+  Object.setPrototypeOf(nav, navProto);
+  Object.defineProperty(navProto, Symbol.toStringTag, { value: 'Navigator', configurable: true });
+
+  const illegal = (name) => {
+    const Ctor = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+    _markNative(Ctor);
+    return Ctor;
+  };
+  // An instance of interface `name` whose members are those of `members`,
+  // moved onto the interface prototype. Data members become read-only
+  // accessors, except event handler slots (`on*`), which stay writable.
+  const ifaceCtors = new Map();
+  const ifaceSlots = new WeakMap();
+  function asInterface(name, members, parent, expose) {
+    let Ctor = ifaceCtors.get(name);
+    if (!Ctor) {
+      Ctor = typeof globalThis[name] === 'function' && expose ? globalThis[name] : illegal(name);
+      if (!Ctor.prototype || Ctor.prototype === Function.prototype) Ctor.prototype = {};
+      const proto = Ctor.prototype;
+      if (parent && Object.getPrototypeOf(proto) === Object.prototype) Object.setPrototypeOf(proto, parent);
+      Object.defineProperty(proto, 'constructor', { value: Ctor, writable: true, configurable: true, enumerable: false });
+      Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
+      ifaceCtors.set(name, Ctor);
+      if (expose && typeof globalThis[name] !== 'function') {
+        Object.defineProperty(globalThis, name, { value: Ctor, writable: true, configurable: true, enumerable: false });
+      }
+    }
+    const proto = Ctor.prototype;
+    const inst = Object.create(proto);
+    const slots = new Map();
+    ifaceSlots.set(inst, slots);
+    for (const key of Reflect.ownKeys(members || {})) {
+      const d = Object.getOwnPropertyDescriptor(members, key);
+      if (typeof key === 'symbol') continue;
+      if ('value' in d && typeof d.value === 'function' && !/^on/.test(key)) {
+        Object.defineProperty(d.value, 'name', { value: key, configurable: true });
+        _markNative(d.value);
+        Object.defineProperty(proto, key, { value: d.value, writable: true, enumerable: true, configurable: true });
+      } else if (d.get || d.set) {
+        if (d.get) _markNativeAs(d.get, 'function get ' + key + '() { [native code] }');
+        if (d.set) _markNativeAs(d.set, 'function set ' + key + '() { [native code] }');
+        Object.defineProperty(proto, key, { get: d.get, set: d.set, enumerable: true, configurable: true });
+      } else {
+        slots.set(key, d.value);
+        const get = _markNativeAs(function () {
+          const own = ifaceSlots.get(this);
+          return own ? own.get(key) : undefined;
+        }, 'function get ' + key + '() { [native code] }');
+        const set = /^on/.test(key)
+          ? _markNativeAs(function (v) {
+            const own = ifaceSlots.get(this);
+            if (own) own.set(key, typeof v === 'function' || (v && typeof v === 'object') ? v : null);
+          }, 'function set ' + key + '() { [native code] }')
+          : undefined;
+        Object.defineProperty(proto, key, { get, set, enumerable: true, configurable: true });
+      }
+    }
+    return inst;
+  }
+  const eventTargetMembers = {
+    addEventListener(type, listener, options) { _eventTargetAdd(this, type, listener, options); },
+    removeEventListener(type, listener, options) { _eventTargetRemove(this, type, listener, options); },
+    dispatchEvent(event) { return _eventTargetDispatch(this, event); },
+  };
+  const withEvents = (members) => Object.assign({}, eventTargetMembers, members);
+  const etProto = EventTarget.prototype;
+  const rejectNotAllowed = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+
+  // Existing member objects, re-homed onto their interfaces.
+  const member = (key, name, parent, expose) => {
+    const v = values.get(key);
+    if (v && typeof v === 'object' && !(v instanceof Navigator)) values.set(key, asInterface(name, v, parent, expose));
+  };
+  const conn = values.get('connection');
+  if (conn) {
+    values.set('connection', asInterface('NetworkInformation', withEvents({
+      get effectiveType() { return '4g'; },
+      get rtt() { return 50; },
+      get downlink() { return 10; },
+      get saveData() { return false; },
+      onchange: null,
+    }), etProto, true));
+  }
+  member('mediaDevices', 'MediaDevices', etProto, true);
+  const md = values.get('mediaDevices');
+  if (md) {
+    const mdProto = Object.getPrototypeOf(md);
+    for (const k of ['addEventListener', 'removeEventListener']) delete mdProto[k];
+    Object.defineProperty(mdProto, 'enumerateDevices', {
+      value: _markNative({ enumerateDevices() {
+        // Before a capture permission is granted Chrome lists one entry
+        // per kind present, with empty ids and labels.
+        const info = (kind) => asInterface(kind === 'audiooutput' ? 'MediaDeviceInfo' : 'InputDeviceInfo',
+          { deviceId: '', kind, label: '', groupId: '', toJSON() { return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId }; } },
+          undefined, true);
+        return Promise.resolve([info('audioinput'), info('audiooutput')]);
+      } }.enumerateDevices),
+      writable: true, enumerable: true, configurable: true,
+    });
+    Object.defineProperty(mdProto, 'getSupportedConstraints', {
+      value: _markNative({ getSupportedConstraints() {
+        const out = {};
+        for (const k of ['aspectRatio', 'autoGainControl', 'brightness', 'channelCount', 'colorTemperature', 'contrast', 'deviceId', 'displaySurface', 'echoCancellation', 'exposureCompensation', 'exposureMode', 'exposureTime', 'facingMode', 'focusDistance', 'focusMode', 'frameRate', 'groupId', 'height', 'iso', 'latency', 'noiseSuppression', 'pan', 'pointsOfInterest', 'resizeMode', 'restrictOwnAudio', 'sampleRate', 'sampleSize', 'saturation', 'sharpness', 'suppressLocalAudioPlayback', 'tilt', 'torch', 'voiceIsolation', 'whiteBalanceMode', 'width', 'zoom']) out[k] = true;
+        return out;
+      } }.getSupportedConstraints),
+      writable: true, enumerable: true, configurable: true,
+    });
+    Object.defineProperty(mdProto, 'ondevicechange', { get: _markNative(function () { return null; }), set: _markNative(function () {}), enumerable: true, configurable: true });
+    Object.setPrototypeOf(mdProto, etProto);
+  }
+  member('serviceWorker', 'ServiceWorkerContainer', etProto, true);
+  member('clipboard', 'Clipboard', etProto, true);
+  member('permissions', 'Permissions', undefined, true);
+  member('geolocation', 'Geolocation', undefined, true);
+  member('storage', 'StorageManager', undefined, true);
+  member('credentials', 'CredentialsContainer', undefined, true);
+  member('mediaCapabilities', 'MediaCapabilities', undefined, true);
+  member('locks', 'LockManager', undefined, true);
+  member('keyboard', 'Keyboard', undefined, true);
+  member('gpu', 'GPU', undefined, true);
+  member('wakeLock', 'WakeLock', undefined, true);
+  member('userAgentData', 'NavigatorUAData', undefined, true);
+  const storage = values.get('storage');
+  if (storage) {
+    Object.defineProperty(Object.getPrototypeOf(storage), 'getDirectory', {
+      value: _markNative({ getDirectory() { return Promise.reject(new DOMException('The request is not allowed by the user agent or the platform in the current context.', 'SecurityError')); } }.getDirectory),
+      writable: true, enumerable: true, configurable: true,
+    });
+  }
+
+  // Members Chrome has that had no object here.
+  const deprecatedQuota = () => asInterface('DeprecatedStorageQuota', {
+    queryUsageAndQuota(success) { if (typeof success === 'function') setTimeout(() => success(0, 10737418240), 0); },
+    requestQuota(size, success) { if (typeof success === 'function') setTimeout(() => success(0), 0); },
+  });
+  const stubs = {
+    vendorSub: '',
+    appCodeName: 'Mozilla',
+    appName: 'Netscape',
+    scheduling: asInterface('Scheduling', { isInputPending() { return false; } }, undefined, true),
+    userActivation: asInterface('UserActivation', {
+      get hasBeenActive() { return _hasStickyActivation; },
+      get isActive() { return false; },
+    }, undefined, true),
+    webkitTemporaryStorage: deprecatedQuota(),
+    webkitPersistentStorage: deprecatedQuota(),
+    windowControlsOverlay: asInterface('WindowControlsOverlay', withEvents({
+      get visible() { return false; },
+      getTitlebarAreaRect() { return new DOMRect(0, 0, 0, 0); },
+      ongeometrychange: null,
+    }), etProto, true),
+    vibrate(pattern) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'vibrate' on 'Navigator': 1 argument required, but only 0 present.");
+      return false;
+    },
+    managed: asInterface('NavigatorManagedData', withEvents({ onmanagedconfigurationchange: null }), etProto, true),
+    virtualKeyboard: asInterface('VirtualKeyboard', withEvents({
+      get boundingRect() { return new DOMRect(0, 0, 0, 0); },
+      get overlaysContent() { return false; },
+      show() {}, hide() {}, ongeometrychange: null,
+    }), etProto, true),
+    login: asInterface('NavigatorLogin', { setStatus() { return Promise.resolve(); } }, undefined, true),
+    ink: asInterface('Ink', { requestPresenter() { return Promise.reject(new DOMException('Not supported', 'NotSupportedError')); } }, undefined, true),
+    devicePosture: asInterface('DevicePosture', withEvents({ get type() { return 'continuous'; }, onchange: null }), etProto, true),
+    hid: asInterface('HID', withEvents({ getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.resolve([]); }, onconnect: null, ondisconnect: null }), etProto, true),
+    mediaSession: asInterface('MediaSession', { metadata: null, playbackState: 'none', setActionHandler() {}, setPositionState() {}, setCameraActive() { return Promise.resolve(); }, setMicrophoneActive() { return Promise.resolve(); } }, undefined, true),
+    presentation: asInterface('Presentation', { defaultRequest: null, receiver: null }, undefined, true),
+    serial: asInterface('Serial', withEvents({ getPorts() { return Promise.resolve([]); }, requestPort() { return Promise.reject(new DOMException('No port selected by the user.', 'NotFoundError')); }, onconnect: null, ondisconnect: null }), etProto, true),
+    usb: asInterface('USB', withEvents({ getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.reject(new DOMException('No device selected.', 'NotFoundError')); }, onconnect: null, ondisconnect: null }), etProto, true),
+    xr: asInterface('XRSystem', withEvents({ isSessionSupported() { return Promise.resolve(false); }, requestSession() { return Promise.reject(new DOMException('The specified session configuration is not supported.', 'NotSupportedError')); }, supportsSession() { return Promise.reject(new DOMException('Not supported', 'NotSupportedError')); }, ondevicechange: null }), etProto, true),
+    storageBuckets: asInterface('StorageBucketManager', { open() { return Promise.reject(new DOMException('Not allowed', 'SecurityError')); }, keys() { return Promise.resolve([]); }, delete() { return Promise.resolve(); } }, undefined, true),
+    clearAppBadge() { return Promise.resolve(); },
+    getUserMedia(constraints, success, failure) {
+      if (arguments.length < 3) throw new TypeError("Failed to execute 'getUserMedia' on 'Navigator': 3 arguments required, but only " + arguments.length + " present.");
+      if (typeof failure === 'function') setTimeout(() => failure(new DOMException('Permission denied', 'NotAllowedError')), 0);
+    },
+    requestMIDIAccess() { return rejectNotAllowed(); },
+    setAppBadge() { return Promise.resolve(); },
+    getInstalledRelatedApps() { return Promise.resolve([]); },
+    registerProtocolHandler(scheme, url) {
+      if (arguments.length < 2) throw new TypeError("Failed to execute 'registerProtocolHandler' on 'Navigator': 2 arguments required, but only " + arguments.length + " present.");
+    },
+    unregisterProtocolHandler(scheme, url) {
+      if (arguments.length < 2) throw new TypeError("Failed to execute 'unregisterProtocolHandler' on 'Navigator': 2 arguments required, but only " + arguments.length + " present.");
+    },
+  };
+  stubs.webkitGetUserMedia = function (constructor, success, failure) {
+    if (arguments.length < 3) throw new TypeError("Failed to execute 'webkitGetUserMedia' on 'Navigator': 3 arguments required, but only " + arguments.length + " present.");
+    if (typeof failure === 'function') setTimeout(() => failure(new DOMException('Permission denied', 'NotAllowedError')), 0);
+  };
+  // Chrome's coarse CPU tier (1-4) from the core count.
+  getters.set('cpuPerformance', function () {
+    const cores = globalThis.__obscura_hw || 0;
+    return cores <= 0 ? 0 : cores <= 2 ? 1 : cores <= 4 ? 2 : cores <= 8 ? 3 : 4;
+  });
+  values.set('sendBeacon', function sendBeacon(url, data) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': 1 argument required, but only 0 present.");
+    try { new URL(String(url), document.baseURI); }
+    catch (_e) { throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported."); }
+    return true;
+  });
+  const getBattery = values.get('getBattery');
+  if (getBattery) {
+    // A desktop without a battery reports a full, charging one.
+    values.set('getBattery', function getBattery() {
+      return Promise.resolve(asInterface('BatteryManager', withEvents({
+        get charging() { return true; }, get chargingTime() { return 0; },
+        get dischargingTime() { return Infinity; }, get level() { return 1; },
+        onchargingchange: null, onchargingtimechange: null, ondischargingtimechange: null, onlevelchange: null,
+      }), etProto, true));
+    });
+  }
+
+  const order = [
+    'vendorSub', 'productSub', 'vendor', 'maxTouchPoints', 'scheduling', 'userActivation', 'geolocation',
+    'doNotTrack', 'webkitTemporaryStorage', 'webkitPersistentStorage', 'windowControlsOverlay',
+    'hardwareConcurrency', 'cookieEnabled', 'appCodeName', 'appName', 'appVersion', 'platform', 'product',
+    'userAgent', 'language', 'languages', 'onLine', 'webdriver', 'plugins', 'mimeTypes', 'pdfViewerEnabled',
+    'connection', 'getGamepads', 'javaEnabled', 'sendBeacon', 'vibrate', 'constructor', 'cpuPerformance', 'clipboard',
+    'credentials', 'keyboard', 'managed', 'mediaDevices', 'serviceWorker', 'virtualKeyboard', 'wakeLock',
+    'deviceMemory', 'userAgentData', 'locks', 'storage', 'gpu', 'login', 'ink', 'mediaCapabilities',
+    'permissions', 'devicePosture', 'hid', 'mediaSession', 'presentation', 'serial', 'usb', 'xr',
+    'storageBuckets', 'clearAppBadge', 'getBattery', 'getUserMedia', 'requestMIDIAccess',
+    'requestMediaKeySystemAccess', 'setAppBadge', 'webkitGetUserMedia', 'getInstalledRelatedApps',
+    'registerProtocolHandler', 'unregisterProtocolHandler', 'share', 'canShare',
+  ];
+  const existing = new Map();
+  for (const key of Reflect.ownKeys(navProto)) {
+    if (typeof key === 'symbol') continue;
+    existing.set(key, Object.getOwnPropertyDescriptor(navProto, key));
+    delete navProto[key];
+  }
+  for (const key of order) {
+    let d = existing.get(key);
+    if (!d) {
+      const getter = getters.get(key);
+      const has = values.has(key) || Object.prototype.hasOwnProperty.call(stubs, key);
+      const value = values.has(key) ? values.get(key) : stubs[key];
+      if (getter) d = { get: getter, set: undefined };
+      else if (!has) continue;
+      else if (typeof value === 'function') {
+        Object.defineProperty(value, 'name', { value: key, configurable: true });
+        d = { value: _markNative(value), writable: true };
+      } else {
+        d = { get: _markNativeAs(function () { return value; }, 'function get ' + key + '() { [native code] }'), set: undefined };
+      }
+    }
+    Object.defineProperty(navProto, key, Object.assign({ enumerable: true, configurable: true }, d));
+  }
+})();
+
+// A function written in this file, as opposed to a V8 builtin. Classes are
+// left alone: they are constructors, as interface objects are.
+function _isScriptFunction(fn) {
+  if (typeof fn !== 'function') return false;
+  const source = _origToString.call(fn);
+  return !/\{\s*\[native code\]\s*\}$/.test(source) && !/^class\b/.test(source);
+}
+// Web IDL operations and attribute accessors are not constructors, have no
+// `prototype`, own only `length` and `name`, and an accessor called on the
+// interface prototype itself throws "Illegal invocation". A plain `function`
+// written here is a constructor with a `prototype`, so fingerprinting
+// scripts (`new fn()`, `class extends fn`, `'prototype' in fn`) tell it from
+// a browser's. Each such member is replaced by a method or accessor of the
+// same name and length that forwards to it.
+function _nativizeMember(proto, key, d) {
+  const out = { enumerable: d.enumerable, configurable: d.configurable };
+  if ('value' in d) {
+    const fn = d.value;
+    if (!_isScriptFunction(fn) || !Object.prototype.hasOwnProperty.call(fn, 'prototype')) return d;
+    const wrapper = { [key](...args) { return Reflect.apply(fn, this, args); } }[key];
+    Object.defineProperty(wrapper, 'length', { value: fn.length, configurable: true });
+    out.value = wrapper;
+    out.writable = d.writable;
+  } else {
+    const get = d.get, set = d.set;
+    out.get = get && ({ get [key]() {
+      if (this === proto) throw new TypeError('Illegal invocation');
+      return Reflect.apply(get, this, []);
+    } }).__lookupGetter__(key);
+    out.set = set && ({ set [key](value) {
+      if (this === proto) throw new TypeError('Illegal invocation');
+      Reflect.apply(set, this, [value]);
+    } }).__lookupSetter__(key);
+  }
+  try { Object.defineProperty(proto, key, out); } catch (_e) { return d; }
+  return out;
+}
+
 (function _markBuiltinsNative() {
   var seen = new Set();
   function walk(ctor) {
@@ -21444,12 +21883,26 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
       var d;
       try { d = Object.getOwnPropertyDescriptor(proto, key); } catch (e) { continue; }
       if (!d) { continue; }
+      if (key !== 'constructor' && (_isScriptFunction(d.value) || _isScriptFunction(d.get) || _isScriptFunction(d.set))) {
+        d = _nativizeMember(proto, key, d);
+      }
       if (typeof d.value === 'function') { _markNative(d.value); }
       if (typeof d.get === 'function') { _markNativeAs(d.get, 'function get ' + key + '() { [native code] }'); }
       if (typeof d.set === 'function') { _markNativeAs(d.set, 'function set ' + key + '() { [native code] }'); }
     }
   }
   var names = Object.getOwnPropertyNames(globalThis);
+  // Window operations (fetch, postMessage, atob, ...) live on the global
+  // object itself and must look like operations too.
+  for (var gi = 0; gi < names.length; gi++) {
+    var gname = names[gi];
+    if (!/^[a-z]/.test(gname) || /^webkit/.test(gname)) { continue; }
+    var gd = Object.getOwnPropertyDescriptor(globalThis, gname);
+    if (gd && typeof gd.value === 'function' && _isScriptFunction(gd.value)
+        && Object.prototype.hasOwnProperty.call(gd.value, 'prototype')) {
+      _markNative(_nativizeMember(globalThis, gname, gd).value);
+    }
+  }
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
     if (!/^[A-Z]/.test(name)) { continue; }
