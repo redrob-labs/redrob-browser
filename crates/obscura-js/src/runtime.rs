@@ -7001,9 +7001,11 @@ mod tests {
             rt.evaluate("__workerReplies").unwrap(),
             serde_json::json!(["started"])
         );
+        // The worker's onerror gets an ErrorEvent whose message is Chrome's
+        // "Uncaught <name>: <message>" text.
         assert_eq!(
             rt.evaluate("__workerErrors").unwrap(),
-            serde_json::json!(["initialization failed"])
+            serde_json::json!(["Uncaught Error: initialization failed"])
         );
         rt.execute_script(
             "worker-cleanup",
@@ -16252,7 +16254,7 @@ mod tests {
         // a 2x devicePixelContentBoxSize surface.
         rt.execute_script(
             "deterministic-high-resolution-screen",
-            "Date.now = () => 0; Math.random = () => 2 / 0xFFFFFFFF;",
+            "globalThis.__obscura_fp_seed = 2;",
         )
         .unwrap();
         rt.run_page_init();

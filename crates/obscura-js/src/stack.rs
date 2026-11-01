@@ -24,7 +24,10 @@ fn call_method<'s>(
     method: &str,
 ) -> Option<v8::Local<'s, v8::Value>> {
     let key = v8::String::new(scope, method)?;
-    let function = site.get(scope, key.into())?.try_cast::<v8::Function>().ok()?;
+    let function = site
+        .get(scope, key.into())?
+        .try_cast::<v8::Function>()
+        .ok()?;
     function.call(scope, site.into(), &[])
 }
 
@@ -173,7 +176,10 @@ fn v8_format<'s>(
         };
     }
     for index in 0..callsites.length() {
-        let site = callsites.get_index(tc, index)?.try_cast::<v8::Object>().ok()?;
+        let site = callsites
+            .get_index(tc, index)?
+            .try_cast::<v8::Object>()
+            .ok()?;
         let line = call_method(tc, site, "toString")?.to_rust_string_lossy(tc);
         out.push_str("\n    at ");
         out.push_str(worker_toplevel_location(&line).unwrap_or(&line));
@@ -199,7 +205,10 @@ mod tests {
             worker_toplevel_location("eval (eval at f (https://a.test/p:1:2), <anonymous>:1:1)"),
             None
         );
-        assert_eq!(worker_toplevel_location("f (https://a.test/x.js:1:2)"), None);
+        assert_eq!(
+            worker_toplevel_location("f (https://a.test/x.js:1:2)"),
+            None
+        );
     }
 
     #[test]

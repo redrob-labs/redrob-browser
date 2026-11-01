@@ -1140,10 +1140,9 @@ fn op_run_classic_script<'s, 'i>(
     let context = v8::Local::new(scope, &entered);
     let scope = &mut v8::ContextScope::new(scope, context);
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
-    let (Some(code), Some(resource)) = (
-        v8::String::new(scope, source),
-        v8::String::new(scope, name),
-    ) else {
+    let (Some(code), Some(resource)) =
+        (v8::String::new(scope, source), v8::String::new(scope, name))
+    else {
         return undefined;
     };
     let origin = v8::ScriptOrigin::new(
@@ -1185,7 +1184,12 @@ fn op_run_classic_script<'s, 'i>(
 #[op2(fast)]
 fn op_performance_now(state: &OpState, frame_id: u32) -> f64 {
     let shared = frame_state(state, frame_id);
-    let micros = shared.borrow().navigation_timing.origin.elapsed().as_micros();
+    let micros = shared
+        .borrow()
+        .navigation_timing
+        .origin
+        .elapsed()
+        .as_micros();
     (micros / 100) as f64 / 10.0
 }
 
@@ -2402,12 +2406,7 @@ fn op_script_try_start(state: &OpState, nid: u32, frame_id: u32) -> bool {
 /// tree. Layout intentionally remains unaware of the detached root until
 /// scoped style, slot assignment, and composed-tree paint are implemented.
 #[op2(fast)]
-fn op_shadow_attach(
-    state: &OpState,
-    host_nid: u32,
-    #[string] mode: String,
-    frame_id: u32,
-) -> i32 {
+fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String, frame_id: u32) -> i32 {
     let mode = match mode.as_str() {
         "open" => ShadowRootMode::Open,
         "closed" => ShadowRootMode::Closed,
@@ -7030,7 +7029,8 @@ fn op_fetch_script_sync(state: &OpState, #[string] url: String, frame_id: u32) -
         return fail(reason);
     }
     let initiator = url::Url::parse(&initiator).unwrap_or_else(|_| parsed.clone());
-    let request = obscura_net::ResourceRequest::subresource(obscura_net::ResourceType::Script, &initiator);
+    let request =
+        obscura_net::ResourceRequest::subresource(obscura_net::ResourceType::Script, &initiator);
     let fetched = std::thread::scope(|scope| {
         scope
             .spawn(|| {
@@ -9529,11 +9529,7 @@ fn finish_async_image_metadata(
 #[cfg(feature = "render")]
 #[op2]
 #[string]
-async fn op_load_image_metadata(
-    state: Rc<RefCell<OpState>>,
-    nid: u32,
-    frame_id: u32,
-) -> String {
+async fn op_load_image_metadata(state: Rc<RefCell<OpState>>, nid: u32, frame_id: u32) -> String {
     let shared = frame_state(&state.borrow(), frame_id);
     let node_id = NodeId::new(nid);
     let (

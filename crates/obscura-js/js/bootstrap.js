@@ -37,7 +37,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__markParserScripts', '__obscura_hasPendingDynamicScripts',
     '__obscura_hasPendingLoadDelayingScripts', '__obscura_hasPendingParserBlockingScripts',
     '__obscura_nextPendingTimeoutDelay',
-    '__obscura_hw', '__obscura_mem',
+    '__obscura_hw', '__obscura_mem', '__obscura_fp_seed',
     '__documentReadyState__', '__currentUrl',
     // internal helpers (var-declared throughout the file)
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
@@ -133,11 +133,11 @@ Object.defineProperty(globalThis, "__obscura_binding_called", {
 globalThis.__obscura_errors = [];
 
 globalThis.addEventListener = globalThis.addEventListener || function(){};
-globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
-
-globalThis.onerror = function(msg, src, line, col, error) {
-  globalThis.__obscura_errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
-};
+// No preset handlers: window.onerror and window.onunhandledrejection are
+// null in a browser, and a page that finds functions there knows it is
+// automated. The rejection handler below already keeps the loop alive.
+globalThis.onunhandledrejection = null;
+globalThis.onerror = null;
 globalThis.addEventListener = function(type, fn, options) {
   _eventTargetAdd(globalThis, type, fn, options);
 };
@@ -915,8 +915,16 @@ function _consoleData(obj, key) {
     if (d) {
       if ('value' in d) return d.value;
       // A V8 builtin accessor (Error's `stack`) runs no page code.
+      // Formatting a stack would call a page's Error.prepareStackTrace, so
+      // it is set aside while V8 builds the text.
       if (typeof d.get === 'function' && /\{\s*\[native code\]\s*\}$/.test(_origToString.call(d.get))) {
+        const prepare = Object.getOwnPropertyDescriptor(Error, 'prepareStackTrace');
+        const unset = !prepare || ('value' in prepare && prepare.value === undefined);
+        const swap = !unset && 'value' in prepare && prepare.writable;
+        if (!unset && !swap) return undefined;
+        if (swap) Error.prepareStackTrace = undefined;
         try { return Reflect.apply(d.get, obj, []); } catch (_e) { return undefined; }
+        finally { if (swap) Error.prepareStackTrace = prepare.value; }
       }
       return undefined;
     }
@@ -1184,7 +1192,7 @@ globalThis.setTimeout = (fn, delay = 0, ...args) => {
       __obscuraPendingTimeoutDeadlines.delete(id);
       if (state.cancelled) return;
       _runTimerTask(taskNestingLevel, () => {
-        try { f(...args); } catch(e) { console.error("Timer error:", e); }
+        try { f(...args); } catch(e) { _reportException(e); }
       });
     },
   );
@@ -1219,7 +1227,7 @@ globalThis.setInterval = (fn, delay = 0, ...args) => {
   const tick = () => {
     if (!_intervals.has(id)) return;
     _runTimerTask(taskNestingLevel, () => {
-      try { f(...args); } catch(e) { console.error("Interval error:", e); }
+      try { f(...args); } catch(e) { _reportException(e); }
     });
     if (!_intervals.has(id)) return;
     const nextDelay = _timerDelayForNesting(normalizedDelay, taskNestingLevel);
@@ -2152,15 +2160,21 @@ function _eventTargetDispatch(target, event) {
     const eventHandler = target === globalThis ? target['on' + event.type] : null;
     if (typeof eventHandler === 'function') {
       try {
-        const result = eventHandler.call(target, event);
-        if (event.type === 'beforeunload' && _beforeUnloadValues.has(event)) {
+        // window.onerror takes the five-argument form and cancels with true.
+        const fiveArgs = event.type === 'error' && typeof ErrorEvent === 'function' && event instanceof ErrorEvent;
+        const result = fiveArgs
+          ? eventHandler.call(target, event.message, event.filename, event.lineno, event.colno, event.error)
+          : eventHandler.call(target, event);
+        if (fiveArgs) {
+          if (result === true) event.preventDefault();
+        } else if (event.type === 'beforeunload' && _beforeUnloadValues.has(event)) {
           if (result != null) {
             event.preventDefault();
             if (event.returnValue === '') event.returnValue = result;
           }
         } else if (result === false) event.preventDefault();
       } catch (error) {
-        console.error(error);
+        _reportException(error);
       }
     }
     const listeners = (_eventTargetListeners.get(target)?.get(String(event.type)) || []).slice();
@@ -8080,10 +8094,11 @@ class HTMLMediaElement extends HTMLElement {
     };
     setTimeout(tick, 0);
   }
-  // Chrome's answers, container by container. Pages read these as a
-  // capability fingerprint; "" for H.264 is what a codec-less headless
-  // browser says.
+  // With a media backend: Chrome's answers, container by container.
   canPlayType(type) {
+    // Without a media backend nothing plays, and saying so keeps sites on
+    // their fallback instead of a video path that never starts.
+    if (typeof globalThis.redrobMedia !== 'function') return '';
     const parts = String(type).split(';');
     const mime = parts[0].trim().toLowerCase();
     const codecsParam = parts.slice(1).map((p) => p.trim()).find((p) => /^codecs\s*=/i.test(p));
@@ -8979,7 +8994,8 @@ globalThis.navigator = {
 
 globalThis.chrome = {
   app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-  runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect() { throw new Error("Could not establish connection. Receiving end does not exist."); }, sendMessage() { throw new Error("Could not establish connection. Receiving end does not exist."); } },
+  // No `runtime`: an ordinary page in Chrome has chrome.runtime undefined; it
+  // appears only where an extension is externally connectable.
   csi() {
     const t = Date.now();
     return { onloadT: t, startE: t - Math.floor(100 + _fpRand(610) * 200), pageT: 0, tran: 5, flashVersion: "" };
@@ -9232,7 +9248,13 @@ function _percentDecodeBytes(text) {
   return new Uint8Array(out);
 }
 function _fetchFailed() { return new TypeError("Failed to fetch"); }
-async function _fetchLocalScheme(url, method) {
+async function _fetchLocalScheme(url, method, signal) {
+  // The response arrives as a later task, so an abort right after the call
+  // still wins, as it does in Chrome.
+  const state = signal ? _abortSignalState(signal) : null;
+  if (state && state.aborted) throw state.reason;
+  await null;
+  if (state && state.aborted) throw state.reason;
   if (url.startsWith("blob:")) {
     const blob = _blobObjects.get(url.split("#")[0]);
     if (method !== "GET" || !blob) throw _fetchFailed();
@@ -9276,7 +9298,13 @@ async function _fetch(input, init = {}, resourceType = "Fetch") {
   // and lowercase standard methods are not rejected by the case-sensitive CORS
   // checks (#969).
   const method = String(init.method || (request ? request.method : "GET")).toUpperCase();
-  if (url.startsWith("data:") || url.startsWith("blob:")) return _fetchLocalScheme(url, method);
+  if (url.startsWith("data:") || url.startsWith("blob:")) {
+    const localSignal = init.signal !== undefined ? init.signal : (request ? request.signal : null);
+    if (localSignal != null && !_abortSignalState(localSignal)) {
+      throw new TypeError("Failed to execute 'fetch': signal is not an AbortSignal");
+    }
+    return _fetchLocalScheme(url, method, localSignal);
+  }
   const headers = init.headers !== undefined ? init.headers : (request ? request.headers : undefined);
   let _h = headers instanceof Headers ? Object.fromEntries(headers.entries()) : (headers || {});
   const inheritsRequestBody = init.body === undefined && request !== null;
@@ -10843,7 +10871,12 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
     if (_computedStyleHasNoDocument(el)) return [];
     refreshRendered();
     if (pseudo) return snapshot.names;
-    return _CHROME_COMPUTED_NAMES;
+    // Chrome lists the longhands, then the element's custom properties.
+    if (snapshot.listed && snapshot.listedFrom === snapshot.names) return snapshot.listed;
+    const custom = snapshot.names.filter((name) => name.startsWith('--'));
+    snapshot.listedFrom = snapshot.names;
+    snapshot.listed = custom.length ? _CHROME_COMPUTED_NAMES.concat(custom) : _CHROME_COMPUTED_NAMES;
+    return snapshot.listed;
   };
   const indexOf = (prop) => (typeof prop === 'string' && /^(0|[1-9]\d*)$/.test(prop) ? +prop : -1);
   return new Proxy(style, {
@@ -13082,11 +13115,11 @@ globalThis.PromiseRejectionEvent = class PromiseRejectionEvent extends Event {
 _markNative(globalThis.PromiseRejectionEvent);
 
 __obscuraCore.setUnhandledPromiseRejectionHandler((promise, reason) => {
-  const event = new PromiseRejectionEvent("unhandledrejection", {
+  const event = globalThis.__obscura_markTrusted(new PromiseRejectionEvent("unhandledrejection", {
     promise,
     reason,
     cancelable: true,
-  });
+  }));
   globalThis.dispatchEvent(event);
   // Browsers report an unhandled rejection without terminating the page's
   // event loop. Returning true tells deno_core that the host delivered it.
@@ -14309,7 +14342,41 @@ function _structuredClone(value, seen) {
   return out;
 }
 globalThis.structuredClone = globalThis.structuredClone || ((v) => _structuredClone(v, new Map()));
-globalThis.reportError = globalThis.reportError || ((e) => console.error(e));
+// HTML "report an exception": an uncaught exception from a timer, a listener
+// or reportError() fires a trusted, cancelable `error` ErrorEvent on the
+// window, and reaches the console only when no handler cancels it. Timer
+// exceptions used to go to the console alone, so window.onerror (where
+// challenge scripts collect their own failures) never heard of them.
+let _reportingException = false;
+function _reportException(error) {
+  if (_reportingException) { try { console.error(error); } catch (_e) {} return; }
+  _reportingException = true;
+  try {
+    let message, filename = '', lineno = 0, colno = 0;
+    const isError = _consoleKind(error) === 'error';
+    if (isError) {
+      const name = _consoleData(error, 'name'), text = _consoleData(error, 'message');
+      message = 'Uncaught ' + (typeof name === 'string' ? name : 'Error') + (typeof text === 'string' && text ? ': ' + text : '');
+      const stack = _consoleData(error, 'stack');
+      const frame = typeof stack === 'string' && /\(?((?:https?|file|blob|data):[^\s()]*?):(\d+):(\d+)\)?/.exec(stack);
+      if (frame) { filename = frame[1]; lineno = +frame[2]; colno = +frame[3]; }
+    } else {
+      message = 'Uncaught ' + _consolePreview(error, 0);
+    }
+    let event = null;
+    if (typeof ErrorEvent === 'function') {
+      event = globalThis.__obscura_markTrusted(new ErrorEvent('error', { message, filename, lineno, colno, error, cancelable: true }));
+      try { globalThis.dispatchEvent(event); } catch (_e) {}
+    }
+    if (!event || !event.defaultPrevented) console.error(error);
+  } finally {
+    _reportingException = false;
+  }
+}
+globalThis.reportError = function reportError(error) {
+  if (arguments.length < 1) throw new TypeError("Failed to execute 'reportError' on 'Window': 1 argument required, but only 0 present.");
+  _reportException(error);
+};
 
 // WHATWG Storage as a legacy platform object: a Proxy routes property access
 // (localStorage.foo, localStorage["foo"], delete, `in`, Object.keys) through
@@ -18473,20 +18540,32 @@ _markNative(HTMLCanvasElement.prototype.toDataURL);
 _markNative(HTMLCanvasElement.prototype.toBlob);
 
 Element.prototype.attachShadow = function attachShadow(opts) {
-  var _mode = opts == null ? undefined : opts.mode;
+  // Chrome's argument checks and messages, in its order: pages compare the
+  // error text, and Turnstile posts it back.
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': 1 argument required, but only 0 present.");
+  }
+  if (opts === null || (typeof opts !== 'object' && typeof opts !== 'function')) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': The provided value is not of type 'ShadowRootInit'.");
+  }
+  var _mode = opts.mode;
+  if (_mode === undefined) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': Required member is undefined.");
+  }
+  _mode = String(_mode);
   if (_mode !== 'open' && _mode !== 'closed') {
-    throw new TypeError('Failed to execute attachShadow on Element: the mode value is not a valid ShadowRootMode.');
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': The provided value '" + _mode + "' is not a valid enum value of type ShadowRootMode.");
   }
   var _ln = (this.localName || '').toLowerCase();
   if (!globalThis.__obscura_shadowHostNames.has(_ln) && _ln.indexOf('-') === -1) {
-    throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow", 'NotSupportedError');
   }
   if (__obscuraCore.ops.op_shadow_root_info(this._nid, _realmFrameId)) {
-    throw new DOMException('Failed to execute attachShadow on Element: the element already hosts a shadow tree.', 'NotSupportedError');
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': Shadow root cannot be created on a host which already hosts a shadow tree.", 'NotSupportedError');
   }
   const rootNid = __obscuraCore.ops.op_shadow_attach(this._nid, _mode, _realmFrameId);
   if (rootNid < 0) {
-    throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow", 'NotSupportedError');
   }
   const shadow = new ShadowRoot(rootNid, this, opts);
   _treeMutationEpoch++;
@@ -20982,7 +21061,10 @@ globalThis.__obscura_init = function() {
     _realmFrameId);
   _browserPostedTaskWakePending = false;
   for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
-  _fpSeed = __obscuraCore.ops.op_fingerprint_seed() | 0;
+  // An embedder (or a test) may pin the seed; otherwise it is the machine's.
+  _fpSeed = Number.isInteger(globalThis.__obscura_fp_seed)
+    ? globalThis.__obscura_fp_seed | 0
+    : __obscuraCore.ops.op_fingerprint_seed() | 0;
   _fpCache = null;
   // A real navigation just completed (this runs after set_url), so drop any
   // URL a location setter previewed synchronously and let document_url drive
@@ -22770,7 +22852,7 @@ function _nativizeMember(proto, key, d) {
   // object itself and must look like operations too.
   for (var gi = 0; gi < names.length; gi++) {
     var gname = names[gi];
-    if (!/^[a-z]/.test(gname) || /^webkit/.test(gname)) { continue; }
+    if (!/^[a-z]/.test(gname) || /^webkit/.test(gname) || gname === 'constructor') { continue; }
     var gd = Object.getOwnPropertyDescriptor(globalThis, gname);
     if (gd && typeof gd.value === 'function' && _isScriptFunction(gd.value)
         && Object.prototype.hasOwnProperty.call(gd.value, 'prototype')) {
