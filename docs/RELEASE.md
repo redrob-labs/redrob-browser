@@ -30,16 +30,18 @@ Each job fetches CEF's prebuilt binary distribution for its platform with `expor
 
 | Platform | Archive | Unpacked | Layout |
 |---|---|---|---|
-| Linux x64 | 237 MB `.tar.gz` | 571 MB | one folder (`scripts/package-linux.sh`) |
+| Linux x64 | 250 MB `.tar.gz` | 609 MB | one folder (`scripts/package-linux.sh`) |
 | Linux arm64 | about the same | about the same | the same script on the arm64 runner |
 | macOS arm64 | measured on the first release run | | `Redrob Browser.app` (`scripts/package-macos.sh`) |
 | Windows x64 | measured on the first release run | | one folder, zip and setup (`release.yml`) |
 
-(Linux x64 measured with this host's build of the engine programs, 2026-11-02.)
+(Linux x64 measured with this host's release build of the CEF window, 2026-11-02: libcef.so is
+278 MB of it, the two engine programs 269 MB.)
 
 - **Linux:** the folder holds the programs, `libcef.so` (stripped of its 1.2 GB of debug
   information), `libvk_swiftshader.so`, `libvulkan.so.1`, `vk_swiftshader_icd.json`,
-  `chrome-sandbox`, `chrome_100_percent.pak`, `chrome_200_percent.pak`, `resources.pak`,
+  `chrome-sandbox`, `libxkbcommon-x11.so.0` (the window opens it at run time for X11 keyboard
+  input, and not every system has it), `chrome_100_percent.pak`, `chrome_200_percent.pak`, `resources.pak`,
   `icudtl.dat`, `v8_context_snapshot.bin`, `locales/` with `en-US*` and `ko*` only, `LICENSE`,
   `NOTICE`, `CREDITS.html` and `bundle-manifest.txt`. The window gets the run path `$ORIGIN`
   (patchelf), so it finds `libcef.so` beside itself; the script stops when `ldd` reports a missing
@@ -87,7 +89,8 @@ CEF_PATH="$HOME/.local/share/cef" bash scripts/package-linux.sh --build 0.1.0
 ```
 
 `--build` runs the release job's `cargo build`; without it the script packages what is in
-`target/release`. It needs `patchelf` (`PATCHELF=<path>` when it is not on `PATH`). Unpack the
+`target/release`. It needs `patchelf` (`PATCHELF=<path>` when it is not on `PATH`) and `libxkbcommon-x11.so.0`
+(`XKBCOMMON_X11=<file>` when the system has none). Unpack the
 archive into an empty folder and run `redrob-browser-window` from there with `LD_LIBRARY_PATH` and
 `CEF_PATH` unset.
 

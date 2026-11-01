@@ -73,7 +73,13 @@ for f in "$cef"/locales/en-US*.pak "$cef"/locales/ko*.pak; do
 done
 [ -f "$out/locales/en-US.pak" ] && [ -f "$out/locales/ko.pak" ] || { echo "CEF has no en-US or ko locale" >&2; exit 1; }
 
-# Programs that link libcef.so find it beside themselves.
+# The window's X11 keyboard support opens libxkbcommon-x11 at run time (so ldd does not list it),
+# and not every system has it; the copy in the bundle is found through the run path below.
+xkb="${XKBCOMMON_X11:-$(ldconfig -p | awk '/libxkbcommon-x11\.so\.0 /{print $NF; exit}')}"
+[ -f "$xkb" ] || { echo "libxkbcommon-x11.so.0 not found (apt-get install libxkbcommon-x11-0, or XKBCOMMON_X11=<file>)" >&2; exit 1; }
+cp -L "$xkb" "$out/libxkbcommon-x11.so.0"
+
+# Programs that link libcef.so find it (and the libraries above) beside themselves.
 for p in "$out"/redrob-browser "$out"/redrob-browser-worker "$out"/redrob-browser-window; do
   if "$patchelf" --print-needed "$p" | grep -qx 'libcef.so'; then
     "$patchelf" --set-rpath '$ORIGIN' "$p"
