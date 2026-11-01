@@ -150,6 +150,10 @@ pub(crate) struct IfcBox {
     pub(crate) node: Option<taffy::NodeId>,
     /// The DOM element of an atomic, floated or out-of-flow box.
     pub(crate) dom: Option<NodeId>,
+    /// An out-of-flow box that was block-level before blockification: its
+    /// static position is that of a block box, which starts a new line
+    /// after any inline content before it (CSS 2.2 10.3.7, 10.6.4).
+    pub(crate) static_block: bool,
     /// The inline element span the box is in.
     pub(crate) parent_span: Option<u32>,
 }

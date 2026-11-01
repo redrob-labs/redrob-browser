@@ -2497,33 +2497,7 @@ fn resolve_inline_percentage_heights(
         let dom_id = id_map.get(&node).copied();
 
         if let (Some(dom_id), Some(parent_id)) = (dom_id, nearest_dom_parent) {
-            // Non-atomic inline boxes (and `display: contents`) are never
-            // containing blocks: a percentage inside `<span>` or an unknown
-            // element resolves against the nearest block container, which
-            // here is the nearest Taffy-backed DOM ancestor.
-            let mut is_direct_dom_child = false;
-            let mut ancestor = rendered_parent(tree, dom_id);
-            for _ in 0..tree.len() {
-                let Some(current) = ancestor else {
-                    break;
-                };
-                if current == parent_id {
-                    is_direct_dom_child = true;
-                    break;
-                }
-                let transparent = styles.get(&current).is_some_and(|style| {
-                    style.display_contents
-                        || (style.display == crate::Display::Inline
-                            && !style.is_inline_block
-                            && !style.is_replaced_box
-                            && style.position.is_none()
-                            && style.float.is_none())
-                });
-                if !transparent {
-                    break;
-                }
-                ancestor = rendered_parent(tree, current);
-            }
+            let is_direct_dom_child = rendered_parent(tree, dom_id) == Some(parent_id);
             let child_percent = styles.get(&dom_id).and_then(|style| {
                 (style.size_expressions[1].is_none()
                     && !style.ignores_used_box_sizes()
@@ -7209,10 +7183,21 @@ fn layout_dom_once(
                         style.flex_basis = crate::Dimension::Px(px);
                     }
                 }
+                let absolute_box = matches!(style.position, Some(taffy::Position::Absolute))
+                    && !style.position_fixed;
+                style.size_calc = Default::default();
                 for index in 0..6 {
                     let Some(expression) = style.size_expressions[index].as_deref() else {
                         continue;
                     };
+                    if absolute_box {
+                        // An absolute box's percentages are of its positioned
+                        // ancestor's padding box, known only to layout. The
+                        // pixel estimate below stays for style-only readers.
+                        style.size_calc[index] =
+                            crate::style::GridCalcExpression::parse_padding(expression)
+                                .map(std::sync::Arc::new);
+                    }
                     if index == 1 && inh.cb_height_deferred {
                         if let Some(percent) =
                             crate::style::functional_percentage_factor(expression)
@@ -7262,6 +7247,9 @@ fn layout_dom_once(
                         4 => style.max_width = resolved,
                         _ => style.max_height = resolved,
                     }
+                }
+                if style.size_calc.iter().any(Option::is_some) {
+                    crate::style::set_grid_calc_context(style, em_px, root_fs, vw, vh);
                 }
                 {
                     // Font properties inherit later in this pass: read the
@@ -15878,6 +15866,21 @@ fn defer_cyclic_flex_inline_sizes(
         })
         .collect();
     let mut deferred = Vec::new();
+    // Read before the loop below rewrites deferred widths to pixels.
+    let definite_width_boxes: HashSet<NodeId> = styles
+        .iter()
+        .filter(|(_, style)| {
+            matches!(style.width, crate::Dimension::Px(_))
+                && style.size_expressions[0]
+                    .as_deref()
+                    .is_none_or(|expression| !expression.contains('%'))
+                && !style.display_contents
+                && (style.display != crate::Display::Inline
+                    || style.is_inline_block
+                    || style.is_replaced_box)
+        })
+        .map(|(&id, _)| id)
+        .collect();
 
     for (id, slot, source) in candidates {
         // Start at the expression's containing-box chain, not the sized
@@ -15887,6 +15890,14 @@ fn defer_cyclic_flex_inline_sizes(
         let mut candidate = rendered_parent(tree, id);
         let mut flex_item = None;
         while let Some(item) = candidate {
+            // A box with a definite width ends the chain: percentages below
+            // it resolve against that width, whatever its ancestors' flex
+            // sizing does (`yt-img-shadow{width:36px}` around a
+            // `width:100%` avatar must not hand the image's 88px natural
+            // width to the flex item above it).
+            if definite_width_boxes.contains(&item) {
+                break;
+            }
             let mut parent = rendered_parent(tree, item);
             while let Some(parent_id) = parent {
                 let Some(parent_style) = styles.get(&parent_id) else {
@@ -22334,6 +22345,94 @@ mod tests {
         assert!((rect("a").width - 896.0).abs() < 0.01, "{:?}", rect("a"));
         assert!((rect("a").height - 504.0).abs() < 0.01, "{:?}", rect("a"));
         assert!((rect("b").height - 458.0).abs() < 0.01, "{:?}", rect("b"));
+    }
+
+    #[test]
+    fn absolute_calc_percentage_sizes_resolve_against_the_positioned_ancestor() {
+        // YouTube's comment thread line: `.threadline { position:absolute;
+        // bottom:0; width:100%; height:calc(100% - 40px) }` inside a 36px
+        // relative avatar column of a 126px comment. Chrome 145: 36x86 at
+        // (0,40). The style pass knows neither the column nor its height.
+        let tree = parse_html(
+            r#"<style>html,body{margin:0}
+               #body{display:flex;position:relative}
+               #thumb{position:relative;flex:0 0 auto;margin-right:16px}
+               #line{position:absolute;bottom:0;width:100%;height:calc(100% - 40px)}
+               #bg{position:absolute;width:calc(100% - 0px);height:calc(100% - 0px)}
+               </style>
+               <div id=body><div id=bg></div><div id=thumb><div style="width:36px;height:39px"></div>
+               <div id=line></div></div><div style="height:126px;flex:1"></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        let line = rect("line");
+        assert!(
+            (line.width - 36.0).abs() < 0.01
+                && (line.height - 86.0).abs() < 0.01
+                && (line.y - 40.0).abs() < 0.01,
+            "{line:?}"
+        );
+        let bg = rect("bg");
+        assert!(
+            (bg.width - 1280.0).abs() < 0.01 && (bg.height - 126.0).abs() < 0.01,
+            "{bg:?}"
+        );
+    }
+
+    #[test]
+    fn definite_width_box_ends_cyclic_percentage_chain() {
+        // A `width:100%` image whose parent is 36px wide is not cyclic for
+        // the auto-width flex item above: Chrome 145 sizes #item 36px. The
+        // image's 88px natural width leaked up as the item's width (YouTube
+        // comment avatars).
+        let tree = parse_html(
+            r#"<style>html,body{margin:0}</style>
+               <div style="display:flex"><div id=item style="position:relative;flex:none">
+               <span style="display:inline-block;width:36px;height:36px"><img id=img style="display:block;width:100%;height:100%" src=a.png></span>
+               </div><div style="flex:1;height:20px"></div></div>"#,
+        );
+        let mut intrinsic = HashMap::new();
+        intrinsic.insert(tree.get_element_by_id("img").unwrap(), (88.0, 88.0));
+        let laid = layout_dom_with_images(&tree, (1280.0, 800.0), &intrinsic);
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert!(
+            (rect("item").width - 36.0).abs() < 0.01,
+            "{:?}",
+            rect("item")
+        );
+        assert!((rect("img").width - 36.0).abs() < 0.01, "{:?}", rect("img"));
+    }
+
+    #[test]
+    fn block_level_absolute_static_position_starts_a_new_line() {
+        // An absolutely positioned box that was block-level sits where a
+        // block box would: at the start edge, below the preceding inline
+        // content (or on the line when nothing precedes it). One that was
+        // inline-level stays on the line after the text. Chrome 145 places
+        // #block at (0, 18) and #inline at (22.2, 0) in their containers.
+        let tree = parse_html(
+            r#"<style>html,body{margin:0}</style>
+               <div id=c1 style="position:relative;width:300px"><span>abc</span><div id=block style="position:absolute;width:10px;height:10px"></div></div>
+               <div id=c2 style="position:relative;width:300px"><span>abc</span><span id=inline style="position:absolute;width:10px;height:10px"></span></div>
+               <div id=c3 style="position:relative;width:300px"><div id=first style="position:absolute;width:10px;height:10px"></div><span>abc</span></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        let (block, c1) = (rect("block"), rect("c1"));
+        assert!(
+            block.x.abs() < 0.01 && block.y - c1.y > 10.0,
+            "{block:?} {c1:?}"
+        );
+        let (inline, c2) = (rect("inline"), rect("c2"));
+        assert!(
+            inline.x > 10.0 && (inline.y - c2.y).abs() < 0.01,
+            "{inline:?} {c2:?}"
+        );
+        let (first, c3) = (rect("first"), rect("c3"));
+        assert!(
+            first.x.abs() < 0.01 && (first.y - c3.y).abs() < 0.01,
+            "{first:?} {c3:?}"
+        );
     }
 
     #[test]

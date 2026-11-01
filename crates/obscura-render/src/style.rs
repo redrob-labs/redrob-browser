@@ -5177,9 +5177,9 @@ impl GridCalcExpression {
         Some(calc)
     }
 
-    /// A calc() padding with a percentage: Taffy resolves it against the
-    /// containing block's final inline size (a flex item's used width, not
-    /// the style pass's estimate of it).
+    /// A calc() padding or size with a percentage: Taffy resolves it
+    /// against the containing block's final size (a flex item's used width,
+    /// an absolute box's positioned ancestor), not the style pass's estimate.
     pub(crate) fn parse_padding(value: &str) -> Option<Self> {
         if !value.contains('%') {
             return None;
@@ -5218,6 +5218,7 @@ pub(crate) fn set_grid_calc_context(
         .flatten()
         .chain(style.inset_calc.iter().flatten())
         .chain(style.padding_calc.iter().flatten())
+        .chain(style.size_calc.iter().flatten())
     {
         expression.set_context(em_px, rem_px, vw, vh);
     }

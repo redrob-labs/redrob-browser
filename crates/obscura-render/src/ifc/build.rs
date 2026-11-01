@@ -766,6 +766,7 @@ impl IfcStore {
                         },
                         node: None,
                         dom: None,
+                        static_block: false,
                     });
                     builder.push_inline_box(edge_box(
                         InlineBoxKind::InFlow,
@@ -794,6 +795,7 @@ impl IfcStore {
                             },
                             node: None,
                             dom: None,
+                            static_block: false,
                         });
                         builder.push_inline_box(edge_box(
                             InlineBoxKind::InFlow,
@@ -818,6 +820,7 @@ impl IfcStore {
                         },
                         node: Some(*node),
                         dom: *dom,
+                        static_block: false,
                     });
                     let mut inline_box =
                         edge_box(InlineBoxKind::InFlow, index, 0.0, InlineBoxEdge::None);
@@ -835,6 +838,7 @@ impl IfcStore {
                         kind: BoxKind::Float,
                         node: Some(*node),
                         dom: *dom,
+                        static_block: false,
                     });
                     builder.push_inline_box(edge_box(
                         InlineBoxKind::CustomOutOfFlow,
@@ -850,6 +854,9 @@ impl IfcStore {
                         kind: BoxKind::OutOfFlow,
                         node: Some(*node),
                         dom: *dom,
+                        static_block: dom
+                            .and_then(|dom| styles.get(&dom))
+                            .is_some_and(|style| !style.static_position_inline),
                     });
                     builder.push_inline_box(edge_box(
                         InlineBoxKind::OutOfFlow,
@@ -866,6 +873,7 @@ impl IfcStore {
                         kind: BoxKind::Break { node: *node },
                         node: None,
                         dom: Some(*node),
+                        static_block: false,
                     });
                     builder.push_inline_box(edge_box(
                         InlineBoxKind::InFlow,
