@@ -1209,12 +1209,33 @@ async fn stop_worker(child: &mut tokio::process::Child) {
     let _ = child.kill().await;
 }
 
-async fn settle_page(page: &mut Page, wait_secs: u64, fixed: bool) {
+/// A page that sends itself somewhere after load (a JS challenge that sets
+/// its cookie and calls `location.reload()` from a timer, a delayed
+/// `location.href = ...`) is followed the way a browser follows it, and the
+/// new document gets its own settle. Bounded like the redirect chain, and no
+/// new navigation starts after `follow_deadline` so the process-level hard
+/// deadline (which reserves one navigation plus one settle for it) holds.
+const MAX_SETTLE_NAVIGATIONS: usize = 10;
+
+async fn settle_page(page: &mut Page, wait_secs: u64, fixed: bool, follow_deadline: Instant) {
     let wait_ms = wait_secs.saturating_mul(1000);
-    if fixed {
-        page.settle_for_duration(wait_ms).await;
-    } else {
-        page.settle(wait_ms).await;
+    for _ in 0..=MAX_SETTLE_NAVIGATIONS {
+        if fixed {
+            page.settle_for_duration(wait_ms).await;
+        } else {
+            page.settle(wait_ms).await;
+        }
+        if !page.has_pending_navigation() || Instant::now() >= follow_deadline {
+            return;
+        }
+        match page.process_pending_navigation().await {
+            Ok(true) => continue,
+            Ok(false) => return,
+            Err(error) => {
+                tracing::warn!("page-initiated navigation failed: {error}");
+                return;
+            }
+        }
     }
 }
 
@@ -1339,6 +1360,7 @@ async fn run_fetch(
     // fetch can never wedge the worker, a daemon thread force-exits if the whole
     // operation overruns navigation + every configured settle pass + grace. A
     // normal fetch returns first and the process exits before this fires.
+    let follow_deadline;
     {
         let settle_passes = if eval_at_capture_boundary {
             1 + u64::from(controlled_scroll_request.is_some())
@@ -1347,9 +1369,14 @@ async fn run_fetch(
         } else {
             1
         };
+        let budget = timeout_secs.saturating_add(wait_secs.saturating_mul(settle_passes));
+        follow_deadline = Instant::now() + Duration::from_secs(budget);
+        // One page-initiated navigation may start right at follow_deadline:
+        // leave room for it to load and settle once.
         let hard = Duration::from_secs(
-            timeout_secs
-                .saturating_add(wait_secs.saturating_mul(settle_passes))
+            budget
+                .saturating_add(timeout_secs)
+                .saturating_add(wait_secs)
                 .saturating_add(10),
         );
         std::thread::spawn(move || {
@@ -1390,7 +1417,7 @@ async fn run_fetch(
     // and completion callbacks (e.g. testharness's add_completion_callback) run
     // before we read the page. Returns early once the loop is idle, so static
     // pages stay fast.
-    settle_page(&mut page, wait_secs, wait_is_fixed).await;
+    settle_page(&mut page, wait_secs, wait_is_fixed, follow_deadline).await;
 
     let mut deferred_eval_output = None;
     let initial_controlled_scroll = if eval_at_capture_boundary {
@@ -1412,7 +1439,7 @@ async fn run_fetch(
         None
     };
     if initial_controlled_scroll.is_some() {
-        settle_page(&mut page, wait_secs, wait_is_fixed).await;
+        settle_page(&mut page, wait_secs, wait_is_fixed, follow_deadline).await;
     }
 
     if !eval_at_capture_boundary {
@@ -1445,7 +1472,7 @@ async fn run_fetch(
             // listener) that writes the DOM. Drive the event loop again so that
             // work completes, then fall through to selector/capture/dump instead
             // of returning the still-pending eval value (issue #248).
-            settle_page(&mut page, wait_secs, wait_is_fixed).await;
+            settle_page(&mut page, wait_secs, wait_is_fixed, follow_deadline).await;
         }
     }
 

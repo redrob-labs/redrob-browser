@@ -4230,6 +4230,14 @@ impl ObscuraJsRuntime {
     /// the watchdog terminates it. A well-behaved page returns as soon as the
     /// loop goes idle.
     pub async fn run_event_loop_bounded(&mut self, budget_ms: u64) -> Result<(), String> {
+        self.run_event_loop_bounded_inner(budget_ms, false).await
+    }
+
+    async fn run_event_loop_bounded_inner(
+        &mut self,
+        budget_ms: u64,
+        stop_at_navigation: bool,
+    ) -> Result<(), String> {
         #[cfg(feature = "render")]
         self.service_render_resources();
         if budget_ms == 0 {
@@ -4253,7 +4261,9 @@ impl ObscuraJsRuntime {
             synchronous_budget + std::time::Duration::from_millis(WATCHDOG_SCHEDULING_MARGIN_MS),
         );
         let result = loop {
-            if tokio::time::Instant::now() >= deadline {
+            if tokio::time::Instant::now() >= deadline
+                || (stop_at_navigation && self.has_pending_navigation())
+            {
                 break Ok(());
             }
             // Timer-driven page script observes resources that landed during
@@ -4307,6 +4317,20 @@ impl ObscuraJsRuntime {
             return Ok(());
         }
         self.run_event_loop_bounded(budget_ms).await
+    }
+
+    /// Like `run_event_loop_for_duration`, but returns as soon as the page has
+    /// queued a navigation (a timer assigning `location`, `location.reload()`):
+    /// the document is going away, and a challenge cookie set just before the
+    /// reload can expire while the old document idles out the interval.
+    pub async fn run_event_loop_for_duration_or_navigation(
+        &mut self,
+        budget_ms: u64,
+    ) -> Result<(), String> {
+        if budget_ms == 0 {
+            return Ok(());
+        }
+        self.run_event_loop_bounded_inner(budget_ms, true).await
     }
 
     /// Return after a poll that delivers browser tasks. If the first poll
@@ -4461,6 +4485,27 @@ impl ObscuraJsRuntime {
         budget_ms: u64,
         quiet_ms: u64,
     ) -> Result<(), String> {
+        self.run_event_loop_until_quiescent_inner(budget_ms, quiet_ms, false)
+            .await
+    }
+
+    /// `run_event_loop_until_quiescent` that also returns once the page has
+    /// queued a navigation, so the caller can follow it right away.
+    pub async fn run_event_loop_until_quiescent_or_navigation(
+        &mut self,
+        budget_ms: u64,
+        quiet_ms: u64,
+    ) -> Result<(), String> {
+        self.run_event_loop_until_quiescent_inner(budget_ms, quiet_ms, true)
+            .await
+    }
+
+    async fn run_event_loop_until_quiescent_inner(
+        &mut self,
+        budget_ms: u64,
+        quiet_ms: u64,
+        stop_at_navigation: bool,
+    ) -> Result<(), String> {
         if budget_ms == 0 {
             return Ok(());
         }
@@ -4495,6 +4540,9 @@ impl ObscuraJsRuntime {
             let Some(_remaining) = deadline.checked_duration_since(now) else {
                 break Ok(());
             };
+            if stop_at_navigation && self.has_pending_navigation() {
+                break Ok(());
+            }
             let next_generation = self.activity_generation();
             // One-shot timers up to two quiet windows away are commonly app
             // hydration/debounce work (`setTimeout(render, 200)`). Intervals

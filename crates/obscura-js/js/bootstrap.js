@@ -150,6 +150,10 @@ globalThis.dispatchEvent = function(event) {
 
 let _domMutationEpoch = 0;
 let _treeMutationEpoch = 0;
+// Bumped by every DOM command that can change which elements are where
+// (attribute writes excepted). Live HTMLCollections keyed on tag names or
+// children revalidate against it; class collections use _domMutationEpoch.
+let _elementTreeEpoch = 0;
 const _DOM_MUTATION_COMMANDS = new Set([
   "append_child", "insert_before", "remove_child",
   "set_attribute", "remove_attribute",
@@ -180,6 +184,7 @@ const _dom = (cmd, a1, a2) => {
   }
   if (_DOM_MUTATION_COMMANDS.has(cmd)) {
     _domMutationEpoch++;
+    if (cmd !== "set_attribute" && cmd !== "remove_attribute") _elementTreeEpoch++;
     // Resize observation is tied to rendering-invalidating DOM work. The
     // hook is installed later in bootstrap, before page script can run.
     if (typeof globalThis.__obscura_recompute_resizes === "function") {
@@ -4463,8 +4468,8 @@ class Element extends Node {
   }
   set innerText(v) { this.textContent = v; }
   get children() {
-    const ids = _domParse("element_children", this._nid) || [];
-    return HTMLCollection._from(ids.map(_wrapEl).filter(Boolean));
+    const nid = this._nid;
+    return HTMLCollection._live(() => (_domParse("element_children", nid) || []).map(_wrapEl), false);
   }
   get content() {
     // <template>.content is a DocumentFragment; <meta>.content reflects
@@ -4692,8 +4697,8 @@ class Element extends Node {
     const ids = _domParse("query_selector_all_scoped", this._nid, s) || [];
     return _relevantNodeList(this, _nodeList(ids.map(_wrapEl).filter(Boolean)));
   }
-  getElementsByTagName(t) { return HTMLCollection._from(this.querySelectorAll(t)); }
-  getElementsByClassName(c) { return _getElementsByClassName(this, c); }
+  getElementsByTagName(t) { return HTMLCollection._live(() => this.querySelectorAll(t), false); }
+  getElementsByClassName(c) { return HTMLCollection._live(() => _getElementsByClassName(this, c), true); }
   matches(s) {
     if (arguments.length === 0) {
       const view = _frameViewOf(this);
@@ -6815,8 +6820,8 @@ class Document extends Node {
       : _domParse("query_selector_all", s)) || [];
     return _nodeList(ids.map(_wrapEl).filter(Boolean));
   }
-  getElementsByTagName(t) { return HTMLCollection._from(this.querySelectorAll(t)); }
-  getElementsByClassName(c) { return _getElementsByClassName(this, c); }
+  getElementsByTagName(t) { return HTMLCollection._live(() => this.querySelectorAll(t), false); }
+  getElementsByClassName(c) { return HTMLCollection._live(() => _getElementsByClassName(this, c), true); }
   getElementsByName(name) { return this.querySelectorAll('[name="' + String(name).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]'); }
   evaluate(expression, contextNode, namespaceResolver, type, result) {
     return _makeXPathResult(type, _xpathFindNodes(expression, contextNode || this));
@@ -7377,6 +7382,7 @@ function _parserInsertedNodes() {
   if (!flat.length) return;
   _treeMutationEpoch++;
   _domMutationEpoch++;
+  _elementTreeEpoch++;
   var observers = globalThis.__mutationObservers;
   var wantRecords = observers && observers.length;
   var nodes = [];
@@ -7496,8 +7502,8 @@ class DocumentFragment extends Node {
     return _relevantNodeList(this, _nodeList(ids.map(_wrapEl).filter(Boolean)));
   }
   get children() {
-    const ids = _domParse("element_children", this._nid) || [];
-    return HTMLCollection._from(ids.map(_wrapEl).filter(Boolean));
+    const nid = this._nid;
+    return HTMLCollection._live(() => (_domParse("element_children", nid) || []).map(_wrapEl), false);
   }
   get firstElementChild() { return this.children[0] || null; }
   get lastElementChild() { const ch = this.children; return ch[ch.length - 1] || null; }
@@ -15507,7 +15513,27 @@ globalThis.HTMLCollection = class HTMLCollection extends Array {
     if (arr) for (let i = 0; i < arr.length; i++) { if (arr[i]) c[c.length] = arr[i]; }
     return new Proxy(c, _htmlCollectionProxy);
   }
+  // A live collection (getElementsByTagName/ClassName, children): it
+  // re-queries when the DOM changed since it was last read, so a loop that
+  // moves `collection[0]` out of its parent walks every element as in
+  // Chrome. Amazon moves its homepage cards that way; a snapshot moved one
+  // card and dropped the rest with their hidden container.
+  static _live(compute, attributeSensitive) {
+    const c = new HTMLCollection();
+    Object.defineProperty(c, "_liveCompute", { value: compute });
+    Object.defineProperty(c, "_liveAttrs", { value: !!attributeSensitive });
+    Object.defineProperty(c, "_liveEpoch", { value: -1, writable: true });
+    return new Proxy(c, _liveHtmlCollectionProxy);
+  }
 };
+function _liveCollectionRefresh(t) {
+  const epoch = t._liveAttrs ? _domMutationEpoch : _elementTreeEpoch;
+  if (t._liveEpoch === epoch) return;
+  t._liveEpoch = epoch;
+  const items = t._liveCompute() || [];
+  t.length = 0;
+  for (let i = 0; i < items.length; i++) { if (items[i]) t[t.length] = items[i]; }
+}
 _markNative(HTMLCollection.prototype.item);
 _markNative(HTMLCollection.prototype.namedItem);
 // Shared (allocated once) Proxy traps for HTMLCollection named access. Indices,
@@ -15524,6 +15550,15 @@ const _htmlCollectionProxy = {
     if (Reflect.has(t, k)) return true;
     return typeof k === "string" && !!(t.namedItem && t.namedItem(k));
   },
+};
+const _liveHtmlCollectionProxy = {
+  get(t, k, r) {
+    if (k !== "_liveCompute" && k !== "_liveAttrs" && k !== "_liveEpoch") _liveCollectionRefresh(t);
+    return _htmlCollectionProxy.get(t, k, r);
+  },
+  has(t, k) { _liveCollectionRefresh(t); return _htmlCollectionProxy.has(t, k); },
+  ownKeys(t) { _liveCollectionRefresh(t); return Reflect.ownKeys(t); },
+  getOwnPropertyDescriptor(t, k) { _liveCollectionRefresh(t); return Reflect.getOwnPropertyDescriptor(t, k); },
 };
 // True for elements in the HTML namespace (the only ones whose name attribute
 // contributes to an HTMLCollection's supported property names).

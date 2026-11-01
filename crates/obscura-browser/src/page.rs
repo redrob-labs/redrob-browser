@@ -3528,8 +3528,13 @@ impl Page {
                     // observable document/network/script activity instead. The
                     // absolute caller budget and V8 watchdog still bound both
                     // asynchronous work and synchronous microtask storms.
-                    let _ = js.run_event_loop_until_quiescent(remaining, 150).await;
+                    let _ = js
+                        .run_event_loop_until_quiescent_or_navigation(remaining, 150)
+                        .await;
                 }
+            }
+            if self.has_pending_navigation() {
+                break;
             }
             #[cfg(feature = "render")]
             {
@@ -3650,10 +3655,12 @@ impl Page {
 
     async fn settle_runtime_for_duration(js: &mut ObscuraJsRuntime, duration_ms: u64) {
         let started = tokio::time::Instant::now();
-        let _ = js.run_event_loop_for_duration(duration_ms).await;
+        let _ = js.run_event_loop_for_duration_or_navigation(duration_ms).await;
         let requested = tokio::time::Duration::from_millis(duration_ms);
         let elapsed = started.elapsed();
-        if elapsed < requested {
+        // A document that is navigating away has nothing left to wait for;
+        // the caller follows the navigation and settles the new document.
+        if elapsed < requested && !js.has_pending_navigation() {
             tokio::time::sleep(requested - elapsed).await;
         }
     }
