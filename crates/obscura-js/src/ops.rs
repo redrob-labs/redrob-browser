@@ -8721,6 +8721,19 @@ fn ensure_prepared_render_with_base_url(
     }) || !state.pending_style_mutations.is_empty()
         || lazy_image_due;
     if needs_rebuild {
+        if std::env::var_os("OBSCURA_RENDER_TIMING_CALLER").is_some() {
+            let trace = std::backtrace::Backtrace::force_capture().to_string();
+            let ops: Vec<&str> = trace
+                .lines()
+                .filter_map(|line| line.trim().split(": ").nth(1))
+                .filter(|name| name.contains("::op_"))
+                .take(2)
+                .collect();
+            eprintln!(
+                "[timing] layout-caller ops={ops:?} mutations={} incompatible={incompatible} lazy={lazy_image_due}",
+                state.pending_style_mutations.len()
+            );
+        }
         if let Some(dom) = state.dom.as_ref() {
             state.animation_timeline.materialize_start_candidates(dom);
         }

@@ -51,6 +51,286 @@ pub(crate) enum Item {
     Break(NodeId),
 }
 
+/// An [`Item`] without its Taffy node, which changes with every box tree.
+#[derive(Clone, PartialEq)]
+enum ItemKey {
+    Text(NodeId),
+    GeneratedText(String),
+    SpanStart(SpanOwner),
+    SplitSpanStart(NodeId, bool, bool),
+    SpanEnd,
+    Atomic {
+        dom: Option<NodeId>,
+        baseline: BaselineSource,
+    },
+    Float {
+        dom: Option<NodeId>,
+    },
+    OutOfFlow {
+        dom: Option<NodeId>,
+    },
+    Break(NodeId),
+}
+
+impl ItemKey {
+    fn of(item: &Item) -> Self {
+        match item {
+            Item::Text(node) => Self::Text(*node),
+            Item::GeneratedText(text) => Self::GeneratedText(text.clone()),
+            Item::SpanStart(owner) => Self::SpanStart(*owner),
+            Item::SplitSpanStart(node, start, end) => Self::SplitSpanStart(*node, *start, *end),
+            Item::SpanEnd => Self::SpanEnd,
+            Item::Atomic { dom, baseline, .. } => Self::Atomic {
+                dom: *dom,
+                baseline: *baseline,
+            },
+            Item::Float { dom, .. } => Self::Float { dom: *dom },
+            Item::OutOfFlow { dom, .. } => Self::OutOfFlow { dom: *dom },
+            Item::Break(node) => Self::Break(*node),
+        }
+    }
+
+    fn matches(&self, item: &Item) -> bool {
+        match (self, item) {
+            (Self::Text(a), Item::Text(b)) => a == b,
+            (Self::GeneratedText(a), Item::GeneratedText(b)) => a == b,
+            (Self::SpanStart(a), Item::SpanStart(b)) => a == b,
+            (Self::SplitSpanStart(a, b, c), Item::SplitSpanStart(x, y, z)) => {
+                (a, b, c) == (x, y, z)
+            }
+            (Self::SpanEnd, Item::SpanEnd) => true,
+            (
+                Self::Atomic { dom, baseline },
+                Item::Atomic {
+                    dom: other_dom,
+                    baseline: other_baseline,
+                    ..
+                },
+            ) => dom == other_dom && baseline == other_baseline,
+            (Self::Float { dom }, Item::Float { dom: other, .. })
+            | (Self::OutOfFlow { dom }, Item::OutOfFlow { dom: other, .. }) => dom == other,
+            (Self::Break(a), Item::Break(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+/// The DOM element whose style `create` reads for `item`, if any.
+fn item_style_owner(item: &Item) -> Option<SpanOwner> {
+    match item {
+        Item::SpanStart(owner) => Some(*owner),
+        Item::SplitSpanStart(node, ..) => Some(SpanOwner::Element(*node)),
+        Item::Atomic { dom, .. } | Item::OutOfFlow { dom, .. } => dom.map(SpanOwner::Element),
+        _ => None,
+    }
+}
+
+/// Everything [`IfcStore::create`] reads to shape one IFC: its items, the
+/// styles of their elements, the text of their text nodes, the root style
+/// and parameters, and the font set. Shaping is a pure function of these.
+pub(crate) struct IfcReuseKey {
+    root: NodeId,
+    anonymous: bool,
+    quirks: bool,
+    fonts: super::fonts::FontSetKey,
+    params: RootParams,
+    root_style: LayoutStyle,
+    items: Vec<ItemKey>,
+    styles: Vec<Option<LayoutStyle>>,
+    texts: Vec<String>,
+}
+
+/// A shaped IFC as `create` made it, before any line layout.
+pub(crate) struct IfcTemplate {
+    key: IfcReuseKey,
+    ifc: Box<Ifc>,
+}
+
+impl IfcReuseKey {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        tree: &DomTree,
+        styles: &HashMap<NodeId, LayoutStyle>,
+        fonts: &super::fonts::Fonts,
+        root: NodeId,
+        root_style: &LayoutStyle,
+        anonymous: bool,
+        items: &[Item],
+        params: &RootParams,
+    ) -> Self {
+        Self {
+            root,
+            anonymous,
+            quirks: tree.is_quirks(),
+            fonts: fonts.set_key(),
+            params: params.clone(),
+            root_style: root_style.clone(),
+            items: items.iter().map(ItemKey::of).collect(),
+            styles: items
+                .iter()
+                .filter_map(item_style_owner)
+                .map(|owner| owner_style(owner, styles).cloned())
+                .collect(),
+            texts: items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Text(node) => Some(text_contents(tree, *node)),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn matches(
+        &self,
+        tree: &DomTree,
+        styles: &HashMap<NodeId, LayoutStyle>,
+        fonts: &super::fonts::Fonts,
+        root: NodeId,
+        root_style: &LayoutStyle,
+        anonymous: bool,
+        items: &[Item],
+        params: &RootParams,
+    ) -> bool {
+        if self.root != root
+            || self.anonymous != anonymous
+            || self.items.len() != items.len()
+            || self.quirks != tree.is_quirks()
+            || self.params != *params
+            || !self.items.iter().zip(items).all(|(key, item)| key.matches(item))
+            || self.root_style != *root_style
+            || !fonts.matches_key(&self.fonts)
+        {
+            return false;
+        }
+        let mut stored_styles = self.styles.iter();
+        let styles_match = items.iter().filter_map(item_style_owner).all(|owner| {
+            stored_styles
+                .next()
+                .is_some_and(|stored| stored.as_ref() == owner_style(owner, styles))
+        });
+        if !styles_match {
+            return false;
+        }
+        let mut stored_texts = self.texts.iter();
+        items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Text(node) => Some(*node),
+                _ => None,
+            })
+            .all(|node| {
+                let Some(stored) = stored_texts.next() else {
+                    return false;
+                };
+                tree.with_node(node, |node| match &node.data {
+                    obscura_dom::tree::NodeData::Text { contents } => contents == stored,
+                    _ => stored.is_empty(),
+                })
+                .unwrap_or(stored.is_empty())
+            })
+    }
+}
+
+fn text_contents(tree: &DomTree, node: NodeId) -> String {
+    tree.with_node(node, |node| match &node.data {
+        obscura_dom::tree::NodeData::Text { contents } => Some(contents.clone()),
+        _ => None,
+    })
+    .flatten()
+    .unwrap_or_default()
+}
+
+thread_local! {
+    /// Templates of the most recently dropped IFC stores on this thread, by
+    /// root element, for the next layout to reuse.
+    static PREVIOUS_TEMPLATES: std::cell::RefCell<HashMap<NodeId, Vec<IfcTemplate>>> =
+        std::cell::RefCell::new(HashMap::new());
+    /// The laid-out IFCs of the same stores, by template id.
+    static PREVIOUS_LAID: std::cell::RefCell<HashMap<u64, Box<Ifc>>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+static NEXT_TEMPLATE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Hand a dropped store's templates and laid-out IFCs to the next layout on
+/// this thread. A large store (a document layout) replaces what earlier
+/// layouts left; a small one (a standalone pseudo text) only adds to it.
+pub(crate) fn retain_templates(templates: Vec<IfcTemplate>, laid: Vec<Option<Box<Ifc>>>) {
+    if templates.is_empty() || !crate::inline::layout_reuse_enabled() {
+        return;
+    }
+    let replace = templates.len() >= 16;
+    let _ = PREVIOUS_TEMPLATES.try_with(|previous| {
+        let mut previous = previous.borrow_mut();
+        if replace {
+            previous.clear();
+        }
+        for template in templates {
+            previous.entry(template.key.root).or_default().push(template);
+        }
+    });
+    let _ = PREVIOUS_LAID.try_with(|previous| {
+        let mut previous = previous.borrow_mut();
+        if replace {
+            previous.clear();
+        }
+        for ifc in laid.into_iter().flatten() {
+            if ifc.template_id != 0 {
+                previous.insert(ifc.template_id, ifc);
+            }
+        }
+    });
+}
+
+/// Whether the previous layout left a laid-out IFC of template `id`.
+pub(crate) fn has_previous_laid(id: u64) -> bool {
+    id != 0
+        && PREVIOUS_LAID
+            .try_with(|previous| previous.borrow().contains_key(&id))
+            .unwrap_or(false)
+}
+
+/// Take the previous layout's laid-out IFC of template `id`.
+pub(crate) fn take_previous_laid(id: u64) -> Option<Box<Ifc>> {
+    PREVIOUS_LAID
+        .try_with(|previous| previous.borrow_mut().remove(&id))
+        .ok()
+        .flatten()
+}
+
+/// Take the previous layout's template whose inputs equal these.
+#[allow(clippy::too_many_arguments)]
+fn take_template(
+    tree: &DomTree,
+    styles: &HashMap<NodeId, LayoutStyle>,
+    fonts: &super::fonts::Fonts,
+    root: NodeId,
+    root_style: &LayoutStyle,
+    anonymous: bool,
+    items: &[Item],
+    params: &RootParams,
+) -> Option<IfcTemplate> {
+    PREVIOUS_TEMPLATES
+        .try_with(|previous| {
+            let mut previous = previous.borrow_mut();
+            let candidates = previous.get_mut(&root)?;
+            let index = candidates.iter().position(|template| {
+                template
+                    .key
+                    .matches(tree, styles, fonts, root, root_style, anonymous, items, params)
+            })?;
+            let template = candidates.swap_remove(index);
+            if candidates.is_empty() {
+                previous.remove(&root);
+            }
+            Some(template)
+        })
+        .ok()
+        .flatten()
+}
+
 /// The style of a span owner.
 fn owner_style<'a>(
     owner: SpanOwner,
@@ -445,6 +725,35 @@ impl IfcStore {
         items: &[Item],
         params: RootParams,
     ) -> Option<usize> {
+        // An IFC whose inputs equal one of the previous layout's is shaped
+        // exactly as that one was: copy its template and only lay it out.
+        let reuse = crate::inline::layout_reuse_enabled();
+        if reuse {
+            let fonts = self.fonts.as_ref()?;
+            if let Some(template) = take_template(
+                tree, styles, fonts, root, root_style, anonymous, items, &params,
+            ) {
+                let mut ifc = template.ifc.clone();
+                let mut nodes = items.iter().filter_map(|item| match item {
+                    Item::Atomic { node, .. } | Item::Float { node, .. } | Item::OutOfFlow { node, .. } => {
+                        Some(*node)
+                    }
+                    _ => None,
+                });
+                for inline_box in &mut ifc.boxes {
+                    if matches!(
+                        inline_box.kind,
+                        BoxKind::Atomic { .. } | BoxKind::Float | BoxKind::OutOfFlow
+                    ) {
+                        inline_box.node = nodes.next();
+                    }
+                }
+                let index = self.ifcs.len();
+                self.ifcs.push(Some(ifc));
+                self.templates.push(template);
+                return Some(index);
+            }
+        }
         let fonts = self.fonts.as_mut()?;
 
         // Paint entries and the span text styles are resolved before the
@@ -923,8 +1232,11 @@ impl IfcStore {
             marker
         });
 
+        let key = reuse.then(|| {
+            IfcReuseKey::new(tree, styles, fonts, root, root_style, anonymous, items, &params)
+        });
         let index = self.ifcs.len();
-        self.ifcs.push(Some(Box::new(Ifc {
+        let ifc = Box::new(Ifc {
             root,
             anonymous,
             node: None,
@@ -944,7 +1256,19 @@ impl IfcStore {
             logical_size: (0.0, 0.0),
             clip: None,
             marker,
-        })));
+            template_id: if key.is_some() {
+                NEXT_TEMPLATE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            } else {
+                0
+            },
+        });
+        if let Some(key) = key {
+            self.templates.push(IfcTemplate {
+                key,
+                ifc: ifc.clone(),
+            });
+        }
+        self.ifcs.push(Some(ifc));
         Some(index)
     }
 }

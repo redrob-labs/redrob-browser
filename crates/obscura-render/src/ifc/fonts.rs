@@ -198,6 +198,39 @@ pub(crate) struct Fonts {
     whole_pixel_blobs: Vec<u64>,
 }
 
+impl Fonts {
+    /// A copy of what identifies this font set, for [`Fonts::matches_key`].
+    pub(crate) fn set_key(&self) -> FontSetKey {
+        FontSetKey {
+            signature: self.signature,
+            load_emoji: self.load_emoji,
+            web_fonts: self.web_fonts.clone(),
+        }
+    }
+
+    /// Whether this set is the one `key` was taken from (web font files
+    /// compared by identity, which the key keeps alive).
+    pub(crate) fn matches_key(&self, key: &FontSetKey) -> bool {
+        self.signature == key.signature
+            && self.load_emoji == key.load_emoji
+            && self.web_fonts.len() == key.web_fonts.len()
+            && self.web_fonts.iter().zip(&key.web_fonts).all(|(a, b)| {
+                Arc::ptr_eq(&a.data, &b.data)
+                    && a.family == b.family
+                    && a.weight == b.weight
+                    && a.italic == b.italic
+            })
+    }
+}
+
+/// What identifies a [`Fonts`] set.
+#[derive(Clone)]
+pub(crate) struct FontSetKey {
+    signature: u64,
+    load_emoji: bool,
+    web_fonts: Vec<WebFont>,
+}
+
 impl Drop for Fonts {
     fn drop(&mut self) {
         for &id in &self.whole_pixel_blobs {

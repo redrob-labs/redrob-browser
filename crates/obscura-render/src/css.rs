@@ -153,6 +153,10 @@ enum RelationalSelectorKey {
 pub(crate) struct RelationalInvalidation {
     pub rule_order: usize,
     anchor_key: Option<RelationalSelectorKey>,
+    /// Keys of the compounds joined to the anchor compound by descendant or
+    /// child combinators (`.list :has(> .icon)` gives `.list`). Each must be
+    /// present on some ancestor of an anchor whose match can change.
+    anchor_ancestor_keys: Vec<RelationalSelectorKey>,
     relative_keys: Vec<RelationalSelectorKey>,
     pub anchor_reaches: InvalidationReaches,
     pub unkeyed_subject: bool,
@@ -335,6 +339,11 @@ fn relational_key_may_match(
 impl RelationalInvalidation {
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
+            && self.anchor_ancestor_keys.iter().all(|key| {
+                tree.ancestors(node)
+                    .into_iter()
+                    .any(|ancestor| relational_key_may_match(Some(key), tree, ancestor))
+            })
     }
 
     /// Whether `node` may be the subject of this `:has()` argument. Falls back
@@ -1298,10 +1307,16 @@ fn note_compound_dependencies(
     reaches: InvalidationReaches,
     rule_order: usize,
     inside_relational: bool,
+    subject_anchor: Option<&RelationalSelectorKey>,
+    ancestor_keys: &[RelationalSelectorKey],
 ) {
     if let Some(local_name) = compound_local_name(compound) {
         map.push_local_name(local_name, rule_order, reaches);
     }
+    // A `:has()` nested in `:is()`/`:where()`/`:not()` at the subject position
+    // still anchors on the element the outer compound matches, so a key of
+    // that compound is a sound anchor filter for it.
+    let anchor_key = relational_anchor_key(compound).or_else(|| subject_anchor.cloned());
     let chars: Vec<char> = compound.chars().collect();
     let mut index = 0usize;
     while index < chars.len() {
@@ -1420,6 +1435,8 @@ fn note_compound_dependencies(
                                 reaches,
                                 rule_order,
                                 !inside_relational,
+                                anchor_key.as_ref(),
+                                ancestor_keys,
                             );
                         }
                     }
@@ -1478,7 +1495,8 @@ fn note_compound_dependencies(
                         });
                         map.push_relational_invalidation(RelationalInvalidation {
                             rule_order,
-                            anchor_key: relational_anchor_key(compound),
+                            anchor_key: anchor_key.clone(),
+                            anchor_ancestor_keys: ancestor_keys.to_vec(),
                             relative_keys,
                             anchor_reaches: reaches,
                             unkeyed_subject: unkeyed,
@@ -1507,6 +1525,8 @@ fn note_compound_dependencies(
                                 argument_reaches,
                                 rule_order,
                                 false,
+                                None,
+                                &[],
                             );
                         }
                     }
@@ -1530,6 +1550,8 @@ fn note_compound_dependencies(
                                     InvalidationReaches::CONSERVATIVE,
                                     rule_order,
                                     !inside_relational,
+                                    None,
+                                    &[],
                                 );
                             }
                         }
@@ -1564,6 +1586,8 @@ fn note_selector_dependencies(
     outer_reaches: InvalidationReaches,
     rule_order: usize,
     record_tree_siblings: bool,
+    subject_anchor: Option<&RelationalSelectorKey>,
+    outer_ancestor_keys: &[RelationalSelectorKey],
 ) {
     if record_tree_siblings {
         let (adjacent, general) = selector_sibling_combinators(selector);
@@ -1574,7 +1598,25 @@ fn note_selector_dependencies(
     if malformed {
         map.mark_conservative(rule_order);
     }
-    for (compound, local_reaches) in compounds {
+    let subject_index = compounds.len().saturating_sub(1);
+    // Ancestors of the subject: the keyed compounds before it, back to the
+    // first sibling combinator, plus those of an enclosing `:is()` subject.
+    let mut subject_ancestor_keys = outer_ancestor_keys.to_vec();
+    for (compound, local_reaches) in compounds[..subject_index]
+        .iter()
+        .rev()
+        .take_while(|_| !malformed)
+    {
+        if !local_reaches.contains(InvalidationReaches::DESCENDANTS)
+            || local_reaches.contains(InvalidationReaches::SIBLINGS)
+        {
+            break;
+        }
+        if let Some(key) = relational_anchor_key(compound) {
+            push_relational_selector_key(&mut subject_ancestor_keys, key);
+        }
+    }
+    for (position, (compound, local_reaches)) in compounds.into_iter().enumerate() {
         if record_tree_siblings
             && local_reaches.contains(InvalidationReaches::SIBLINGS)
             && !relative_selector_subject_has_key(&compound)
@@ -1585,12 +1627,24 @@ fn note_selector_dependencies(
             map.mark_conservative(rule_order);
         }
         let reaches = compose_invalidation_reach(map, local_reaches, outer_reaches, rule_order);
-        note_compound_dependencies(map, &compound, reaches, rule_order, !record_tree_siblings);
+        note_compound_dependencies(
+            map,
+            &compound,
+            reaches,
+            rule_order,
+            !record_tree_siblings,
+            subject_anchor.filter(|_| position == subject_index),
+            if position == subject_index {
+                &subject_ancestor_keys
+            } else {
+                &[]
+            },
+        );
     }
 }
 
 fn note_selector_for_invalidation(map: &mut InvalidationMap, selector: &str, rule_order: usize) {
-    note_selector_dependencies(map, selector, InvalidationReaches::SELF, rule_order, true);
+    note_selector_dependencies(map, selector, InvalidationReaches::SELF, rule_order, true, None, &[]);
 }
 
 /// Record element attributes read from declaration values.

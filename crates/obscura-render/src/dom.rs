@@ -512,6 +512,8 @@ struct RetainedTaffy {
     dom_of: HashMap<taffy::NodeId, NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
     measures: HashMap<usize, crate::inline::MeasureSignature>,
+    /// Template id of every IFC context (see `ifc::Ifc::template_id`).
+    ifc_templates: HashMap<usize, u64>,
 }
 
 thread_local! {
@@ -531,16 +533,21 @@ fn retain_taffy_tree(
     root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     engine: &crate::inline::TextEngine,
+    ifc_store: &crate::ifc::IfcStore,
 ) {
     if !taffy_reuse_enabled() {
         return;
     }
     let mut measures = HashMap::new();
+    let mut ifc_templates = HashMap::new();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if let Some(&ctx) = tree.get_node_context(node) {
             if let Some(signature) = engine.measure_signature(ctx) {
                 measures.insert(ctx, signature);
+            }
+            if let Some(template) = ifc_context_template(ifc_store, ctx) {
+                ifc_templates.insert(ctx, template);
             }
         }
         stack.extend_from_slice(tree.child_slice(node));
@@ -552,8 +559,20 @@ fn retain_taffy_tree(
         dom_of: id_map.clone(),
         by_dom,
         measures,
+        ifc_templates,
     };
     let _ = RETAINED_TAFFY.try_with(|slot| *slot.borrow_mut() = Some(retained));
+}
+
+/// The template id of the IFC a Taffy node context names, if it has one.
+fn ifc_context_template(store: &crate::ifc::IfcStore, ctx: usize) -> Option<u64> {
+    if ctx & crate::ifc::IFC_CONTEXT_BIT == 0 || ctx & crate::inline::REPLACED_CONTEXT_BIT != 0 {
+        return None;
+    }
+    store
+        .get(ctx & !crate::ifc::IFC_CONTEXT_BIT)
+        .map(|ifc| ifc.template_id)
+        .filter(|&id| id != 0)
 }
 
 fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
@@ -627,10 +646,47 @@ fn match_retained_subtree(
     old_node: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     engine: &crate::inline::TextEngine,
+    ifc_store: &crate::ifc::IfcStore,
+    fresh: Option<&HashSet<NodeId>>,
     equal: &mut Vec<(taffy::NodeId, taffy::NodeId)>,
 ) -> bool {
+    // A `calc()` handle is the address of an expression owned by the node's
+    // computed style. Equal handles name the same live expression, with the
+    // same em/rem/viewport context, only when that style was retained by the
+    // cascade; a fresh style may reuse a freed address for another value.
+    let calc_retained = || {
+        fresh.is_some_and(|fresh| {
+            id_map
+                .get(&new)
+                .is_some_and(|dom| old.dom_of.get(&old_node) == Some(dom) && !fresh.contains(dom))
+        })
+    };
     let mut same = match (tree.style(new), old.tree.style(old_node)) {
-        (Ok(a), Ok(b)) => a == b && !taffy_style_uses_calc(a),
+        (Ok(a), Ok(b)) => {
+            if a != b {
+                note_taffy_miss(0);
+                if crate::prof::enabled() && std::env::var_os("OBSCURA_TAFFY_MISS_DEBUG").is_some()
+                {
+                    let (fa, fb) = (format!("{a:?}"), format!("{b:?}"));
+                    let tokens_b: HashSet<&str> = fb.split(", ").collect();
+                    let differing: Vec<&str> = fa
+                        .split(", ")
+                        .filter(|token| !tokens_b.contains(token))
+                        .take(4)
+                        .collect();
+                    eprintln!(
+                        "[timing] taffy-miss style dom={:?} new={differing:?}",
+                        id_map.get(&new).map(|id| id.index())
+                    );
+                }
+                false
+            } else if taffy_style_uses_calc(a) && !calc_retained() {
+                note_taffy_miss(1);
+                false
+            } else {
+                true
+            }
+        }
         _ => false,
     };
     if same {
@@ -641,14 +697,25 @@ fn match_retained_subtree(
             (None, None) => true,
             (Some(&a), Some(&b)) => match (engine.measure_signature(a), old.measures.get(&b)) {
                 (Some(a), Some(b)) => a.same_measure(b),
-                _ => false,
+                // An IFC shaped from the same template as the old one lays
+                // out alike; its line layout is taken from the old IFC.
+                _ => ifc_context_template(ifc_store, a).is_some_and(|template| {
+                    old.ifc_templates.get(&b) == Some(&template)
+                        && crate::ifc::build::has_previous_laid(template)
+                }),
             },
             _ => false,
         };
+        if !same {
+            note_taffy_miss(2);
+        }
     }
     let children = tree.child_slice(new);
     let old_children = old.tree.child_slice(old_node);
-    same &= children.len() == old_children.len();
+    if children.len() != old_children.len() {
+        note_taffy_miss(3);
+        same = false;
+    }
     for (index, &child) in children.iter().enumerate() {
         let partner = match id_map.get(&child) {
             Some(dom) => old
@@ -664,16 +731,37 @@ fn match_retained_subtree(
         match partner {
             Some(partner) => {
                 let child_same =
-                    match_retained_subtree(tree, child, old, partner, id_map, engine, equal);
+                    match_retained_subtree(
+                        tree, child, old, partner, id_map, engine, ifc_store, fresh, equal,
+                    );
                 same &= child_same && old_children.get(index) == Some(&partner);
             }
-            None => same = false,
+            None => {
+                note_taffy_miss(4);
+                same = false;
+            }
         }
     }
     if same {
         equal.push((new, old_node));
     }
     same
+}
+
+thread_local! {
+    /// Self-caused taffy reuse misses by reason, for `OBSCURA_RENDER_TIMING`:
+    /// style, calc, measure, child count, missing partner.
+    static TAFFY_MISSES: std::cell::Cell<[usize; 5]> = const { std::cell::Cell::new([0; 5]) };
+}
+
+fn note_taffy_miss(reason: usize) {
+    if crate::prof::enabled() {
+        TAFFY_MISSES.with(|misses| {
+            let mut value = misses.get();
+            value[reason] += 1;
+            misses.set(value);
+        });
+    }
 }
 
 /// Copy the previous layout's cache into every unchanged subtree of the new
@@ -683,6 +771,8 @@ fn seed_from_retained_taffy(
     root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     engine: &crate::inline::TextEngine,
+    ifc_store: &mut crate::ifc::IfcStore,
+    fresh: Option<&HashSet<NodeId>>,
 ) -> (usize, usize) {
     if !taffy_reuse_enabled() {
         return (0, 0);
@@ -695,9 +785,22 @@ fn seed_from_retained_taffy(
         return (0, 0);
     };
     let mut equal = Vec::new();
-    match_retained_subtree(tree, root, &old, old.root, id_map, engine, &mut equal);
+    match_retained_subtree(
+        tree, root, &old, old.root, id_map, engine, ifc_store, fresh, &mut equal,
+    );
     for &(new, old_node) in &equal {
         let _ = tree.copy_layout_state(new, &old.tree, old_node);
+        let Some(&ctx) = tree.get_node_context(new) else {
+            continue;
+        };
+        if let Some(template) = ifc_context_template(ifc_store, ctx) {
+            if let (Some(laid), Some(ifc)) = (
+                crate::ifc::build::take_previous_laid(template),
+                ifc_store.get_mut(ctx & !crate::ifc::IFC_CONTEXT_BIT),
+            ) {
+                ifc.adopt_layout_of(&laid);
+            }
+        }
     }
     (equal.len(), old.tree.total_node_count())
 }
@@ -1488,8 +1591,17 @@ impl DomLayout {
         tree: &DomTree,
         viewport: (f32, f32),
     ) -> DerivedLayoutState {
+        let started = std::time::Instant::now();
         let viewport_fixed = self.viewport_fixed_nodes(tree);
+        let fixed_done = std::time::Instant::now();
         let geometry = self.derived_geometry_with_fixed(tree, viewport, &viewport_fixed);
+        if crate::prof::enabled() {
+            eprintln!(
+                "[timing] derived fixed={:?} geometry={:?}",
+                fixed_done.duration_since(started),
+                fixed_done.elapsed()
+            );
+        }
         DerivedLayoutState {
             content_size: geometry.content_size,
             viewport_fixed,
@@ -1504,9 +1616,20 @@ impl DomLayout {
         viewport: (f32, f32),
         viewport_fixed: &HashSet<NodeId>,
     ) -> DerivedGeometryState {
+        let started = std::time::Instant::now();
         let content_size = self.scrolling_content_size_with_fixed(tree, viewport, viewport_fixed);
+        let content_done = std::time::Instant::now();
         let scroll_tree = self.scroll_tree(tree, viewport, content_size, viewport_fixed);
+        let scroll_done = std::time::Instant::now();
         let sticky = self.sticky_layout_with_geometry(tree, viewport, content_size, &scroll_tree);
+        if crate::prof::enabled() {
+            eprintln!(
+                "[timing] derived-geometry content={:?} scroll={:?} sticky={:?}",
+                content_done.duration_since(started),
+                scroll_done.duration_since(content_done),
+                scroll_done.elapsed()
+            );
+        }
         DerivedGeometryState {
             content_size,
             sticky,
@@ -4227,6 +4350,35 @@ fn subtree_may_match_relational_path(
         .any(|id| invalidation.subject_may_match(tree, id))
 }
 
+/// `subtree_may_match_relational_path` for an inserted or removed subtree
+/// whose anchors outside it are reachable only through a child chain of
+/// `depth` levels (`:has(> a > b)` is 2). A chain element in the subtree is
+/// then at most `depth - 1` levels below its root: deeper matches can only
+/// change anchors inside the subtree, which is restyled as a whole anyway.
+fn shallow_subtree_may_match_relational_path(
+    tree: &DomTree,
+    invalidation: &crate::css::RelationalInvalidation,
+    root: NodeId,
+) -> bool {
+    let Some(depth) = invalidation.child_chain_depth else {
+        return subtree_may_match_relational_path(tree, invalidation, root);
+    };
+    let mut level = vec![root];
+    for _ in 0..depth {
+        if level
+            .iter()
+            .any(|id| invalidation.subject_may_match(tree, *id))
+        {
+            return true;
+        }
+        level = level.iter().flat_map(|id| tree.children(*id)).collect();
+        if level.is_empty() {
+            break;
+        }
+    }
+    false
+}
+
 /// Candidate anchors after an insertion. Relative selectors search from the
 /// changed subtree toward ancestors and earlier siblings; only the boundary
 /// can connect the already-fresh inserted subtree to retained elements.
@@ -4278,9 +4430,13 @@ thread_local! {
     static ROOT_ANCHOR_RULES: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-fn note_root_anchor(tree: &DomTree, anchor: NodeId, rule_order: usize) {
+/// Record a `:has()` anchor whose scope reached the root element or added at
+/// least 200 nodes to the restyle set.
+fn note_root_anchor(tree: &DomTree, anchor: NodeId, rule_order: usize, added: usize) {
     if crate::prof::enabled()
-        && element_local_name(tree, anchor).is_some_and(|name| name == "html" || name == "body")
+        && (added >= 200
+            || element_local_name(tree, anchor)
+                .is_some_and(|name| name == "html" || name == "body"))
     {
         ROOT_ANCHOR_RULES.with(|rules| rules.borrow_mut().push(rule_order));
     }
@@ -4342,14 +4498,14 @@ fn add_relational_tree_invalidation(
             // only if the subtree held an element of the relative selector, or
             // through the sibling and structural effects tested here.
             TreeStyleMutation::Remove { node, .. } => {
-                subtree_may_match_relational_path(tree, invalidation, *node)
+                shallow_subtree_may_match_relational_path(tree, invalidation, *node)
                     || invalidation.unkeyed_subject
                     || invalidation.sibling_side_effect
                     || invalidation.structural_side_effect
                     || invalidation.text_side_effect
             }
             TreeStyleMutation::Insert { node, .. } => {
-                subtree_may_match_relational_path(tree, invalidation, *node)
+                shallow_subtree_may_match_relational_path(tree, invalidation, *node)
                     || invalidation.unkeyed_subject
                     || invalidation.sibling_side_effect
                     || invalidation.structural_side_effect
@@ -4398,8 +4554,9 @@ fn add_relational_tree_invalidation(
                 }
                 return false;
             }
-            note_root_anchor(tree, anchor, invalidation.rule_order);
+            let before = dirty.len();
             add_relational_anchor_scope(tree, anchor, invalidation.anchor_reaches, dirty);
+            note_root_anchor(tree, anchor, invalidation.rule_order, dirty.len() - before);
         }
     }
     true
@@ -5073,12 +5230,18 @@ fn retained_style_plan(
                             }
                             return RetainedStylePlan::Full;
                         }
-                        note_root_anchor(tree, anchor, invalidation.rule_order);
+                        let before = dirty.len();
                         add_relational_anchor_scope(
                             tree,
                             anchor,
                             invalidation.anchor_reaches,
                             &mut dirty,
+                        );
+                        note_root_anchor(
+                            tree,
+                            anchor,
+                            invalidation.rule_order,
+                            dirty.len() - before,
                         );
                     }
                 }
@@ -6701,6 +6864,7 @@ fn layout_dom_once(
         // sufficient: under an auto-height containing block it computes to
         // auto and must never become a post-layout percentage basis.
         let mut definite_height_nodes = HashSet::new();
+        phase_marks.push(("pre", std::time::Instant::now()));
         let mut queue = vec![(root_id, root_inh)];
         while let Some((id, mut inh)) = queue.pop() {
             // Default the child containing-block width to this element's own
@@ -7916,6 +8080,7 @@ fn layout_dom_once(
             }
         }
 
+        phase_marks.push(("inherit", std::time::Instant::now()));
         // Root/body overflow propagated to the viewport leaves the source
         // element itself overflow-visible for Taffy and BFC decisions.
         mark_viewport_overflow_source(tree, root_id, &mut styles);
@@ -8155,6 +8320,7 @@ fn layout_dom_once(
             );
         }
 
+        phase_marks.push(("fixups", std::time::Instant::now()));
         resolve_grid_areas(tree, root_id, &mut styles);
 
         // A fieldset's rendered legend (its first legend child, in flow)
@@ -8461,11 +8627,19 @@ fn layout_dom_once(
                 &ifc_items.static_positions,
             );
             let (seeded, previous_nodes) =
-                seed_from_retained_taffy(&mut taffy_tree, taffy_root, &id_map, &engine);
+                seed_from_retained_taffy(
+                    &mut taffy_tree,
+                    taffy_root,
+                    &id_map,
+                    &engine,
+                    &mut ifc_items.ifc,
+                    fresh_styles.as_ref(),
+                );
             if crate::prof::enabled() {
                 eprintln!(
-                    "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={}",
-                    taffy_tree.total_node_count()
+                    "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={} misses(style,calc,measure,children,partner)={:?}",
+                    taffy_tree.total_node_count(),
+                    TAFFY_MISSES.with(|misses| misses.replace([0; 5]))
                 );
             }
             let available = taffy::Size {
@@ -9645,6 +9819,7 @@ fn layout_dom_once(
                 taffy_root,
                 &id_map,
                 &engine,
+                &ifc_items.ifc,
             );
         }
     }
