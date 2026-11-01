@@ -6733,7 +6733,10 @@ fn layout_dom_once(
                     })
                     .and_then(|parent| styles.get(&parent))
                     .is_some_and(|parent| {
-                        parent.display == crate::Display::Flex
+                        (parent.display == crate::Display::Grid
+                            && parent.css_display == crate::CssDisplay::Layout
+                            && stretched_grid_item(parent, style))
+                            || parent.display == crate::Display::Flex
                             && !parent.internal_flex_container
                             && if matches!(
                                 parent.flex_direction,
@@ -12549,6 +12552,19 @@ fn stretched_row_flex_item(parent: &crate::LayoutStyle, item: &crate::LayoutStyl
     let single_line = matches!(parent.flex_wrap, None | Some(taffy::FlexWrap::NoWrap));
     let align = item.align_self.or(parent.align_items);
     row && single_line
+        && align.is_none_or(|align| align == taffy::AlignItems::STRETCH)
+        && !item.margin_auto[0]
+        && !item.margin_auto[2]
+}
+
+/// A `height:auto` grid item stretched over its grid area in the block axis
+/// (`align-self` normal or stretch, no auto block margins). CSS Grid §6.2:
+/// the stretched size is definite, so percentage heights inside it resolve
+/// against the area. Spotify's main view is such an item around a
+/// `height:100%` scroller, which collapsed to its content without it.
+fn stretched_grid_item(parent: &crate::LayoutStyle, item: &crate::LayoutStyle) -> bool {
+    let align = item.align_self.or(parent.align_items);
+    !item.is_replaced_box
         && align.is_none_or(|align| align == taffy::AlignItems::STRETCH)
         && !item.margin_auto[0]
         && !item.margin_auto[2]

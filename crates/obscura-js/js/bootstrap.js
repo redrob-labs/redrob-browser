@@ -47,7 +47,7 @@ const __obscuraCore = globalThis.Deno.core;
     '_elemHrefURL', '_setElemHrefPart', '_pad', '_daysInMonth',
     '_isoWeek1Monday', '_inputParseNumber', '_inputFormatNumber',
     '_htmlAttrName', '_convertNodes', '_fragmentContextPayload', '_parseHTMLFragment', '_xmlWellFormed', '_elementClassFor', '_wrap', '_wrapEl',
-    '_resolveUrl', '_registerIframe', '_base64ToUint8Array',
+    '_resolveUrl', '_registerIframe', '_reflectedUnsigned', '_base64ToUint8Array',
     '_bodyToUint8Array', '_arrayBufferFromBytes',
     '_installWasmStreamingFallback', '_urlParseOp', '_urlSetOp',
     '_urlResolveOp', '_decodeBodyWithCharset', '_utf8DecodeBytes',
@@ -75,7 +75,7 @@ const __obscuraCore = globalThis.Deno.core;
     'MessageChannel', 'MessagePort', 'BroadcastChannel', 'CustomElementRegistry',
     'Scheduler',
     'XMLHttpRequestEventTarget', 'HTMLMediaElement', 'HTMLVideoElement',
-    'HTMLAudioElement', 'WebGL2RenderingContext',
+    'HTMLAudioElement', 'WebGL2RenderingContext', 'DOMStringList', 'VideoPlaybackQuality',
     'MediaKeys', 'MediaKeySession', 'MediaKeySystemAccess', 'MediaKeyStatusMap',
     'MediaKeyMessageEvent', 'MediaEncryptedEvent',
     'SVGElement', 'SVGGraphicsElement', 'SVGGeometryElement', 'SVGPathElement',
@@ -468,7 +468,7 @@ async function __runDynScriptTask(task) {
     // off the element. Calling onload separately would double-fire it.
     try { task.dispatchEvent(new Event('load')); } catch(e) {}
   } catch(e) {
-    console.error('Dynamic script fetch error:', e.message);
+    console.error('Dynamic script fetch error (' + task.url + '):', e.message);
     try { task.dispatchEvent(new Event('error')); } catch(ex) {}
   } finally {
     if (task.delaysLoad) {
@@ -4283,6 +4283,10 @@ const _innerTextBlockDisplays = new Set([
 // <option> and <optgroup> are not here: Chrome lays options out as blocks
 // (in or out of a <select>) and innerText lists each on its own line.
 const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track']);
+const _innerTextUnrenderedSvgTags = new Set([
+  'title', 'desc', 'metadata', 'defs', 'symbol', 'clipPath', 'mask', 'pattern',
+  'marker', 'linearGradient', 'radialGradient', 'filter', 'script', 'style',
+]);
 // Forced line feeds (<br>, table rows) and tabs (table cells) are emitted as
 // these tokens so they stay distinct from a text node whose data happens to
 // be a lone "\n" or "\t": such whitespace collapses like any other.
@@ -4303,6 +4307,10 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   // are not being rendered (noscript with scripting on, media sources).
   if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
       && _innerTextUnrenderedTags.has(node.localName)) return;
+  // SVG descriptive and resource elements (an icon's <title>, <defs>,
+  // gradients) are never rendered in place, whatever their display value.
+  if (node.namespaceURI === 'http://www.w3.org/2000/svg'
+      && _innerTextUnrenderedSvgTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
     items.push(_innerTextLF);
@@ -7259,6 +7267,11 @@ class Document extends Node {
   get images() { return this.querySelectorAll("img"); }
   get links() { return this.querySelectorAll("a[href], area[href]"); }
   get scripts() { return this.querySelectorAll("script"); }
+  get embeds() { return HTMLCollection._live(() => this.querySelectorAll("embed"), false); }
+  get plugins() { return this.embeds; }
+  get anchors() { return HTMLCollection._live(() => this.querySelectorAll("a[name]"), true); }
+  // Applets are gone from HTML; the collection is always empty.
+  get applets() { return HTMLCollection._from([]); }
   get cookie() {
     // A document without a browsing context is cookie-averse.
     if (this._detached) return "";
@@ -8157,6 +8170,77 @@ class HTMLMediaElement extends HTMLElement {
   addTextTrack(kind, label = "", language = "") {
     return new TextTrack(null, String(kind), String(label), String(language));
   }
+  // Content attributes reflected as IDL attributes (HTML media elements).
+  get autoplay() { return this.hasAttribute("autoplay"); }
+  set autoplay(v) { this.toggleAttribute("autoplay", !!v); }
+  get loop() { return this.hasAttribute("loop"); }
+  set loop(v) { this.toggleAttribute("loop", !!v); }
+  get controls() { return this.hasAttribute("controls"); }
+  set controls(v) { this.toggleAttribute("controls", !!v); }
+  get defaultMuted() { return this.hasAttribute("muted"); }
+  set defaultMuted(v) { this.toggleAttribute("muted", !!v); }
+  get preload() {
+    const v = (this.getAttribute("preload") ?? "").toLowerCase();
+    if (v === "none" || v === "metadata" || v === "auto") return v;
+    return this.hasAttribute("preload") ? "auto" : "metadata";
+  }
+  set preload(v) { this.setAttribute("preload", v); }
+  get crossOrigin() {
+    if (!this.hasAttribute("crossorigin")) return null;
+    return (this.getAttribute("crossorigin") || "").toLowerCase() === "use-credentials"
+      ? "use-credentials" : "anonymous";
+  }
+  set crossOrigin(v) {
+    if (v === null) this.removeAttribute("crossorigin");
+    else this.setAttribute("crossorigin", v);
+  }
+  get controlsList() {
+    if (!this._controlsList) {
+      this._controlsList = new DOMTokenList(this, "controlslist",
+        ["nodownload", "nofullscreen", "noplaybackrate", "noremoteplayback"]);
+    }
+    return this._controlsList;
+  }
+  get disableRemotePlayback() { return this.hasAttribute("disableremoteplayback"); }
+  set disableRemotePlayback(v) { this.toggleAttribute("disableremoteplayback", !!v); }
+  get defaultPlaybackRate() { return this.__media.defaultPlaybackRate ?? 1; }
+  set defaultPlaybackRate(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new TypeError("Failed to set the 'defaultPlaybackRate' property on 'HTMLMediaElement': The provided double value is non-finite.");
+    if (n === this.defaultPlaybackRate) return;
+    this.__media.defaultPlaybackRate = n;
+    this.__fire("ratechange");
+  }
+  get playbackRate() { return this.__media.playbackRate ?? 1; }
+  set playbackRate(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new TypeError("Failed to set the 'playbackRate' property on 'HTMLMediaElement': The provided double value is non-finite.");
+    if (n !== 0 && (Math.abs(n) < 0.0625 || Math.abs(n) > 16)) {
+      throw new DOMException(`Failed to set the 'playbackRate' property on 'HTMLMediaElement': The provided playback rate (${n}) is not in the supported playback range.`, "NotSupportedError");
+    }
+    if (n === this.playbackRate) return;
+    this.__media.playbackRate = n;
+    this.__fire("ratechange");
+  }
+  get preservesPitch() { return this.__media.preservesPitch ?? true; }
+  set preservesPitch(v) { this.__media.preservesPitch = !!v; }
+  // Ranges the user agent has played. Nothing plays headless; the window
+  // reports positions, so the played range runs from 0 to the furthest one.
+  get played() {
+    const end = this.__media.playedEnd || 0;
+    return new TimeRanges(end > 0 ? [[0, end]] : []);
+  }
+  get sinkId() { return this.__media.sinkId ?? ""; }
+  setSinkId(id) {
+    const sink = String(id);
+    if (sink !== "" && sink !== "default") {
+      return Promise.reject(new DOMException("Requested device not found", "NotFoundError"));
+    }
+    this.__media.sinkId = sink;
+    return Promise.resolve();
+  }
+  get webkitAudioDecodedByteCount() { return 0; }
+  get webkitVideoDecodedByteCount() { return 0; }
 }
 _markNative(HTMLMediaElement.prototype.canPlayType);
 _markNative(HTMLMediaElement.prototype.play);
@@ -8187,6 +8271,7 @@ globalThis.__redrobMediaUpdate = function (id, s) {
   if (before.readyState < 2 && m.readyState >= 2) { el.__fire('loadeddata'); el.__fire('canplay'); }
   if (before.readyState < 4 && m.readyState >= 4) el.__fire('canplaythrough');
   if (m.seeking) { m.seeking = false; el.__fire('seeked'); }
+  if (!s.paused && s.currentTime > (m.playedEnd || 0)) m.playedEnd = s.currentTime;
   if (before.paused && !s.paused) { m.paused = false; el.__fire('playing'); }
   if (!before.paused && s.paused && !s.ended) { m.paused = true; el.__fire('pause'); }
   if (s.currentTime !== before.currentTime) el.__fire('timeupdate');
@@ -8202,7 +8287,66 @@ class HTMLVideoElement extends HTMLMediaElement {
   set poster(value) { this.setAttribute("poster", value); }
   get videoWidth() { return this.__media.videoWidth; }
   get videoHeight() { return this.__media.videoHeight; }
+  get width() { return _reflectedUnsigned(this, "width"); }
+  set width(v) { this.setAttribute("width", String(Number(v) >>> 0)); }
+  get height() { return _reflectedUnsigned(this, "height"); }
+  set height(v) { this.setAttribute("height", String(Number(v) >>> 0)); }
+  get playsInline() { return this.hasAttribute("playsinline"); }
+  set playsInline(v) { this.toggleAttribute("playsinline", !!v); }
+  get disablePictureInPicture() { return this.hasAttribute("disablepictureinpicture"); }
+  set disablePictureInPicture(v) { this.toggleAttribute("disablepictureinpicture", !!v); }
+  get onenterpictureinpicture() { return this._onenterpip || null; }
+  set onenterpictureinpicture(v) { this._setPipHandler("enterpictureinpicture", "_onenterpip", v); }
+  get onleavepictureinpicture() { return this._onleavepip || null; }
+  set onleavepictureinpicture(v) { this._setPipHandler("leavepictureinpicture", "_onleavepip", v); }
+  _setPipHandler(type, slot, v) {
+    if (this[slot]) this.removeEventListener(type, this[slot]);
+    this[slot] = typeof v === "function" ? v : null;
+    if (this[slot]) this.addEventListener(type, this[slot]);
+  }
+  requestPictureInPicture() {
+    return Promise.reject(new DOMException(
+      "Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Must be handling a user gesture if there isn't already an element in Picture-in-Picture.",
+      "NotAllowedError",
+    ));
+  }
+  // Frames presented so far; none are presented without a playing window.
+  get webkitDecodedFrameCount() { return 0; }
+  get webkitDroppedFrameCount() { return 0; }
+  getVideoPlaybackQuality() {
+    return new VideoPlaybackQuality(performance.now(), 0, 0);
+  }
+  // The callback runs when a new frame is presented for compositing.
+  requestVideoFrameCallback(callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError("Failed to execute 'requestVideoFrameCallback' on 'HTMLVideoElement': parameter 1 is not of type 'Function'.");
+    }
+    const id = (this.__videoFrameCallbackId = (this.__videoFrameCallbackId || 0) + 1);
+    (this.__videoFrameCallbacks ||= new Map()).set(id, callback);
+    return id;
+  }
+  cancelVideoFrameCallback(id) {
+    this.__videoFrameCallbacks?.delete(Number(id));
+  }
 }
+function _reflectedUnsigned(el, name) {
+  const raw = el.getAttribute(name);
+  if (raw === null) return 0;
+  const m = /^[\t\n\f\r ]*\+?(\d+)/.exec(raw);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return n <= 2147483647 ? n : 0;
+}
+class VideoPlaybackQuality {
+  constructor(creationTime, totalVideoFrames, droppedVideoFrames) {
+    Object.defineProperty(this, "_q", { value: [creationTime, totalVideoFrames, droppedVideoFrames] });
+  }
+  get creationTime() { return this._q[0]; }
+  get totalVideoFrames() { return this._q[1]; }
+  get droppedVideoFrames() { return this._q[2]; }
+  get corruptedVideoFrames() { return 0; }
+}
+globalThis.VideoPlaybackQuality = VideoPlaybackQuality;
 class HTMLAudioElement extends HTMLMediaElement {}
 class HTMLTrackElement extends HTMLElement {
   static NONE = 0;
@@ -8348,6 +8492,19 @@ function _resolveUrl(url) {
 // changes, so their `useLocation` hooks return the wrong path and the UI
 // freezes on the original route.
 globalThis.__virtualUrl = null;
+class DOMStringList {
+  constructor(items) {
+    Object.defineProperty(this, "_items", { value: Array.from(items || [], String) });
+    for (let i = 0; i < this._items.length; i++) {
+      Object.defineProperty(this, i, { value: this._items[i], enumerable: true });
+    }
+  }
+  get length() { return this._items.length; }
+  item(index) { return this._items[index >>> 0] ?? null; }
+  contains(value) { return this._items.includes(String(value)); }
+  [Symbol.iterator]() { return this._items[Symbol.iterator](); }
+}
+globalThis.DOMStringList = DOMStringList;
 function __currentUrl() {
   return globalThis.__virtualUrl || _domParse("document_url") || "about:blank";
 }
@@ -8363,6 +8520,21 @@ globalThis.location = {
   get hash() { try { return new URL(this.href).hash; } catch { return ""; } },
   get port() { try { return new URL(this.href).port; } catch { return ""; } },
   toString() { return this.href; },
+  // Origins of the documents this one is nested in, innermost first.
+  get ancestorOrigins() {
+    const origins = [];
+    let w = globalThis;
+    for (let i = 0; i < 64; i++) {
+      let p = null;
+      try { p = w.parent; } catch (_e) { break; }
+      if (!p || p === w) break;
+      let origin = "null";
+      try { origin = p.location.origin || "null"; } catch (_e) {}
+      origins.push(origin);
+      w = p;
+    }
+    return new DOMStringList(origins);
+  },
   assign(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
   reload() { var r = _resolveUrl(this.href); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
   replace(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },

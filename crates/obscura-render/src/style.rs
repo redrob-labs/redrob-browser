@@ -5723,6 +5723,64 @@ fn parse_grid_areas(value: &str) -> Vec<Vec<String>> {
     rows
 }
 
+/// The row track list of a `grid-template` rows side that embeds area
+/// strings: the strings are dropped, and a string with no track size right
+/// after it contributes an `auto` row. Line names stay where they are.
+fn grid_template_area_rows(rows_part: &str) -> String {
+    let mut out = String::new();
+    let mut chars = rows_part.chars().peekable();
+    // A string was read and its row size has not been seen yet.
+    let mut pending_row = false;
+    while let Some(c) = chars.next() {
+        match c {
+            '\'' | '"' => {
+                for d in chars.by_ref() {
+                    if d == c {
+                        break;
+                    }
+                }
+                if pending_row {
+                    out.push_str(" auto");
+                }
+                pending_row = true;
+            }
+            '[' => {
+                if pending_row {
+                    out.push_str(" auto");
+                    pending_row = false;
+                }
+                out.push_str(" [");
+                for d in chars.by_ref() {
+                    out.push(d);
+                    if d == ']' {
+                        break;
+                    }
+                }
+            }
+            c if c.is_whitespace() => {}
+            c => {
+                // A track size token, parentheses included (minmax(0, 1fr)).
+                out.push(' ');
+                out.push(c);
+                let mut depth = i32::from(c == '(');
+                while let Some(&d) = chars.peek() {
+                    if depth == 0 && (d.is_whitespace() || matches!(d, '\'' | '"' | '[')) {
+                        break;
+                    }
+                    depth += i32::from(d == '(') - i32::from(d == ')');
+                    out.push(d);
+                    chars.next();
+                }
+                pending_row = false;
+            }
+        }
+    }
+    if pending_row {
+        out.push_str(" auto");
+    }
+    out.trim().to_string()
+}
+
 /// Parse the `grid-template: <rows> / <cols>` shorthand. The rows side may embed
 /// area strings; we support the common `tracks / tracks` form and, when area
 /// strings are present, extract them too.
@@ -5732,8 +5790,15 @@ fn parse_grid_template(style: &mut LayoutStyle, value: &str) {
         None => (value.trim(), None),
     };
     if rows_part.contains('\'') || rows_part.contains('"') {
-        // Rows side carries area strings interleaved with row track sizes.
+        // Rows side carries area strings interleaved with row track sizes:
+        // `[names]? "string" <track-size>? [names]?`, repeated. Each string
+        // is one row, sized `auto` when no size follows it.
         style.grid_areas = Some(parse_grid_areas(rows_part));
+        let rows = grid_template_area_rows(rows_part);
+        let (tracks, names, calc_expressions) = parse_track_list_named(&rows);
+        style.grid_template_rows = tracks;
+        style.grid_calc_expressions[1] = calc_expressions;
+        style.grid_row_line_names = (!names.is_empty()).then(|| build_line_map(names));
     } else if !rows_part.is_empty() {
         let (tracks, names, calc_expressions) = parse_track_list_named(rows_part);
         style.grid_template_rows = tracks;
