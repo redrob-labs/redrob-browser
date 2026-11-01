@@ -272,8 +272,9 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> V
     loop {
         let created = client::take_created();
         let closed = client::take_closed();
+        let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
-        if created.is_empty() && closed.is_empty() && cmd.is_none() {
+        if created.is_empty() && closed.is_empty() && cmd.is_none() && !replied {
             break;
         }
         ENGINE.with_borrow_mut(|e| {

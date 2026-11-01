@@ -59,6 +59,8 @@ thread_local! {
     static CREATED: RefCell<Vec<Created>> = const { RefCell::new(Vec::new()) };
     static CLOSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
     static PENDING: RefCell<HashMap<i32, Reply>> = RefCell::new(HashMap::new());
+    /// DevTools replies waiting for the window loop (`run_replies`).
+    static READY: RefCell<Vec<(Reply, bool, Value)>> = const { RefCell::new(Vec::new()) };
     /// Popups CEF announced and has not created yet, by popup id.
     static POPUPS: RefCell<HashMap<i32, TabId>> = RefCell::new(HashMap::new());
 }
@@ -351,6 +353,16 @@ pub fn devtools(browser: &Browser, method: &str, params: Value, reply: impl FnOn
     }
 }
 
+/// Run the DevTools replies that arrived; true when there were any.
+pub fn run_replies() -> bool {
+    let ready = READY.with_borrow_mut(std::mem::take);
+    let any = !ready.is_empty();
+    for (reply, ok, value) in ready {
+        reply(ok, value);
+    }
+    any
+}
+
 /// Fire and forget.
 pub fn devtools_send(browser: &Browser, method: &str, params: Value) {
     devtools(browser, method, params, |_, _| {});
@@ -377,8 +389,11 @@ wrap_dev_tools_message_observer! {
             let value = result
                 .and_then(|r| serde_json::from_slice::<Value>(r).ok())
                 .unwrap_or(Value::Null);
+            // Run it from the window loop: CEF calls made inside this
+            // callback (a navigation, another DevTools call) would re-enter
+            // the observer list CEF is walking.
             if let Some(reply) = PENDING.with_borrow_mut(|p| p.remove(&message_id)) {
-                reply(success == 1, value);
+                READY.with_borrow_mut(|r| r.push((reply, success == 1, value)));
             }
         }
 
