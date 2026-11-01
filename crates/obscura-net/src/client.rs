@@ -644,6 +644,9 @@ impl Resolve for SsrfGuardResolver {
 /// cache on most Linux hosts, so every new connection paid a full DNS round
 /// trip (250ms for en.wikipedia.org from this host). Chrome keeps host-cache
 /// entries for about a minute; this matches it.
+/// HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE Chrome advertises (256 KiB).
+pub const CHROME_MAX_HEADER_LIST_SIZE: u32 = 256 * 1024;
+
 const DNS_CACHE_TTL: Duration = Duration::from_secs(60);
 const DNS_CACHE_CAPACITY: usize = 512;
 
@@ -1126,6 +1129,9 @@ impl ObscuraHttpClient {
                     // grow with the link so large images and downloads are not
                     // capped at the 64 KiB initial window per round trip.
                     .http2_adaptive_window(true)
+                    // hyper's default 16 KiB header list limit resets YouTube's
+                    // response stream (PROTOCOL_ERROR); Chrome accepts 256 KiB.
+                    .http2_max_header_list_size(CHROME_MAX_HEADER_LIST_SIZE)
                     .pool_idle_timeout(Duration::from_secs(90))
                     // SSRF guard: reject hostnames that resolve to a private/loopback IP.
                     .dns_resolver(Arc::new(SsrfGuardResolver::new(self.allow_private_network)));

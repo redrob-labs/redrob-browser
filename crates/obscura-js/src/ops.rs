@@ -3821,7 +3821,8 @@ fn build_request_client(proxy_url: Option<&str>) -> Result<reqwest::Client, Stri
         // workloads where the same origin is hit dozens of times across
         // a navigation. Keep connections warm longer.
         .pool_idle_timeout(std::time::Duration::from_secs(300))
-        .tcp_keepalive(std::time::Duration::from_secs(60));
+        .tcp_keepalive(std::time::Duration::from_secs(60))
+        .http2_max_header_list_size(obscura_net::CHROME_MAX_HEADER_LIST_SIZE);
     if let Some(proxy) = proxy_url {
         let p = reqwest::Proxy::all(proxy)
             .map_err(|e| format!("Invalid op_fetch_url proxy '{}': {}", proxy, e))?;

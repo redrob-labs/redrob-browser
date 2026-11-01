@@ -14,6 +14,7 @@ pub mod wreq_client;
 pub use blocklist::is_blocked as is_tracker_blocked;
 pub use client::{
     env_allows_private_network, is_forbidden_ip, CallbackRegistry, ObscuraHttpClient,
+    CHROME_MAX_HEADER_LIST_SIZE,
     ObscuraNetError, RequestCallback, RequestCredentials, RequestInfo, RequestMode,
     ResourceRequest, ResourceType, Response, ResponseCallback, SsrfGuardResolver,
 };
