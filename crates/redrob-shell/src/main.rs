@@ -14,6 +14,8 @@ mod agent_bridge;
 mod autoscroll;
 mod browser;
 mod cdp;
+#[allow(dead_code)]
+mod cef;
 mod compositor;
 mod devtools;
 mod drm_tab;
