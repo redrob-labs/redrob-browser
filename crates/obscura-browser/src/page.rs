@@ -3509,6 +3509,7 @@ impl Page {
             return;
         }
         let settle_started = std::time::Instant::now();
+        let mut followed = 0;
         // Pump, then give any frame document that finished fetching a realm of
         // its own. Attaching one runs its scripts, which can start timers,
         // fetches and further frames, so keep alternating until no new frame
@@ -3535,7 +3536,11 @@ impl Page {
             {
                 self.queue_pending_render_resources();
             }
-            if !self.advance_frames().await {
+            let frames_moved = self.advance_frames().await;
+            if self.follow_settle_navigation(&mut followed).await {
+                continue;
+            }
+            if !frames_moved {
                 break;
             }
         }
@@ -3565,14 +3570,52 @@ impl Page {
         if duration_ms == 0 {
             return;
         }
-        if let Some(js) = &mut self.js {
-            Self::settle_runtime_for_duration(js, duration_ms).await;
+        // The wait keeps its full wall clock, in slices: between them frame
+        // documents get their realms (a challenge widget lives in one) and a
+        // navigation the page started is followed, as a browser would while
+        // the caller waits. A challenge page that reloads itself into the
+        // site after solving otherwise ends the wait still on the challenge.
+        const SLICE_MS: u64 = 250;
+        let started = tokio::time::Instant::now();
+        let total = tokio::time::Duration::from_millis(duration_ms);
+        let mut followed = 0;
+        loop {
+            let remaining = total.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            let slice = remaining.min(tokio::time::Duration::from_millis(SLICE_MS));
+            if let Some(js) = &mut self.js {
+                Self::settle_runtime_for_duration(js, duration_millis_u64(slice)).await;
+            } else {
+                tokio::time::sleep(slice).await;
+            }
+            self.advance_frames().await;
+            self.follow_settle_navigation(&mut followed).await;
         }
-        // A fixed wait must retain its full wall clock, so frames get their
-        // realms once at the end instead of being interleaved as in `settle`.
-        // Their document scripts still run; only their own deferred work is
-        // left for a later settle.
-        self.advance_frames().await;
+    }
+
+    /// Follows a navigation the document queued while settling (a challenge
+    /// script reloading, a timer assigning `location`, a form submit), up to
+    /// the navigation chain limit so a page that keeps reloading itself
+    /// cannot hold the settle forever. Reports whether one was followed.
+    async fn follow_settle_navigation(&mut self, followed: &mut usize) -> bool {
+        if !self.has_pending_navigation() {
+            return false;
+        }
+        if *followed >= self.navigation_chain_limit() {
+            self.take_pending_navigation();
+            return false;
+        }
+        *followed += 1;
+        match self.process_pending_navigation_outcome().await {
+            Ok(PendingNavigationOutcome::Document) => true,
+            Ok(_) => false,
+            Err(error) => {
+                tracing::warn!("navigation started while settling failed: {error}");
+                false
+            }
+        }
     }
 
     /// Advance one wake-driven browser task for a continuously owned page.

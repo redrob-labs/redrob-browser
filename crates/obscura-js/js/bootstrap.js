@@ -37,7 +37,7 @@ const __obscuraCore = globalThis.Deno.core;
     '__markParserScripts', '__obscura_hasPendingDynamicScripts',
     '__obscura_hasPendingLoadDelayingScripts', '__obscura_hasPendingParserBlockingScripts',
     '__obscura_nextPendingTimeoutDelay',
-    '__obscura_hw', '__obscura_mem',
+    '__obscura_hw', '__obscura_mem', '__obscura_fp_seed',
     '__documentReadyState__', '__currentUrl',
     // internal helpers (var-declared throughout the file)
     '__processDynScriptQueue', '_decodeDataScriptUrl', '_markNative', '_fpRand', '_fpNoise',
@@ -133,11 +133,11 @@ Object.defineProperty(globalThis, "__obscura_binding_called", {
 globalThis.__obscura_errors = [];
 
 globalThis.addEventListener = globalThis.addEventListener || function(){};
-globalThis.onunhandledrejection = function(e) { if (e?.preventDefault) e.preventDefault(); };
-
-globalThis.onerror = function(msg, src, line, col, error) {
-  globalThis.__obscura_errors.push({msg: String(msg), src: String(src||""), line, error: String(error||"")});
-};
+// No preset handlers: window.onerror and window.onunhandledrejection are
+// null in a browser, and a page that finds functions there knows it is
+// automated. The rejection handler below already keeps the loop alive.
+globalThis.onunhandledrejection = null;
+globalThis.onerror = null;
 globalThis.addEventListener = function(type, fn, options) {
   _eventTargetAdd(globalThis, type, fn, options);
 };
@@ -167,6 +167,14 @@ const _DOM_TREE_MUTATION_COMMANDS = new Set([
 // makes `iframe.contentDocument.title` read the frame's document rather than
 // the caller's. Set by __obscura_init; 0 is the page.
 let _realmFrameId = 0;
+
+// Runs classic script source as its own script named `name`, like a
+// <script> element. Indirect eval would leave `eval at ...` frames naming the
+// engine in every stack trace the script takes.
+function _runClassicScript(code, name) {
+  const result = __obscuraCore.ops.op_run_classic_script(String(code), String(name || ''));
+  if (result !== undefined) throw result.error;
+}
 
 const _dom = (cmd, a1, a2) => {
   let result = __obscuraCore.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""), _realmFrameId);
@@ -219,14 +227,31 @@ const _functionToString = {
     if (_nativeFns.has(this)) {
       return `function ${this.name || ''}() { [native code] }`;
     }
+    // A function another realm (a frame, the parent page) marked: its
+    // text is recorded on the function under a private key.
+    if (typeof this === 'function') {
+      const recorded = __obscuraCore.ops.op_native_source(this);
+      if (recorded !== undefined) {
+        return recorded || `function ${this.name || ''}() { [native code] }`;
+      }
+    }
     return _origToString.call(this);
   },
 }.toString;
 Function.prototype.toString = _functionToString;
-function _markNative(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; }
+function _recordNativeSource(fn, text) {
+  try { __obscuraCore.ops.op_mark_native(fn, text); } catch (_e) {}
+}
+function _markNative(fn) {
+  if (typeof fn === 'function') { _nativeFns.add(fn); _recordNativeSource(fn, ''); }
+  return fn;
+}
 // Mark a function with an exact native-code toString (used for accessors).
-function _markNativeAs(fn, str) { if (typeof fn === 'function') _nativeStr.set(fn, str); return fn; }
-_nativeFns.add(_functionToString);
+function _markNativeAs(fn, str) {
+  if (typeof fn === 'function') { _nativeStr.set(fn, str); _recordNativeSource(fn, str); }
+  return fn;
+}
+_markNative(_functionToString);
 
 // unusualWindowProperties: obscura's internal globals are made non-enumerable
 // (see _preHideInternals and __obscura_init), which hides them from
@@ -387,7 +412,7 @@ function _decodeDataScriptUrl(url) {
 // native per-document state so it survives wrapper churn, fragment parsing,
 // moves, and cloneNode().
 globalThis.__markParserScripts = function(nids) {
-  for (const nid of nids || []) __obscuraCore.ops.op_script_mark_started(+nid);
+  for (const nid of nids || []) __obscuraCore.ops.op_script_mark_started(+nid, _realmFrameId);
 };
 async function __fetchDynClassicScript(task) {
   let body;
@@ -439,7 +464,7 @@ async function __runDynScriptTask(task) {
         await new Promise(resolve => {
           const execute = () => {
             globalThis.__currentScriptNid = task.nid;
-            try { (0, eval)(body); }
+            try { _runClassicScript(body, task.url); }
             catch(e) { console.error('Dynamic script error (' + task.url + '):', e.message); }
             finally { globalThis.__currentScriptNid = task.prevNid || 0; }
             resolve();
@@ -874,6 +899,79 @@ const _consoleObjectId = (value) => {
   store[objectId] = value;
   return objectId;
 };
+// Console formatting must not run page code. Chrome only describes console
+// arguments for an attached inspector, and does it from V8's own view of the
+// value: no getters, no toString/toJSON, no proxy traps. Pages test exactly
+// that (an Error whose `stack` getter fires, a `%d` argument whose valueOf
+// fires) to tell an automated or inspected browser from a plain one.
+const _consoleKind = (value) => __obscuraCore.ops.op_console_value_kind(value);
+// The value `key` has as an own or inherited data property; undefined for an
+// accessor, a proxy anywhere on the chain, or a missing key.
+function _consoleData(obj, key) {
+  let o = obj;
+  for (let i = 0; o !== null && o !== undefined && i < 64; i++) {
+    if (_consoleKind(o) === 'proxy') return undefined;
+    const d = Reflect.getOwnPropertyDescriptor(o, key);
+    if (d) {
+      if ('value' in d) return d.value;
+      // A V8 builtin accessor (Error's `stack`) runs no page code.
+      // Formatting a stack would call a page's Error.prepareStackTrace, so
+      // it is set aside while V8 builds the text.
+      if (typeof d.get === 'function' && /\{\s*\[native code\]\s*\}$/.test(_origToString.call(d.get))) {
+        const prepare = Object.getOwnPropertyDescriptor(Error, 'prepareStackTrace');
+        const unset = !prepare || ('value' in prepare && prepare.value === undefined);
+        const swap = !unset && 'value' in prepare && prepare.writable;
+        if (!unset && !swap) return undefined;
+        if (swap) Error.prepareStackTrace = undefined;
+        try { return Reflect.apply(d.get, obj, []); } catch (_e) { return undefined; }
+        finally { if (swap) Error.prepareStackTrace = prepare.value; }
+      }
+      return undefined;
+    }
+    o = Reflect.getPrototypeOf(o);
+  }
+  return undefined;
+}
+function _consoleClassName(value) {
+  if (_consoleKind(value) === 'proxy') return typeof value === 'function' ? 'Function' : 'Object';
+  const ctor = _consoleData(value, 'constructor');
+  const name = typeof ctor === 'function' ? _consoleData(ctor, 'name') : undefined;
+  return typeof name === 'string' && name ? name : 'Object';
+}
+function _consoleErrorText(value) {
+  const stack = _consoleData(value, 'stack');
+  if (typeof stack === 'string' && stack) return stack;
+  const message = _consoleData(value, 'message');
+  const name = _consoleData(value, 'name');
+  return (typeof name === 'string' ? name : 'Error') + (typeof message === 'string' && message ? ': ' + message : '');
+}
+// A JSON-like preview built from own enumerable data properties only.
+function _consolePreview(value, depth) {
+  if (value === null) return 'null';
+  const type = typeof value;
+  if (type === 'string') return depth ? JSON.stringify(value) : value;
+  if (type === 'bigint') return String(value) + 'n';
+  if (type === 'symbol') return String(value);
+  if (type !== 'object' && type !== 'function') return String(value);
+  const kind = _consoleKind(value);
+  if (kind === 'proxy') return type === 'function' ? 'function' : 'Proxy(Object)';
+  if (type === 'function') return _origToString.call(value);
+  if (kind === 'error') return _consoleErrorText(value);
+  if (typeof _consoleData(value, '_nid') === 'number') {
+    const tag = _consoleData(value, '_tagName');
+    return typeof tag === 'string' ? tag.toLowerCase() : _consoleClassName(value);
+  }
+  if (depth >= 2) return kind === 'array' ? '[...]' : '{...}';
+  const keys = Reflect.ownKeys(value).filter((k) => {
+    if (typeof k !== 'string') return false;
+    const d = Reflect.getOwnPropertyDescriptor(value, k);
+    return d && d.enumerable && 'value' in d;
+  }).slice(0, 100);
+  if (kind === 'array') {
+    return '[' + keys.filter((k) => k !== 'length').map((k) => _consolePreview(Reflect.getOwnPropertyDescriptor(value, k).value, depth + 1)).join(',') + ']';
+  }
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + _consolePreview(Reflect.getOwnPropertyDescriptor(value, k).value, depth + 1)).join(',') + '}';
+}
 const _consoleRemoteObject = (value) => {
   const type = typeof value;
   if (value === null) return { type: "object", subtype: "null", value: null, description: "null" };
@@ -890,52 +988,34 @@ const _consoleRemoteObject = (value) => {
     const description = String(value) + "n";
     return { type, unserializableValue: description, description };
   }
-  if (type === "symbol") return { type, description: String(value) };
-  if (value instanceof Error) {
-    const _pst = Error.prepareStackTrace;
-    if (_pst !== undefined) Error.prepareStackTrace = undefined;
-    const description = value.stack || value.message || String(value);
-    if (_pst !== undefined) Error.prepareStackTrace = _pst;
+  if (type === "symbol") return { type, description: _consolePreview(value, 0) };
+  const kind = _consoleKind(value);
+  if (kind === "error") {
     return {
       type: "object", subtype: "error",
-      className: (value.constructor && value.constructor.name) || "Error",
-      description, objectId: _consoleObjectId(value)
+      className: _consoleClassName(value),
+      description: _consoleErrorText(value), objectId: _consoleObjectId(value)
     };
   }
-  const className = type === "function"
-    ? "Function"
-    : ((value.constructor && value.constructor.name) || "Object");
-  const remote = { type, className, description: type === "function" ? String(value) : className };
-  if (Array.isArray(value)) {
+  const className = type === "function" ? "Function" : _consoleClassName(value);
+  const remote = { type, className, description: type === "function" ? _consolePreview(value, 0) : className };
+  if (kind === "proxy") {
+    remote.subtype = "proxy";
+    remote.description = "Proxy(" + (type === "function" ? "Function" : "Object") + ")";
+  } else if (kind === "array") {
+    const length = _consoleData(value, "length");
     remote.subtype = "array";
-    remote.description = "Array(" + value.length + ")";
-  } else if (type === "object" && typeof value._nid === "number") {
+    remote.description = "Array(" + (typeof length === "number" ? length : 0) + ")";
+  } else if (type === "object" && typeof _consoleData(value, "_nid") === "number") {
     remote.subtype = "node";
-    remote.description = value.tagName ? value.tagName.toLowerCase() : (value.nodeName || "node");
+    remote.description = _consolePreview(value, 0);
   }
   remote.objectId = _consoleObjectId(value);
   return remote;
 };
 const _consoleFn = (level, args) => {
   try {
-    const text = args.map(a => {
-      if (a === null) return "null";
-      if (a === undefined) return "undefined";
-      if (a instanceof Error) {
-        const _pst = Error.prepareStackTrace;
-        if (_pst !== undefined) Error.prepareStackTrace = undefined;
-        const _s = a.stack || a.message || String(a);
-        if (_pst !== undefined) Error.prepareStackTrace = _pst;
-        return _s;
-      }
-      if (typeof a === "object") {
-        try {
-          const s = JSON.stringify(a);
-          return s === "{}" && a.message ? a.message : s;
-        } catch { return String(a); }
-      }
-      return String(a);
-    }).join(" ");
+    const text = args.map((a) => a === undefined ? "undefined" : _consolePreview(a, 0)).join(" ");
     const eventArgs = __obscuraCore.ops.op_runtime_events_enabled()
       ? JSON.stringify(args.map(a => {
           try { return _consoleRemoteObject(a); }
@@ -946,15 +1026,29 @@ const _consoleFn = (level, args) => {
   } catch {}
 };
 
-globalThis.console = {
-  log: (...a) => _consoleFn("log", a), warn: (...a) => _consoleFn("warning", a),
-  error: (...a) => _consoleFn("error", a), info: (...a) => _consoleFn("info", a),
-  debug: (...a) => _consoleFn("debug", a), dir: (...a) => _consoleFn("dir", a),
-  trace: (...a) => _consoleFn("trace", a), table: (...a) => _consoleFn("table", a), group: () => {},
-  groupEnd: () => {}, groupCollapsed: () => {}, time: () => {}, timeEnd: () => {},
-  timeLog: () => {}, count: () => {}, countReset: () => {}, clear: () => {},
-  assert: (c, ...a) => { if (!c) _consoleFn("error", ["Assertion failed:", ...a]); },
-};
+// Chrome's console methods are native functions named after themselves.
+globalThis.console = (() => {
+  const c = {};
+  const define = (name, fn) => {
+    Object.defineProperty(fn, 'name', { value: name, configurable: true });
+    _markNative(fn);
+    c[name] = fn;
+  };
+  for (const [name, level] of [['debug', 'debug'], ['error', 'error'], ['info', 'info'], ['log', 'log'],
+    ['warn', 'warning'], ['dir', 'dir'], ['dirxml', 'dirxml'], ['table', 'table'], ['trace', 'trace']]) {
+    define(name, function (...a) { _consoleFn(level, a); });
+  }
+  for (const name of ['group', 'groupCollapsed', 'groupEnd', 'clear', 'count', 'countReset',
+    'profile', 'profileEnd', 'time', 'timeLog', 'timeEnd', 'timeStamp', 'context']) {
+    define(name, function () {});
+  }
+  define('assert', function (condition, ...a) { if (!condition) _consoleFn("error", ["Assertion failed:", ...a]); });
+  define('createTask', function (name) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'createTask' on 'console': 1 argument required, but only 0 present.");
+    return { run(fn) { return fn(); } };
+  });
+  return c;
+})();
 
 let _tid = 0;
 const _intervals = new Set();
@@ -1066,7 +1160,7 @@ const _coerceTimerFn = (fn) => {
     // instead of swallowing it eagerly at scheduling. The dynamic-script path
     // uses the same indirect eval for the same reason.
     const src = fn;
-    return () => { (0, eval)(src); };
+    return () => { _runClassicScript(src, ''); };
   }
   return typeof fn === "function" ? fn : null;
 };
@@ -1098,7 +1192,7 @@ globalThis.setTimeout = (fn, delay = 0, ...args) => {
       __obscuraPendingTimeoutDeadlines.delete(id);
       if (state.cancelled) return;
       _runTimerTask(taskNestingLevel, () => {
-        try { f(...args); } catch(e) { console.error("Timer error:", e); }
+        try { f(...args); } catch(e) { _reportException(e); }
       });
     },
   );
@@ -1133,7 +1227,7 @@ globalThis.setInterval = (fn, delay = 0, ...args) => {
   const tick = () => {
     if (!_intervals.has(id)) return;
     _runTimerTask(taskNestingLevel, () => {
-      try { f(...args); } catch(e) { console.error("Interval error:", e); }
+      try { f(...args); } catch(e) { _reportException(e); }
     });
     if (!_intervals.has(id)) return;
     const nextDelay = _timerDelayForNesting(normalizedDelay, taskNestingLevel);
@@ -1799,6 +1893,8 @@ function _serializeCss(props) {
   return e.length ? e.map(([k, v]) => `${k}: ${v}`).join("; ") + ";" : "";
 }
 
+// Internal members are symbol-keyed so the prototype lists only what Chrome's does.
+const _cssPull = Symbol("pull"), _cssPush = Symbol("push"), _cssReplaceFromAttribute = Symbol("replaceFromAttribute");
 class CSSStyleDeclaration {
   constructor(owner, onChange) {
     // Non-enumerable so they never leak through the proxy's own-key traps.
@@ -1816,19 +1912,19 @@ class CSSStyleDeclaration {
   // Pull the initial `style` attribute once. Later attribute mutations update
   // the declaration directly from Element.setAttribute/removeAttribute, so
   // repeated style reads do not cross the JS/Rust op boundary.
-  _pull() {
+  [_cssPull]() {
     if (this._loaded) return;
     _parseCssInto(this._props, this._owner.getAttribute("style"));
     this._loaded = true;
   }
-  _replaceFromAttribute(text) {
+  [_cssReplaceFromAttribute](text) {
     _parseCssInto(this._props, text);
     this._loaded = true;
   }
   // Serialize `_props` back onto the owner's `style` attribute after a mutation,
   // so el.style.x = … and cssText reflect into getAttribute('style') and
   // serialization. No-op when owner-less.
-  _push() {
+  [_cssPush]() {
     const o = this._owner;
     if (o) {
       const text = _serializeCss(this._props);
@@ -1846,7 +1942,7 @@ class CSSStyleDeclaration {
   // MutationObserver that re-applies the same style re-triggered itself
   // forever (a page pinning body `top: 0` spun at 100% CPU).
   setProperty(name, value) {
-    this._pull();
+    this[_cssPull]();
     const k = _cssCamelToKebab(String(name));
     const old = this._props[k];
     if (value === "" || value == null) {
@@ -1857,26 +1953,26 @@ class CSSStyleDeclaration {
       if (old === value) return;
       this._props[k] = value;
     }
-    this._push();
+    this[_cssPush]();
   }
   removeProperty(name) {
-    this._pull();
+    this[_cssPull]();
     const k = _cssCamelToKebab(String(name));
     const old = this._props[k];
     if (old === undefined) return "";
     delete this._props[k];
-    this._push();
+    this[_cssPush]();
     return old;
   }
-  getPropertyValue(name) { this._pull(); return this._props[_cssCamelToKebab(String(name))] || ""; }
+  getPropertyValue(name) { this[_cssPull](); return this._props[_cssCamelToKebab(String(name))] || ""; }
   getPropertyPriority() { return ""; }
-  get cssText() { this._pull(); return _serializeCss(this._props); }
+  get cssText() { this[_cssPull](); return _serializeCss(this._props); }
   set cssText(v) {
     _parseCssInto(this._props, v);
-    this._push();
+    this[_cssPush]();
   }
-  get length() { this._pull(); return Object.keys(this._props).length; }
-  item(i) { this._pull(); return Object.keys(this._props)[i] || ""; }
+  get length() { this[_cssPull](); return Object.keys(this._props).length; }
+  item(i) { this[_cssPull](); return Object.keys(this._props)[i] || ""; }
 }
 
 const _styleProxy = (decl) => new Proxy(decl, {
@@ -1897,13 +1993,13 @@ const _styleProxy = (decl) => new Proxy(decl, {
   has(t, p) {
     if (typeof p !== "string") return Reflect.has(t, p);
     if (p in Object.getPrototypeOf(t)) return true;
-    t._pull();
+    t[_cssPull]();
     if (_cssCamelToKebab(p) in t._props) return true;
     if (_CSS_PROP_SET.has(p) || _CSS_PROP_SET.has(_cssKebabToCamel(p))) return true;
     return /^\d+$/.test(p) && +p < t.length;
   },
   ownKeys(t) {
-    t._pull();
+    t[_cssPull]();
     const keys = [];
     const n = t.length;
     for (let i = 0; i < n; i++) keys.push(String(i));
@@ -1914,7 +2010,7 @@ const _styleProxy = (decl) => new Proxy(decl, {
   },
   getOwnPropertyDescriptor(t, p) {
     if (typeof p !== "string") return Reflect.getOwnPropertyDescriptor(t, p);
-    t._pull();
+    t[_cssPull]();
     if (/^\d+$/.test(p) && +p < t.length) return { value: t.item(+p), writable: false, enumerable: true, configurable: true };
     if (_cssCamelToKebab(p) in t._props || _CSS_PROP_SET.has(p) || _CSS_PROP_SET.has(_cssKebabToCamel(p))) {
       return { value: t.getPropertyValue(p), writable: true, enumerable: true, configurable: true };
@@ -2064,15 +2160,21 @@ function _eventTargetDispatch(target, event) {
     const eventHandler = target === globalThis ? target['on' + event.type] : null;
     if (typeof eventHandler === 'function') {
       try {
-        const result = eventHandler.call(target, event);
-        if (event.type === 'beforeunload' && _beforeUnloadValues.has(event)) {
+        // window.onerror takes the five-argument form and cancels with true.
+        const fiveArgs = event.type === 'error' && typeof ErrorEvent === 'function' && event instanceof ErrorEvent;
+        const result = fiveArgs
+          ? eventHandler.call(target, event.message, event.filename, event.lineno, event.colno, event.error)
+          : eventHandler.call(target, event);
+        if (fiveArgs) {
+          if (result === true) event.preventDefault();
+        } else if (event.type === 'beforeunload' && _beforeUnloadValues.has(event)) {
           if (result != null) {
             event.preventDefault();
             if (event.returnValue === '') event.returnValue = result;
           }
         } else if (result === false) event.preventDefault();
       } catch (error) {
-        console.error(error);
+        _reportException(error);
       }
     }
     const listeners = (_eventTargetListeners.get(target)?.get(String(event.type)) || []).slice();
@@ -2257,7 +2359,7 @@ let _scriptingEnabled = true;
 let _sandboxOpaqueOrigin = false;
 function __prepareInsertedScript(script) {
   if (!_scriptingEnabled) return;
-  if (!__obscuraCore.ops.op_script_try_start(script._nid)) return;
+  if (!__obscuraCore.ops.op_script_try_start(script._nid, _realmFrameId)) return;
   const scriptType = (script.getAttribute('type') || '').trim().toLowerCase();
   const isModule = scriptType === 'module';
   const isImportMap = scriptType === 'importmap';
@@ -2388,7 +2490,7 @@ function __prepareInsertedScript(script) {
     __processParserBlockingScriptQueue();
   } else {
     globalThis.__currentScriptNid = script._nid;
-    try { (0, eval)(code); }
+    try { _runClassicScript(code, ''); }
     catch(e) { console.error('Dynamic inline script error:', e.message); }
     finally { globalThis.__currentScriptNid = prevNid || 0; }
   }
@@ -4520,7 +4622,7 @@ class Element extends Node {
         _reconcileWindowNamedProperty(previousWindowName);
       }
     }
-    if (n === "style") this._style._replaceFromAttribute(value);
+    if (n === "style") this._style[_cssReplaceFromAttribute](value);
     if (n === "onload" && _isWindowReflectingBodyElement(this)) {
       _windowOnloadOverrideSet = false;
       _windowOnloadOverride = null;
@@ -4556,7 +4658,7 @@ class Element extends Node {
     // instead of maintaining a second, subtly different key space here.
     this._nullNamespaceAttrs = null;
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe') this._loadIframeSrcdoc(true);
-    if (ns === "" && n === "style") this._style._replaceFromAttribute(value);
+    if (ns === "" && n === "style") this._style[_cssReplaceFromAttribute](value);
   }
   removeAttribute(n) {
     n = _htmlAttrName(this, n);
@@ -4579,7 +4681,7 @@ class Element extends Node {
         && (n === "id" || (n === "name" && _windowNameEligibleElement(this)))) {
       _reconcileWindowNamedProperty(previousWindowName);
     }
-    if (n === "style") this._style._replaceFromAttribute("");
+    if (n === "style") this._style[_cssReplaceFromAttribute]("");
     if (n === "onload" && _isWindowReflectingBodyElement(this)) {
       _windowOnloadOverrideSet = false;
       _windowOnloadOverride = null;
@@ -4608,7 +4710,7 @@ class Element extends Node {
     if (ceOldValue !== null) _ceAttributeChanged(this, n, ceOldValue, null, ns || null);
     this._nullNamespaceAttrs = null;
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe') this._loadIframeSrc(this.getAttribute('src') || 'about:blank');
-    if (ns === "" && n === "style") this._style._replaceFromAttribute("");
+    if (ns === "" && n === "style") this._style[_cssReplaceFromAttribute]("");
   }
   hasAttribute(n) { return this.getAttribute(n) !== null; }
   hasAttributes() { return this.attributes.length > 0; }
@@ -7197,7 +7299,8 @@ class Document extends Node {
   write(...args) {
     const method = _documentRealmMember(this, 'write');
     if (method) return Reflect.apply(method, this, args);
-    var html = args.join('');
+    // Each argument is a DOMString: null writes "null", undefined "undefined".
+    var html = args.map(String).join('');
     if (!html) return;
     // While a parser-inserted script runs, the text goes into the document
     // parser at the insertion point and is parsed now. An inline script the
@@ -7220,7 +7323,7 @@ class Document extends Node {
     _insertWrittenNodes(this, _domParse("document_write", "", html) || []);
   }
   writeln(...args) {
-    this.write(args.join('') + '\n');
+    this.write(args.map(String).join('') + '\n');
   }
   open() {
     const method = _documentRealmMember(this, 'open');
@@ -7295,7 +7398,7 @@ function _runWrittenParserScript(nid) {
   if (!script) return;
   var prev = globalThis.__currentScriptNid;
   globalThis.__currentScriptNid = nid;
-  try { (0, eval)(script.textContent); }
+  try { _runClassicScript(script.textContent, String(globalThis.location && globalThis.location.href || '')); }
   catch (e) { console.error('Inline script error:', e && e.message); }
   finally { globalThis.__currentScriptNid = prev || 0; }
 }
@@ -7654,14 +7757,23 @@ class HTMLImageElement extends HTMLElement {
     }
   }
 
+  // A broken image without alt text renders as Chrome's 16x16 broken-image
+  // icon while it is in the document, and `width`/`height` report that box.
+  // 0x0 is the classic headless tell.
+  _brokenIconSize() {
+    return this._imageComplete && !this._imageDecoded && !!this.getAttribute("src")
+      && !this.hasAttribute("alt") && this.isConnected ? 16 : 0;
+  }
   get width() {
     const value = Number.parseInt(this.getAttribute("width") || "", 10);
-    return Number.isFinite(value) && value >= 0 ? value : this._imageNaturalWidth;
+    if (Number.isFinite(value) && value >= 0) return value;
+    return this._imageNaturalWidth || this._brokenIconSize();
   }
   set width(value) { this.setAttribute("width", Math.max(0, Number(value) || 0)); }
   get height() {
     const value = Number.parseInt(this.getAttribute("height") || "", 10);
-    return Number.isFinite(value) && value >= 0 ? value : this._imageNaturalHeight;
+    if (Number.isFinite(value) && value >= 0) return value;
+    return this._imageNaturalHeight || this._brokenIconSize();
   }
   set height(value) { this.setAttribute("height", Math.max(0, Number(value) || 0)); }
 
@@ -7763,7 +7875,7 @@ class HTMLImageElement extends HTMLElement {
     try {
       const op = __obscuraCore.ops.op_load_image_metadata;
       if (typeof op === "function") {
-        Promise.resolve(op(this._nid >>> 0)).then(
+        Promise.resolve(op(this._nid >>> 0, _realmFrameId)).then(
           raw => {
             let metadata = null;
             try { metadata = JSON.parse(raw); }
@@ -7787,7 +7899,7 @@ class HTMLImageElement extends HTMLElement {
     try {
       const op = __obscuraCore.ops.op_image_metadata;
       if (typeof op !== "function") return;
-      const metadata = JSON.parse(op(this._nid >>> 0, true));
+      const metadata = JSON.parse(op(this._nid >>> 0, true, _realmFrameId));
       if (!metadata) return;
       const selected = metadata.currentSrc ? String(metadata.currentSrc) : "";
       if (selected !== this._imageCurrentSrc) {
@@ -7982,11 +8094,38 @@ class HTMLMediaElement extends HTMLElement {
     };
     setTimeout(tick, 0);
   }
+  // With a media backend: Chrome's answers, container by container.
   canPlayType(type) {
+    // Without a media backend nothing plays, and saying so keeps sites on
+    // their fallback instead of a video path that never starts.
     if (typeof globalThis.redrobMedia !== 'function') return '';
-    const t = String(type).toLowerCase();
-    if (/^(video|audio)\/(mp4|webm|ogg|mpeg|x-m4a|aac|wav)/.test(t)) return 'maybe';
-    return '';
+    const parts = String(type).split(';');
+    const mime = parts[0].trim().toLowerCase();
+    const codecsParam = parts.slice(1).map((p) => p.trim()).find((p) => /^codecs\s*=/i.test(p));
+    const containers = {
+      'video/mp4': /^(avc1\..+|av01\..+|vp09\..+|mp4a\.40\.\d+|flac|opus)$/,
+      'audio/mp4': /^(mp4a\.40\.\d+|flac|opus)$/,
+      'audio/x-m4a': /^(mp4a\.40\.\d+|flac|opus)$/,
+      'video/webm': /^(vp8|vp8\.0|vp9|vp9\.0|vp09\..+|av01\..+|vorbis|opus)$/,
+      'audio/webm': /^(vorbis|opus)$/,
+      'video/ogg': /^(vorbis|opus|flac)$/,
+      'audio/ogg': /^(vorbis|opus|flac)$/,
+      'audio/wav': /^1$/,
+      'audio/x-wav': /^1$/,
+      'video/x-matroska': /^(avc1\..+|av01\..+|vp8|vp9|vp09\..+|vorbis|opus|flac)$/,
+      'video/3gpp': null, 'video/x-m4v': null,
+      'application/x-mpegurl': null, 'application/vnd.apple.mpegurl': null,
+    };
+    const sureWithoutCodecs = new Set(['audio/mpeg', 'audio/mp3', 'audio/aac', 'audio/flac']);
+    if (!codecsParam) {
+      if (sureWithoutCodecs.has(mime)) return 'probably';
+      return Object.prototype.hasOwnProperty.call(containers, mime) ? 'maybe' : '';
+    }
+    const allowed = containers[mime];
+    if (!allowed) return '';
+    const codecs = codecsParam.replace(/^codecs\s*=\s*/i, '').replace(/^["']|["']$/g, '')
+      .split(',').map((c) => c.trim()).filter(Boolean);
+    return codecs.length && codecs.every((c) => allowed.test(c)) ? 'probably' : '';
   }
   load() {
     const m = this.__media;
@@ -8271,22 +8410,129 @@ globalThis.__virtualUrl = null;
 function __currentUrl() {
   return globalThis.__virtualUrl || _domParse("document_url") || "about:blank";
 }
-globalThis.location = {
-  get href() { return __currentUrl(); },
-  set href(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  get origin() { try { return new URL(this.href).origin; } catch { return ""; } },
-  get protocol() { try { return new URL(this.href).protocol; } catch { return ""; } },
-  get host() { try { return new URL(this.href).host; } catch { return ""; } },
-  get hostname() { try { return new URL(this.href).hostname; } catch { return ""; } },
-  get pathname() { try { return new URL(this.href).pathname; } catch { return "/"; } },
-  get search() { try { return new URL(this.href).search; } catch { return ""; } },
-  get hash() { try { return new URL(this.href).hash; } catch { return ""; } },
-  get port() { try { return new URL(this.href).port; } catch { return ""; } },
-  toString() { return this.href; },
-  assign(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  reload() { var r = _resolveUrl(this.href); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  replace(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-};
+// Location navigation. A target that differs from the current URL only in
+// its fragment is a same-document navigation, as in Chrome: it updates the URL
+// and fires hashchange instead of fetching the document again.
+function _navigateLocation(url, replace) {
+  var target = _resolveUrl(url);
+  var current = __currentUrl();
+  try {
+    var a = new URL(current), b = new URL(target);
+    if (b.hash !== '' && a.origin === b.origin && a.pathname === b.pathname
+        && a.search === b.search && globalThis.history) {
+      if (a.hash !== b.hash) {
+        if (replace) globalThis.history.replaceState(globalThis.history.state, '', b.href);
+        else globalThis.history.pushState(null, '', b.href);
+        var hashEvent = typeof HashChangeEvent === 'function'
+          ? new HashChangeEvent('hashchange', { oldURL: current, newURL: b.href })
+          : new Event('hashchange');
+        setTimeout(function () { try { globalThis.dispatchEvent(hashEvent); } catch (e) {} }, 0);
+      }
+      return;
+    }
+  } catch (e) {}
+  globalThis.__virtualUrl = target;
+  __obscuraCore.ops.op_navigate(target, 'GET', '');
+}
+function _setLocationPart(part, value) {
+  var u;
+  try { u = new URL(__currentUrl()); } catch (e) { return; }
+  value = String(value);
+  if (part === 'hash') {
+    value = value.replace(/^#/, '');
+    u.hash = value;
+    var href = u.href;
+    // `location.hash = ''` still navigates to the URL with an empty fragment.
+    if (value === '' && href.indexOf('#') === -1) href += '#';
+    _navigateLocation(href, false);
+    return;
+  }
+  u[part] = value;
+  _navigateLocation(u.href, false);
+}
+// DOMStringList, as `location.ancestorOrigins` returns it.
+const _domStringListItems = new WeakMap();
+function DOMStringList() { throw new TypeError("Illegal constructor"); }
+Object.defineProperty(DOMStringList.prototype, Symbol.toStringTag, { value: 'DOMStringList', configurable: true });
+(function () {
+  var length = function () { return (_domStringListItems.get(this) || []).length; };
+  _markNativeAs(length, 'function get length() { [native code] }');
+  Object.defineProperty(DOMStringList.prototype, 'length', { get: length, enumerable: true, configurable: true });
+  var item = function item(index) { var items = _domStringListItems.get(this) || []; index = index >>> 0; return index < items.length ? items[index] : null; };
+  var contains = function contains(value) { return (_domStringListItems.get(this) || []).indexOf(String(value)) !== -1; };
+  [item, contains].forEach(function (fn) {
+    _markNative(fn);
+    Object.defineProperty(DOMStringList.prototype, fn.name, { value: fn, writable: true, enumerable: true, configurable: true });
+  });
+  Object.defineProperty(DOMStringList.prototype, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true });
+  _markNative(DOMStringList);
+})();
+function _makeDOMStringList(items) {
+  var list = Object.create(DOMStringList.prototype);
+  items = Array.from(items, String);
+  _domStringListItems.set(list, items);
+  items.forEach(function (value, index) {
+    Object.defineProperty(list, index, { value: value, enumerable: true, writable: false, configurable: false });
+  });
+  return Object.preventExtensions(list);
+}
+globalThis.DOMStringList = DOMStringList;
+// Origins of the documents embedding this one, nearest first. Frame setup
+// fills it in before the frame's scripts run; the page itself has none.
+globalThis.__obscura_ancestorOrigins = [];
+// Location is an interface in Chrome; its members are unforgeable, so they live
+// on the instance and the prototype only carries the brand.
+function Location() { throw new TypeError("Illegal constructor"); }
+Object.defineProperty(Location.prototype, Symbol.toStringTag, { value: 'Location', configurable: true });
+globalThis.location = Object.create(Location.prototype);
+(function _defineLocationMembers(loc) {
+  var parts = ['protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
+  Object.defineProperty(loc, 'valueOf', { value: Object.prototype.valueOf, writable: false, enumerable: false, configurable: false });
+  var accessors = {
+    ancestorOrigins: null,
+    href: {
+      get: function () { return __currentUrl(); },
+      set: function (url) { _navigateLocation(url, false); },
+    },
+    origin: { get: function () { try { return new URL(__currentUrl()).origin; } catch (e) { return ""; } } },
+  };
+  parts.forEach(function (part) {
+    accessors[part] = {
+      get: function () { try { return new URL(__currentUrl())[part]; } catch (e) { return part === 'pathname' ? '/' : ''; } },
+      set: function (value) { _setLocationPart(part, value); },
+    };
+  });
+  var ancestorOrigins = null;
+  accessors.ancestorOrigins = {
+    get: function () {
+      if (!ancestorOrigins) ancestorOrigins = _makeDOMStringList(globalThis.__obscura_ancestorOrigins || []);
+      return ancestorOrigins;
+    },
+  };
+  Object.keys(accessors).forEach(function (name) {
+    var d = accessors[name];
+    var desc = { enumerable: true, configurable: false };
+    if (d.get) { desc.get = d.get; _markNativeAs(d.get, 'function get ' + name + '() { [native code] }'); }
+    if (d.set) { desc.set = d.set; _markNativeAs(d.set, 'function set ' + name + '() { [native code] }'); }
+    Object.defineProperty(loc, name, desc);
+  });
+  var methods = {
+    assign: function assign(url) { _navigateLocation(url, false); },
+    reload: function reload() {
+      var r = __currentUrl();
+      globalThis.__virtualUrl = r;
+      __obscuraCore.ops.op_navigate(r, 'GET', '');
+    },
+    replace: function replace(url) { _navigateLocation(url, true); },
+    toString: function toString() { return __currentUrl(); },
+  };
+  Object.keys(methods).forEach(function (name) {
+    _markNative(methods[name]);
+    Object.defineProperty(loc, name, { value: methods[name], writable: false, enumerable: true, configurable: false });
+  });
+  _markNative(Location);
+  globalThis.Location = Location;
+})(globalThis.location);
 const _locationObj = globalThis.location;
 Object.defineProperty(globalThis, 'location', {
   get() { return _locationObj; },
@@ -8444,78 +8690,89 @@ for (let i = 0; i < 50; i++) {
 
 // Navigator constructor so that typeof Navigator !== 'undefined' and
 // navigatorPrototype checks don't throw a ReferenceError.
-function Navigator() {}
+function Navigator() { throw new TypeError("Illegal constructor"); }
 _markNative(Navigator);
 
 // PluginArray must exist before navigator is built so the plugins getter can use it.
-function PluginArray(items) {
-  for (var _pi = 0; _pi < items.length; _pi++) this[_pi] = items[_pi];
-  this.length = items.length;
-}
-PluginArray.prototype = Object.create(Array.prototype);
-PluginArray.prototype.constructor = PluginArray;
-PluginArray.prototype.item = function(i) { return this[i] || null; };
-PluginArray.prototype.namedItem = function(name) {
-  for (var _pi = 0; _pi < this.length; _pi++) {
-    if (this[_pi].name === name) return this[_pi];
+// PluginArray, Plugin, MimeTypeArray and MimeType as Chrome has them: the
+// interfaces cannot be constructed, members are getters and operations on
+// the prototypes, entries are own indexed properties and names resolve as
+// named properties. Chrome lists the same five PDF viewers everywhere since
+// version 94, each carrying both PDF MIME types, and the MIME types point
+// back at the first viewer. Plain function declarations so they survive the
+// V8 snapshot.
+const _pluginKey = {};
+const _pluginData = new WeakMap();
+function PluginArray(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function Plugin(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function MimeTypeArray(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+function MimeType(key) { if (key !== _pluginKey) throw new TypeError('Illegal constructor'); }
+(function _definePluginInterfaces() {
+  const data = (self, name) => {
+    const d = _pluginData.get(self);
+    if (!d) throw new TypeError('Illegal invocation');
+    return d[name];
+  };
+  const define = (Ctor, tag, getters, methods) => {
+    for (const name of getters) {
+      const get = _markNativeAs(function () { return data(this, name); }, 'function get ' + name + '() { [native code] }');
+      Object.defineProperty(Ctor.prototype, name, { get, set: undefined, enumerable: true, configurable: true });
+    }
+    for (const [name, fn] of Object.entries(methods)) {
+      Object.defineProperty(fn, 'name', { value: name, configurable: true });
+      _markNative(fn);
+      Object.defineProperty(Ctor.prototype, name, { value: fn, writable: true, enumerable: true, configurable: true });
+    }
+    Object.defineProperty(Ctor.prototype, Symbol.toStringTag, { value: tag, configurable: true });
+    _markNative(Ctor);
+  };
+  const listMethods = (nameOf) => ({
+    item(index) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'item' on '" + Object.prototype.toString.call(this).slice(8, -1) + "': 1 argument required, but only 0 present.");
+      return data(this, 'items')[index >>> 0] || null;
+    },
+    namedItem(name) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'namedItem' on '" + Object.prototype.toString.call(this).slice(8, -1) + "': 1 argument required, but only 0 present.");
+      return data(this, 'items').find((entry) => nameOf(entry) === String(name)) || null;
+    },
+  });
+  define(PluginArray, 'PluginArray', ['length'], Object.assign(listMethods((p) => _pluginData.get(p).name), { refresh() {} }));
+  define(Plugin, 'Plugin', ['name', 'filename', 'description', 'length'], listMethods((m) => _pluginData.get(m).type));
+  define(MimeTypeArray, 'MimeTypeArray', ['length'], listMethods((m) => _pluginData.get(m).type));
+  define(MimeType, 'MimeType', ['type', 'suffixes', 'description', 'enabledPlugin'], {});
+  for (const Ctor of [PluginArray, Plugin, MimeTypeArray]) {
+    Object.defineProperty(Ctor.prototype, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true });
   }
-  return null;
-};
-PluginArray.prototype.refresh = function() {};
-PluginArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(PluginArray.prototype, Symbol.toStringTag, {value: 'PluginArray', configurable: true});
-_markNative(PluginArray);
-_markNative(PluginArray.prototype.item);
-_markNative(PluginArray.prototype.namedItem);
-_markNative(PluginArray.prototype.refresh);
-
-// Plugin / MimeType / MimeTypeArray global interfaces. Chrome exposes these as
-// global constructors; their absence threw "ReferenceError: Plugin is not
-// defined" in site bundles that reference them (issue #305). Plain function
-// declarations (no globalThis assignment) so they survive the V8 snapshot, the
-// same pattern PluginArray uses.
-function Plugin(name, filename, description, mimeTypes) {
-  this.name = name;
-  this.filename = filename;
-  this.description = description;
-  var mt = mimeTypes || [];
-  for (var _i = 0; _i < mt.length; _i++) this[_i] = mt[_i];
-  this.length = mt.length;
+})();
+// Builds an indexed list: entries as own enumerable index properties and
+// named access by `nameOf` as non-enumerable own properties.
+function _pluginList(Ctor, items, nameOf, extra) {
+  const list = new Ctor(_pluginKey);
+  _pluginData.set(list, Object.assign({ items, length: items.length }, extra || {}));
+  items.forEach((entry, i) => Object.defineProperty(list, i, { value: entry, enumerable: true, configurable: true }));
+  for (const entry of items) {
+    const name = nameOf(entry);
+    if (name && !Object.prototype.hasOwnProperty.call(list, name)) {
+      Object.defineProperty(list, name, { value: entry, enumerable: false, configurable: true });
+    }
+  }
+  return list;
 }
-Plugin.prototype.item = function(i) { return this[i] || null; };
-Plugin.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-Plugin.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(Plugin.prototype, Symbol.toStringTag, {value: 'Plugin', configurable: true});
-_markNative(Plugin);
-_markNative(Plugin.prototype.item);
-_markNative(Plugin.prototype.namedItem);
-
-function MimeType(type, description, suffixes, plugin) {
-  this.type = type;
-  this.description = description;
-  this.suffixes = suffixes;
-  this.enabledPlugin = plugin || null;
+function _makePdfPlugins() {
+  const desc = 'Portable Document Format';
+  const mimes = [new MimeType(_pluginKey), new MimeType(_pluginKey)];
+  const names = ['PDF Viewer', 'Chrome PDF Viewer', 'Chromium PDF Viewer', 'Microsoft Edge PDF Viewer', 'WebKit built-in PDF'];
+  const typeOf = (m) => _pluginData.get(m).type;
+  _pluginData.set(mimes[0], { type: 'application/pdf', suffixes: 'pdf', description: desc, enabledPlugin: null });
+  _pluginData.set(mimes[1], { type: 'text/pdf', suffixes: 'pdf', description: desc, enabledPlugin: null });
+  const plugins = names.map((name) => _pluginList(Plugin, mimes, typeOf,
+    { name, filename: 'internal-pdf-viewer', description: desc }));
+  for (const mime of mimes) _pluginData.get(mime).enabledPlugin = plugins[0];
+  return {
+    plugins: _pluginList(PluginArray, plugins, (p) => _pluginData.get(p).name),
+    mimeTypes: _pluginList(MimeTypeArray, mimes, typeOf),
+  };
 }
-Object.defineProperty(MimeType.prototype, Symbol.toStringTag, {value: 'MimeType', configurable: true});
-_markNative(MimeType);
-
-function MimeTypeArray(items) {
-  for (var _i = 0; _i < items.length; _i++) this[_i] = items[_i];
-  this.length = items.length;
-}
-MimeTypeArray.prototype.item = function(i) { return this[i] || null; };
-MimeTypeArray.prototype.namedItem = function(name) {
-  for (var _i = 0; _i < this.length; _i++) if (this[_i] && this[_i].type === name) return this[_i];
-  return null;
-};
-MimeTypeArray.prototype[Symbol.iterator] = Array.prototype[Symbol.iterator];
-Object.defineProperty(MimeTypeArray.prototype, Symbol.toStringTag, {value: 'MimeTypeArray', configurable: true});
-_markNative(MimeTypeArray);
-_markNative(MimeTypeArray.prototype.item);
-_markNative(MimeTypeArray.prototype.namedItem);
 
 globalThis.Navigator = Navigator;
 globalThis.PluginArray = PluginArray;
@@ -8717,17 +8974,9 @@ globalThis.navigator = {
   });
 
   // Cache plugins/mimeTypes so navigator.plugins === navigator.plugins.
-  var _plugins = new PluginArray([
-    new Plugin("PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chrome PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chromium PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Microsoft Edge PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("WebKit built-in PDF", "internal-pdf-viewer", "Portable Document Format", []),
-  ]);
-  var _mimeTypes = new MimeTypeArray([
-    new MimeType("application/pdf", "Portable Document Format", "pdf", null),
-    new MimeType("text/pdf", "Portable Document Format", "pdf", null),
-  ]);
+  var _pdf = _makePdfPlugins();
+  var _plugins = _pdf.plugins;
+  var _mimeTypes = _pdf.mimeTypes;
   defGetter('plugins', function() { return _plugins; });
   defGetter('mimeTypes', function() { return _mimeTypes; });
 
@@ -8745,7 +8994,8 @@ globalThis.navigator = {
 
 globalThis.chrome = {
   app: { isInstalled: false, InstallState: { DISABLED: "disabled", INSTALLED: "installed", NOT_INSTALLED: "not_installed" }, RunningState: { CANNOT_RUN: "cannot_run", READY_TO_RUN: "ready_to_run", RUNNING: "running" } },
-  runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}, connect() { throw new Error("Could not establish connection. Receiving end does not exist."); }, sendMessage() { throw new Error("Could not establish connection. Receiving end does not exist."); } },
+  // No `runtime`: an ordinary page in Chrome has chrome.runtime undefined; it
+  // appears only where an extension is externally connectable.
   csi() {
     const t = Date.now();
     return { onloadT: t, startE: t - Math.floor(100 + _fpRand(610) * 200), pageT: 0, tran: 5, flashVersion: "" };
@@ -8978,6 +9228,59 @@ function _serializeBody(initBody, headers, synthesizeContentType = true) {
   return new TextEncoder().encode(typeof initBody === 'string' ? initBody : String(initBody));
 }
 
+// data: and blob: URLs never reach the network: the browser answers them
+// from the URL itself or from the blob the page registered. Challenge scripts
+// fetch both (`fetch("data:,")` as a capability probe, a worker's own blob URL)
+// and treat a failure as a non-browser.
+function _percentDecodeBytes(text) {
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x25 && /^[0-9A-Fa-f]{2}$/.test(text.slice(i + 1, i + 3))) {
+      out.push(parseInt(text.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else if (c < 0x80) {
+      out.push(c);
+    } else {
+      for (const byte of new TextEncoder().encode(text[i])) out.push(byte);
+    }
+  }
+  return new Uint8Array(out);
+}
+function _fetchFailed() { return new TypeError("Failed to fetch"); }
+async function _fetchLocalScheme(url, method, signal) {
+  // The response arrives as a later task, so an abort right after the call
+  // still wins, as it does in Chrome.
+  const state = signal ? _abortSignalState(signal) : null;
+  if (state && state.aborted) throw state.reason;
+  await null;
+  if (state && state.aborted) throw state.reason;
+  if (url.startsWith("blob:")) {
+    const blob = _blobObjects.get(url.split("#")[0]);
+    if (method !== "GET" || !blob) throw _fetchFailed();
+    const bytes = blob._bytes ? new Uint8Array(blob._bytes) : new Uint8Array(await blob.arrayBuffer());
+    const headers = { "content-length": String(bytes.length) };
+    if (blob.type) headers["content-type"] = blob.type;
+    return _createInternalResponse(bytes, { status: 200, statusText: "OK", headers, type: "basic", url, redirected: false });
+  }
+  const withoutFragment = url.split("#")[0];
+  const comma = withoutFragment.indexOf(",");
+  if (comma < 0) throw _fetchFailed();
+  let meta = withoutFragment.slice(5, comma).trim();
+  let bytes = _percentDecodeBytes(withoutFragment.slice(comma + 1));
+  if (/;\s*base64$/i.test(meta)) {
+    meta = meta.replace(/;\s*base64$/i, "");
+    let binary;
+    try { binary = atob(new TextDecoder().decode(bytes).replace(/[\t\n\f\r ]/g, "")); }
+    catch (_e) { throw _fetchFailed(); }
+    bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  }
+  if (meta.startsWith(";")) meta = "text/plain" + meta;
+  const mime = meta && /^[^\/;\s]+\/[^\/;\s]+/.test(meta) ? meta : "text/plain;charset=US-ASCII";
+  return _createInternalResponse(bytes, {
+    status: 200, statusText: "OK", headers: { "content-type": mime }, type: "basic", url, redirected: false,
+  });
+}
 async function _fetch(input, init = {}, resourceType = "Fetch") {
   init = init || {};
   const request = input instanceof Request ? input : null;
@@ -8995,6 +9298,13 @@ async function _fetch(input, init = {}, resourceType = "Fetch") {
   // and lowercase standard methods are not rejected by the case-sensitive CORS
   // checks (#969).
   const method = String(init.method || (request ? request.method : "GET")).toUpperCase();
+  if (url.startsWith("data:") || url.startsWith("blob:")) {
+    const localSignal = init.signal !== undefined ? init.signal : (request ? request.signal : null);
+    if (localSignal != null && !_abortSignalState(localSignal)) {
+      throw new TypeError("Failed to execute 'fetch': signal is not an AbortSignal");
+    }
+    return _fetchLocalScheme(url, method, localSignal);
+  }
   const headers = init.headers !== undefined ? init.headers : (request ? request.headers : undefined);
   let _h = headers instanceof Headers ? Object.fromEntries(headers.entries()) : (headers || {});
   const inheritsRequestBody = init.body === undefined && request !== null;
@@ -9172,6 +9482,18 @@ globalThis.XMLHttpRequest = class XMLHttpRequest extends XMLHttpRequestEventTarg
   }
 
   open(method, url, async_) {
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'open' on 'XMLHttpRequest': 2 arguments required, but only "
+        + arguments.length + " present.");
+    }
+    method = String(method);
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(method)) {
+      throw new DOMException("Failed to execute 'open' on 'XMLHttpRequest': '" + method + "' is not a valid HTTP method.", 'SyntaxError');
+    }
+    if (/^(connect|trace|track)$/i.test(method)) {
+      throw new DOMException("Failed to execute 'open' on 'XMLHttpRequest': '" + method + "' HTTP method is unsupported.", 'SecurityError');
+    }
+    if (/^(delete|get|head|options|post|put)$/i.test(method)) method = method.toUpperCase();
     this._method = method;
     this._url = url;
     this._headers = {};
@@ -10156,7 +10478,13 @@ function _splitMediaAnd(input) {
 }
 
 function _mediaViewportDimension(name) {
-  const value = name === 'width' ? Number(globalThis.innerWidth) : Number(globalThis.innerHeight);
+  // device-width/height are the screen's, as in Chrome; width/height the viewport's.
+  if (name === 'device-width' || name === 'device-height') {
+    const scr = globalThis.screen;
+    const v = scr ? Number(name === 'device-width' ? scr.width : scr.height) : NaN;
+    if (Number.isFinite(v)) return v;
+  }
+  const value = name === 'width' || name === 'device-width' ? Number(globalThis.innerWidth) : Number(globalThis.innerHeight);
   if (Number.isFinite(value)) return value;
   return name === 'width' ? 1440 : 900;
 }
@@ -10177,7 +10505,7 @@ function _compareMediaValues(left, operator, right) {
 }
 
 function _evaluateMediaDimension(feature) {
-  let match = feature.match(/^(min|max)-(width|height)\s*:\s*(.+)$/);
+  let match = feature.match(/^(min|max)-((?:device-)?(?:width|height))\s*:\s*(.+)$/);
   if (match) {
     const expected = _parseMediaPx(match[3]);
     if (expected === null) return false;
@@ -10185,7 +10513,7 @@ function _evaluateMediaDimension(feature) {
     return match[1] === 'min' ? actual >= expected : actual <= expected;
   }
 
-  match = feature.match(/^(width|height)\s*:\s*(.+)$/);
+  match = feature.match(/^((?:device-)?(?:width|height))\s*:\s*(.+)$/);
   if (match) {
     const expected = _parseMediaPx(match[2]);
     return expected !== null && _mediaViewportDimension(match[1]) === expected;
@@ -10250,8 +10578,52 @@ function _evaluateMediaFeature(raw) {
   if (match) return match[2] === 'hover';
 
   if (feature === 'color') return true;
-  match = feature.match(/^color\s*:\s*(\d+)$/);
-  if (match) return Number(match[1]) === 8;
+  match = feature.match(/^(min-|max-)?color\s*:\s*(\d+)$/);
+  if (match) return _compareMediaValues(8, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  // The rest of Chrome's answers for an ordinary sRGB desktop screen.
+  match = feature.match(/^(min-|max-)?(device-)?aspect-ratio\s*:\s*(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+(?:\.\d+)?))?$/);
+  if (match) {
+    const dims = match[2] ? ['device-width', 'device-height'] : ['width', 'height'];
+    const actual = _mediaViewportDimension(dims[0]) / _mediaViewportDimension(dims[1]);
+    const expected = Number(match[3]) / (match[4] === undefined ? 1 : Number(match[4]));
+    return _compareMediaValues(actual, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', expected);
+  }
+  match = feature.match(/^(min-|max-)?(?:-webkit-)?(?:device-pixel-ratio|resolution)\s*:\s*(\d+(?:\.\d+)?)(dppx|x|dpi|dpcm)?$/);
+  if (match) {
+    let expected = Number(match[2]);
+    if (match[3] === 'dpi') expected /= 96;
+    else if (match[3] === 'dpcm') expected /= 96 / 2.54;
+    const dpr = Number(globalThis.devicePixelRatio) || 1;
+    return _compareMediaValues(dpr, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', expected);
+  }
+  match = feature.match(/^color-gamut\s*:\s*(srgb|p3|rec2020)$/);
+  if (match) return match[1] === 'srgb';
+  match = feature.match(/^(dynamic-range|video-dynamic-range)\s*:\s*(standard|high)$/);
+  if (match) return match[2] === 'standard';
+  match = feature.match(/^forced-colors\s*:\s*(none|active)$/);
+  if (match) return match[1] === 'none';
+  match = feature.match(/^prefers-contrast\s*:\s*(no-preference|more|less|custom)$/);
+  if (match) return match[1] === 'no-preference';
+  match = feature.match(/^prefers-reduced-transparency\s*:\s*(no-preference|reduce)$/);
+  if (match) return match[1] === 'no-preference';
+  match = feature.match(/^display-mode\s*:\s*(browser|minimal-ui|standalone|fullscreen|window-controls-overlay|picture-in-picture|tabbed|borderless)$/);
+  if (match) return match[1] === 'browser';
+  match = feature.match(/^(min-|max-)?monochrome(?:\s*:\s*(\d+))?$/);
+  if (match) return match[2] === undefined ? false : _compareMediaValues(0, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  match = feature.match(/^(min-|max-)?color-index(?:\s*:\s*(\d+))?$/);
+  if (match) return match[2] === undefined ? false : _compareMediaValues(0, match[1] === 'min-' ? '>=' : match[1] === 'max-' ? '<=' : '=', Number(match[2]));
+  match = feature.match(/^scripting\s*:\s*(none|initial-only|enabled)$/);
+  if (match) return match[1] === 'enabled';
+  match = feature.match(/^update\s*:\s*(none|slow|fast)$/);
+  if (match) return match[1] === 'fast';
+  match = feature.match(/^overflow-(block|inline)\s*:\s*(none|scroll|paged|optional-paged)$/);
+  if (match) return match[2] === 'scroll';
+  if (feature === 'hover' || feature === 'any-hover' || feature === 'pointer' || feature === 'any-pointer'
+      || feature === 'grid' || feature === 'device-width' || feature === 'device-height') {
+    return feature !== 'grid';
+  }
+  match = feature.match(/^grid\s*:\s*([01])$/);
+  if (match) return match[1] === '0';
   return false;
 }
 
@@ -10493,21 +10865,29 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
   // An element outside any document has no computed style: every property
   // reads "" and length is 0. Checked per read, as the declaration is live.
   const detachedLookup = (name) => (_computedStyleHasNoDocument(el) ? '' : lookup(name));
+  // An element's computed style lists every longhand, as Chrome's does;
+  // a pseudo-element's lists what the renderer resolved.
+  const listedNames = () => {
+    if (_computedStyleHasNoDocument(el)) return [];
+    refreshRendered();
+    if (pseudo) return snapshot.names;
+    // Chrome lists the longhands, then the element's custom properties.
+    if (snapshot.listed && snapshot.listedFrom === snapshot.names) return snapshot.listed;
+    const custom = snapshot.names.filter((name) => name.startsWith('--'));
+    snapshot.listedFrom = snapshot.names;
+    snapshot.listed = custom.length ? _CHROME_COMPUTED_NAMES.concat(custom) : _CHROME_COMPUTED_NAMES;
+    return snapshot.listed;
+  };
+  const indexOf = (prop) => (typeof prop === 'string' && /^(0|[1-9]\d*)$/.test(prop) ? +prop : -1);
   return new Proxy(style, {
     get(_, prop) {
       if (prop === Symbol.toPrimitive || prop === Symbol.toStringTag) return undefined;
       if (prop === 'getPropertyValue') return (name) => detachedLookup(name);
       if (prop === 'getPropertyPriority') return () => '';
-      if (prop === 'item') return (i) => {
-        if (_computedStyleHasNoDocument(el)) return '';
-        refreshRendered();
-        return snapshot.names[i | 0] || '';
-      };
-      if (prop === 'length') {
-        if (_computedStyleHasNoDocument(el)) return 0;
-        refreshRendered();
-        return snapshot.names.length;
-      }
+      if (prop === 'item') return (i) => listedNames()[i | 0] || '';
+      if (prop === 'length') return listedNames().length;
+      const index = indexOf(prop);
+      if (index >= 0) return listedNames()[index];
       if (prop === 'cssText') return '';
       if (prop === 'parentRule') return null;
       // CSSStyleDeclaration's `has` trap intentionally reports every known
@@ -10524,8 +10904,147 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
       if (typeof prop === 'string') return detachedLookup(prop);
       return undefined;
     },
+    has(t, prop) {
+      const index = indexOf(prop);
+      if (index >= 0) return index < listedNames().length;
+      if (_isChromeCssName(prop)) return true;
+      if (typeof prop === 'string' && prop.includes('-') && !prop.startsWith('--')) return false;
+      return Reflect.has(t, prop);
+    },
+    // Chrome's computed declaration owns its indexed longhands and one
+    // camelCase property per CSS property name.
+    ownKeys(t) {
+      const indices = listedNames().map((_, i) => String(i));
+      const own = Reflect.ownKeys(t).filter((key) => indexOf(key) < 0 && !_CHROME_STYLE_NAMES.has(key));
+      return indices.concat(_CHROME_STYLE_OWN_NAMES, own);
+    },
+    getOwnPropertyDescriptor(t, prop) {
+      const index = indexOf(prop);
+      if (index >= 0) {
+        const names = listedNames();
+        return index < names.length
+          ? { value: names[index], writable: false, enumerable: true, configurable: true }
+          : undefined;
+      }
+      if (typeof prop === 'string' && prop !== 'cssFloat' && _CHROME_STYLE_NAMES.has(prop)) {
+        return { value: detachedLookup(prop), writable: true, enumerable: true, configurable: true };
+      }
+      return Reflect.getOwnPropertyDescriptor(t, prop);
+    },
   });
 };
+// The longhands a computed style lists, in Chrome 153's order: what
+// `getComputedStyle(el).length` and its indexed entries enumerate.
+const _CHROME_COMPUTED_NAMES = Object.freeze([
+  'accent-color', 'align-content', 'align-items', 'align-self', 'alignment-baseline', 'anchor-name',
+  'anchor-scope', 'animation-composition', 'animation-delay', 'animation-direction',
+  'animation-duration', 'animation-fill-mode', 'animation-iteration-count', 'animation-name',
+  'animation-play-state', 'animation-range-end', 'animation-range-start', 'animation-timeline',
+  'animation-timing-function', 'animation-trigger', 'app-region', 'appearance', 'aspect-ratio',
+  'backdrop-filter', 'backface-visibility', 'background-attachment', 'background-blend-mode',
+  'background-clip', 'background-color', 'background-image', 'background-origin',
+  'background-position', 'background-repeat', 'background-size', 'baseline-shift',
+  'baseline-source', 'block-size', 'border-block-end-color', 'border-block-end-style',
+  'border-block-end-width', 'border-block-start-color', 'border-block-start-style',
+  'border-block-start-width', 'border-bottom-color', 'border-bottom-left-radius',
+  'border-bottom-right-radius', 'border-bottom-style', 'border-bottom-width', 'border-collapse',
+  'border-end-end-radius', 'border-end-start-radius', 'border-image-outset', 'border-image-repeat',
+  'border-image-slice', 'border-image-source', 'border-image-width', 'border-inline-end-color',
+  'border-inline-end-style', 'border-inline-end-width', 'border-inline-start-color',
+  'border-inline-start-style', 'border-inline-start-width', 'border-left-color',
+  'border-left-style', 'border-left-width', 'border-right-color', 'border-right-style',
+  'border-right-width', 'border-shape', 'border-start-end-radius', 'border-start-start-radius',
+  'border-top-color', 'border-top-left-radius', 'border-top-right-radius', 'border-top-style',
+  'border-top-width', 'bottom', 'box-decoration-break', 'box-shadow', 'box-sizing', 'break-after',
+  'break-before', 'break-inside', 'buffered-rendering', 'caption-side', 'caret-animation',
+  'caret-color', 'caret-shape', 'clear', 'clip', 'clip-path', 'clip-rule', 'color',
+  'color-interpolation', 'color-interpolation-filters', 'color-rendering', 'color-scheme',
+  'column-count', 'column-fill', 'column-gap', 'column-height', 'column-rule-break',
+  'column-rule-color', 'column-rule-inset-cap-end', 'column-rule-inset-cap-start',
+  'column-rule-inset-junction-end', 'column-rule-inset-junction-start', 'column-rule-style',
+  'column-rule-visibility-items', 'column-rule-width', 'column-span', 'column-width', 'column-wrap',
+  'contain', 'contain-intrinsic-block-size', 'contain-intrinsic-height',
+  'contain-intrinsic-inline-size', 'contain-intrinsic-size', 'contain-intrinsic-width',
+  'container-name', 'container-type', 'content', 'content-visibility', 'corner-bottom-left-shape',
+  'corner-bottom-right-shape', 'corner-end-end-shape', 'corner-end-start-shape',
+  'corner-start-end-shape', 'corner-start-start-shape', 'corner-top-left-shape',
+  'corner-top-right-shape', 'counter-increment', 'counter-reset', 'counter-set', 'cursor', 'cx',
+  'cy', 'd', 'direction', 'display', 'dominant-baseline', 'dynamic-range-limit', 'empty-cells',
+  'field-sizing', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'flex-basis', 'flex-direction',
+  'flex-grow', 'flex-line-count', 'flex-shrink', 'flex-wrap', 'float', 'flood-color',
+  'flood-opacity', 'font-family', 'font-feature-settings', 'font-kerning', 'font-language-override',
+  'font-optical-sizing', 'font-palette', 'font-size', 'font-size-adjust', 'font-stretch',
+  'font-style', 'font-synthesis-small-caps', 'font-synthesis-style', 'font-synthesis-weight',
+  'font-variant', 'font-variant-alternates', 'font-variant-caps', 'font-variant-east-asian',
+  'font-variant-emoji', 'font-variant-ligatures', 'font-variant-numeric', 'font-variant-position',
+  'font-variation-settings', 'font-weight', 'forced-color-adjust', 'grid-auto-columns',
+  'grid-auto-flow', 'grid-auto-rows', 'grid-column-end', 'grid-column-start', 'grid-row-end',
+  'grid-row-start', 'grid-template-areas', 'grid-template-columns', 'grid-template-rows', 'height',
+  'hyphenate-character', 'hyphenate-limit-chars', 'hyphens', 'image-orientation', 'image-rendering',
+  'initial-letter', 'inline-size', 'inset-block-end', 'inset-block-start', 'inset-inline-end',
+  'inset-inline-start', 'interactivity', 'interest-delay-end', 'interest-delay-start',
+  'interpolate-size', 'isolation', 'justify-content', 'justify-items', 'justify-self', 'left',
+  'letter-spacing', 'lighting-color', 'line-break', 'line-height', 'list-style-image',
+  'list-style-position', 'list-style-type', 'margin-block-end', 'margin-block-start',
+  'margin-bottom', 'margin-inline-end', 'margin-inline-start', 'margin-left', 'margin-right',
+  'margin-top', 'marker-end', 'marker-mid', 'marker-start', 'mask-clip', 'mask-composite',
+  'mask-image', 'mask-mode', 'mask-origin', 'mask-position', 'mask-repeat', 'mask-size',
+  'mask-type', 'math-depth', 'math-shift', 'math-style', 'max-block-size', 'max-height',
+  'max-inline-size', 'max-width', 'min-block-size', 'min-height', 'min-inline-size', 'min-width',
+  'mix-blend-mode', 'object-fit', 'object-position', 'object-view-box', 'offset-anchor',
+  'offset-distance', 'offset-path', 'offset-position', 'offset-rotate', 'opacity', 'order',
+  'orphans', 'outline-color', 'outline-offset', 'outline-style', 'outline-width', 'overflow-anchor',
+  'overflow-block', 'overflow-clip-margin', 'overflow-inline', 'overflow-wrap', 'overflow-x',
+  'overflow-y', 'overlay', 'overscroll-behavior-block', 'overscroll-behavior-inline',
+  'overscroll-behavior-x', 'overscroll-behavior-y', 'padding-block-end', 'padding-block-start',
+  'padding-bottom', 'padding-inline-end', 'padding-inline-start', 'padding-left', 'padding-right',
+  'padding-top', 'paint-order', 'perspective', 'perspective-origin', 'pointer-events', 'position',
+  'position-anchor', 'position-area', 'position-try-fallbacks', 'position-try-order',
+  'position-visibility', 'print-color-adjust', 'quotes', 'r', 'reading-flow', 'reading-order',
+  'resize', 'right', 'rotate', 'row-gap', 'row-rule-break', 'row-rule-color',
+  'row-rule-inset-cap-end', 'row-rule-inset-cap-start', 'row-rule-inset-junction-end',
+  'row-rule-inset-junction-start', 'row-rule-style', 'row-rule-visibility-items', 'row-rule-width',
+  'ruby-align', 'ruby-overhang', 'ruby-position', 'rule-overlap', 'rx', 'ry', 'scale',
+  'scroll-axis-lock', 'scroll-behavior', 'scroll-initial-target', 'scroll-margin-block-end',
+  'scroll-margin-block-start', 'scroll-margin-bottom', 'scroll-margin-inline-end',
+  'scroll-margin-inline-start', 'scroll-margin-left', 'scroll-margin-right', 'scroll-margin-top',
+  'scroll-marker-group', 'scroll-padding-block-end', 'scroll-padding-block-start',
+  'scroll-padding-bottom', 'scroll-padding-inline-end', 'scroll-padding-inline-start',
+  'scroll-padding-left', 'scroll-padding-right', 'scroll-padding-top', 'scroll-snap-align',
+  'scroll-snap-stop', 'scroll-snap-type', 'scroll-target-group', 'scroll-timeline-axis',
+  'scroll-timeline-name', 'scrollbar-color', 'scrollbar-gutter', 'scrollbar-width',
+  'shape-image-threshold', 'shape-margin', 'shape-outside', 'shape-rendering', 'speak',
+  'stop-color', 'stop-opacity', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'tab-size',
+  'table-layout', 'text-align', 'text-align-last', 'text-anchor', 'text-autospace', 'text-box-edge',
+  'text-box-trim', 'text-combine-upright', 'text-decoration', 'text-decoration-color',
+  'text-decoration-line', 'text-decoration-skip-ink', 'text-decoration-style',
+  'text-decoration-thickness', 'text-emphasis-color', 'text-emphasis-position',
+  'text-emphasis-style', 'text-fit', 'text-indent', 'text-justify', 'text-orientation',
+  'text-overflow', 'text-rendering', 'text-shadow', 'text-size-adjust', 'text-spacing-trim',
+  'text-transform', 'text-underline-offset', 'text-underline-position', 'text-wrap-mode',
+  'text-wrap-style', 'timeline-scope', 'timeline-trigger-activation-range-end',
+  'timeline-trigger-activation-range-start', 'timeline-trigger-active-range-end',
+  'timeline-trigger-active-range-start', 'timeline-trigger-name', 'timeline-trigger-source', 'top',
+  'touch-action', 'transform', 'transform-box', 'transform-origin', 'transform-style',
+  'transition-behavior', 'transition-delay', 'transition-duration', 'transition-property',
+  'transition-timing-function', 'translate', 'trigger-scope', 'unicode-bidi', 'user-select',
+  'vector-effect', 'vertical-align', 'view-timeline-axis', 'view-timeline-inset',
+  'view-timeline-name', 'view-transition-class', 'view-transition-group', 'view-transition-name',
+  'view-transition-scope', 'visibility', 'white-space-collapse', 'widows', 'width', 'will-change',
+  'window-drag', 'word-break', 'word-spacing', 'writing-mode', 'x', 'y', 'z-index', 'zoom',
+  '-webkit-border-horizontal-spacing', '-webkit-border-image', '-webkit-border-vertical-spacing',
+  '-webkit-box-align', '-webkit-box-decoration-break', '-webkit-box-direction', '-webkit-box-flex',
+  '-webkit-box-ordinal-group', '-webkit-box-orient', '-webkit-box-pack', '-webkit-box-reflect',
+  '-webkit-font-smoothing', '-webkit-line-break', '-webkit-line-clamp', '-webkit-locale',
+  '-webkit-mask-box-image', '-webkit-mask-box-image-outset', '-webkit-mask-box-image-repeat',
+  '-webkit-mask-box-image-slice', '-webkit-mask-box-image-source', '-webkit-mask-box-image-width',
+  '-webkit-mask-position-x', '-webkit-mask-position-y', '-webkit-rtl-ordering',
+  '-webkit-ruby-position', '-webkit-tap-highlight-color', '-webkit-text-combine',
+  '-webkit-text-decorations-in-effect', '-webkit-text-fill-color', '-webkit-text-orientation',
+  '-webkit-text-security', '-webkit-text-stroke-color', '-webkit-text-stroke-width',
+  '-webkit-user-drag', '-webkit-user-modify', '-webkit-writing-mode',
+]);
 // Chrome parity: only elements whose shadow-including root is not a document
 // lose their style. Iframe shim documents count as documents, and shadow
 // content of a connected host keeps its style even when it is not slotted.
@@ -12392,7 +12911,7 @@ globalThis.__obscura_fireBeforeUnload = function() {
 };
 _markNative(BeforeUnloadEvent);
 _markNative(Event);
-globalThis.CustomEvent = class extends Event {
+globalThis.CustomEvent = class CustomEvent extends Event {
   constructor(t,o={}) { if (arguments.length < 1) throw new TypeError("Failed to construct 'CustomEvent': 1 argument required, but only 0 present."); super(t,o);this.detail=o.detail!==undefined?o.detail:null; }
   // Legacy DOM Level 2 init; some libraries (Starbucks China bundle, older
   // analytics shims) still call createEvent('CustomEvent') + initCustomEvent
@@ -12404,7 +12923,7 @@ globalThis.CustomEvent = class extends Event {
     this.detail = detail;
   }
 };
-globalThis.MouseEvent = class extends Event {
+globalThis.MouseEvent = class MouseEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.screenX=o.screenX||0;this.screenY=o.screenY||0;this.clientX=o.clientX||0;this.clientY=o.clientY||0;this.ctrlKey=!!o.ctrlKey;this.altKey=!!o.altKey;this.shiftKey=!!o.shiftKey;this.metaKey=!!o.metaKey;this.button=o.button||0;this.buttons=o.buttons||0;this.relatedTarget=o.relatedTarget||null;this.movementX=o.movementX||0;this.movementY=o.movementY||0; }
   get pageX() { return this.clientX + (globalThis.scrollX || 0); }
   get pageY() { return this.clientY + (globalThis.scrollY || 0); }
@@ -12446,7 +12965,7 @@ globalThis.MouseEvent = class extends Event {
     this.relatedTarget=relatedTarget===undefined?null:relatedTarget;
   }
 };
-globalThis.KeyboardEvent = class extends Event {
+globalThis.KeyboardEvent = class KeyboardEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.key=o.key||"";this.code=o.code||"";this.location=o.location||0;this.ctrlKey=!!o.ctrlKey;this.altKey=!!o.altKey;this.shiftKey=!!o.shiftKey;this.metaKey=!!o.metaKey;this.repeat=!!o.repeat;this.keyCode=o.keyCode||0;this.charCode=o.charCode||0;this.which=o.which||0; }
   getModifierState(key) {
     switch (String(key)) {
@@ -12470,9 +12989,9 @@ globalThis.KeyboardEvent = class extends Event {
     this.metaKey=!!metaKey;
   }
 };
-globalThis.FocusEvent = class extends Event { constructor(t,o={}) { super(t,o);this.relatedTarget=o.relatedTarget||null; } };
-globalThis.InputEvent = class extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
-globalThis.ErrorEvent = class extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
+globalThis.FocusEvent = class FocusEvent extends Event { constructor(t,o={}) { super(t,o);this.relatedTarget=o.relatedTarget||null; } };
+globalThis.InputEvent = class InputEvent extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
+globalThis.ErrorEvent = class ErrorEvent extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
 const _browserErrorEvent = globalThis.ErrorEvent;
 __obscuraCore.setReportExceptionCallback(error => {
   // deno_core's default reporter terminates execution, discarding the rest of
@@ -12486,7 +13005,7 @@ __obscuraCore.setReportExceptionCallback(error => {
     _consoleFn("error", [error]);
   }
 });
-globalThis.PointerEvent = class extends MouseEvent {
+globalThis.PointerEvent = class PointerEvent extends MouseEvent {
   constructor(t,o={}) {
     super(t,o);
     this.pointerId=o.pointerId===undefined?0:o.pointerId;
@@ -12507,8 +13026,8 @@ globalThis.AnimationEvent = class AnimationEvent extends Event {
     this.pseudoElement = String(init.pseudoElement ?? '');
   }
 };
-globalThis.TransitionEvent = class extends Event {};
-globalThis.UIEvent = class extends Event {
+globalThis.TransitionEvent = class TransitionEvent extends Event {};
+globalThis.UIEvent = class UIEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0; }
   // Legacy DOM Level 2 initializer. Positional signature per UI Events spec.
   initUIEvent(type,canBubble,cancelable,view,detail) {
@@ -12521,11 +13040,11 @@ globalThis.UIEvent = class extends Event {
 // WheelEvent inherits all MouseEvent coordinates and modifier state. CDP
 // Input.dispatchMouseEvent supplies those fields and automation libraries use
 // them to distinguish wheel gestures over nested panes.
-globalThis.WheelEvent = class extends MouseEvent {
+globalThis.WheelEvent = class WheelEvent extends MouseEvent {
   constructor(t,o={}) { super(t,o);this.deltaX=o.deltaX||0;this.deltaY=o.deltaY||0;this.deltaZ=o.deltaZ||0;this.deltaMode=o.deltaMode||0; }
 };
 
-globalThis.CompositionEvent = class extends Event {
+globalThis.CompositionEvent = class CompositionEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.data=o.data||""; }
   // Legacy DOM Level 3 initializer. Positional signature per UI Events spec.
   initCompositionEvent(type,canBubble,cancelable,view,data) {
@@ -12535,7 +13054,7 @@ globalThis.CompositionEvent = class extends Event {
     this.data=data===undefined?"":String(data);
   }
 };
-globalThis.PopStateEvent = class extends Event {
+globalThis.PopStateEvent = class PopStateEvent extends Event {
   constructor(type, init) {
     super(type, init || {});
     // Real PopStateEvent exposes `state` from the entry being navigated to.
@@ -12545,8 +13064,8 @@ globalThis.PopStateEvent = class extends Event {
     this.state = init && 'state' in init ? init.state : null;
   }
 };
-globalThis.HashChangeEvent = class extends Event {};
-globalThis.MessageEvent = class extends Event {
+globalThis.HashChangeEvent = class HashChangeEvent extends Event {};
+globalThis.MessageEvent = class MessageEvent extends Event {
   constructor(t,o={}) {
     super(t,o);
     this.data = Object.prototype.hasOwnProperty.call(o, "data") ? o.data : null;
@@ -12565,8 +13084,8 @@ globalThis.ProgressEvent = class ProgressEvent extends Event {
     this.total = i.total != null ? Number(i.total) : 0;
   }
 };
-globalThis.ClipboardEvent = class extends Event {};
-globalThis.SubmitEvent = class extends Event {};
+globalThis.ClipboardEvent = class ClipboardEvent extends Event {};
+globalThis.SubmitEvent = class SubmitEvent extends Event {};
 
 // ToggleEvent backs the popover beforetoggle/toggle events. oldState and
 // newState are "open"/"closed". These events do not bubble; beforetoggle is
@@ -12596,11 +13115,11 @@ globalThis.PromiseRejectionEvent = class PromiseRejectionEvent extends Event {
 _markNative(globalThis.PromiseRejectionEvent);
 
 __obscuraCore.setUnhandledPromiseRejectionHandler((promise, reason) => {
-  const event = new PromiseRejectionEvent("unhandledrejection", {
+  const event = globalThis.__obscura_markTrusted(new PromiseRejectionEvent("unhandledrejection", {
     promise,
     reason,
     cancelable: true,
-  });
+  }));
   globalThis.dispatchEvent(event);
   // Browsers report an unhandled rejection without terminating the page's
   // event loop. Returning true tells deno_core that the host delivered it.
@@ -13341,8 +13860,8 @@ globalThis.performance = globalThis.performance || {
     // synthetic per-call increment keeps tight loops from advancing the clock
     // faster than real elapsed time.
     var _last = -Infinity;
-    return function() {
-      var ms = Date.now() - (globalThis.performance.timeOrigin || 0);
+    return function now() {
+      var ms = __obscuraCore.ops.op_performance_now(_realmFrameId);
       if (ms < _last) return _last;
       _last = ms;
       return _last;
@@ -13823,7 +14342,41 @@ function _structuredClone(value, seen) {
   return out;
 }
 globalThis.structuredClone = globalThis.structuredClone || ((v) => _structuredClone(v, new Map()));
-globalThis.reportError = globalThis.reportError || ((e) => console.error(e));
+// HTML "report an exception": an uncaught exception from a timer, a listener
+// or reportError() fires a trusted, cancelable `error` ErrorEvent on the
+// window, and reaches the console only when no handler cancels it. Timer
+// exceptions used to go to the console alone, so window.onerror (where
+// challenge scripts collect their own failures) never heard of them.
+let _reportingException = false;
+function _reportException(error) {
+  if (_reportingException) { try { console.error(error); } catch (_e) {} return; }
+  _reportingException = true;
+  try {
+    let message, filename = '', lineno = 0, colno = 0;
+    const isError = _consoleKind(error) === 'error';
+    if (isError) {
+      const name = _consoleData(error, 'name'), text = _consoleData(error, 'message');
+      message = 'Uncaught ' + (typeof name === 'string' ? name : 'Error') + (typeof text === 'string' && text ? ': ' + text : '');
+      const stack = _consoleData(error, 'stack');
+      const frame = typeof stack === 'string' && /\(?((?:https?|file|blob|data):[^\s()]*?):(\d+):(\d+)\)?/.exec(stack);
+      if (frame) { filename = frame[1]; lineno = +frame[2]; colno = +frame[3]; }
+    } else {
+      message = 'Uncaught ' + _consolePreview(error, 0);
+    }
+    let event = null;
+    if (typeof ErrorEvent === 'function') {
+      event = globalThis.__obscura_markTrusted(new ErrorEvent('error', { message, filename, lineno, colno, error, cancelable: true }));
+      try { globalThis.dispatchEvent(event); } catch (_e) {}
+    }
+    if (!event || !event.defaultPrevented) console.error(error);
+  } finally {
+    _reportingException = false;
+  }
+}
+globalThis.reportError = function reportError(error) {
+  if (arguments.length < 1) throw new TypeError("Failed to execute 'reportError' on 'Window': 1 argument required, but only 0 present.");
+  _reportException(error);
+};
 
 // WHATWG Storage as a legacy platform object: a Proxy routes property access
 // (localStorage.foo, localStorage["foo"], delete, `in`, Object.keys) through
@@ -14318,12 +14871,365 @@ function _cssTopLevelComma(text) {
   return -1;
 }
 
+// Every property Chrome 153 accepts in CSS.supports(name, "initial"). A
+// property the renderer does not implement still exists in a browser, and
+// feature-detection scripts date the browser by which ones answer.
+const _CHROME_CSS_PROPERTIES = new Set([
+  '-webkit-align-content', '-webkit-align-items', '-webkit-align-self', '-webkit-animation',
+  '-webkit-animation-delay', '-webkit-animation-direction', '-webkit-animation-duration',
+  '-webkit-animation-fill-mode', '-webkit-animation-iteration-count', '-webkit-animation-name',
+  '-webkit-animation-play-state', '-webkit-animation-timing-function', '-webkit-app-region',
+  '-webkit-appearance', '-webkit-backface-visibility', '-webkit-background-clip',
+  '-webkit-background-origin', '-webkit-background-size', '-webkit-border-after',
+  '-webkit-border-after-color', '-webkit-border-after-style', '-webkit-border-after-width',
+  '-webkit-border-before', '-webkit-border-before-color', '-webkit-border-before-style',
+  '-webkit-border-before-width', '-webkit-border-bottom-left-radius',
+  '-webkit-border-bottom-right-radius', '-webkit-border-end', '-webkit-border-end-color',
+  '-webkit-border-end-style', '-webkit-border-end-width', '-webkit-border-horizontal-spacing',
+  '-webkit-border-image', '-webkit-border-radius', '-webkit-border-start',
+  '-webkit-border-start-color', '-webkit-border-start-style', '-webkit-border-start-width',
+  '-webkit-border-top-left-radius', '-webkit-border-top-right-radius',
+  '-webkit-border-vertical-spacing', '-webkit-box-align', '-webkit-box-decoration-break',
+  '-webkit-box-direction', '-webkit-box-flex', '-webkit-box-ordinal-group', '-webkit-box-orient',
+  '-webkit-box-pack', '-webkit-box-reflect', '-webkit-box-shadow', '-webkit-box-sizing',
+  '-webkit-clip-path', '-webkit-column-break-after', '-webkit-column-break-before',
+  '-webkit-column-break-inside', '-webkit-column-count', '-webkit-column-gap',
+  '-webkit-column-rule', '-webkit-column-rule-color', '-webkit-column-rule-style',
+  '-webkit-column-rule-width', '-webkit-column-span', '-webkit-column-width', '-webkit-columns',
+  '-webkit-filter', '-webkit-flex', '-webkit-flex-basis', '-webkit-flex-direction',
+  '-webkit-flex-flow', '-webkit-flex-grow', '-webkit-flex-shrink', '-webkit-flex-wrap',
+  '-webkit-font-feature-settings', '-webkit-font-smoothing', '-webkit-hyphenate-character',
+  '-webkit-justify-content', '-webkit-line-break', '-webkit-line-clamp', '-webkit-locale',
+  '-webkit-logical-height', '-webkit-logical-width', '-webkit-margin-after',
+  '-webkit-margin-before', '-webkit-margin-end', '-webkit-margin-start', '-webkit-mask',
+  '-webkit-mask-box-image', '-webkit-mask-box-image-outset', '-webkit-mask-box-image-repeat',
+  '-webkit-mask-box-image-slice', '-webkit-mask-box-image-source', '-webkit-mask-box-image-width',
+  '-webkit-mask-clip', '-webkit-mask-composite', '-webkit-mask-image', '-webkit-mask-origin',
+  '-webkit-mask-position', '-webkit-mask-position-x', '-webkit-mask-position-y',
+  '-webkit-mask-repeat', '-webkit-mask-size', '-webkit-max-logical-height',
+  '-webkit-max-logical-width', '-webkit-min-logical-height', '-webkit-min-logical-width',
+  '-webkit-opacity', '-webkit-order', '-webkit-padding-after', '-webkit-padding-before',
+  '-webkit-padding-end', '-webkit-padding-start', '-webkit-perspective',
+  '-webkit-perspective-origin', '-webkit-perspective-origin-x', '-webkit-perspective-origin-y',
+  '-webkit-print-color-adjust', '-webkit-rtl-ordering', '-webkit-ruby-position',
+  '-webkit-shape-image-threshold', '-webkit-shape-margin', '-webkit-shape-outside',
+  '-webkit-tap-highlight-color', '-webkit-text-combine', '-webkit-text-decorations-in-effect',
+  '-webkit-text-emphasis', '-webkit-text-emphasis-color', '-webkit-text-emphasis-position',
+  '-webkit-text-emphasis-style', '-webkit-text-fill-color', '-webkit-text-orientation',
+  '-webkit-text-security', '-webkit-text-size-adjust', '-webkit-text-stroke',
+  '-webkit-text-stroke-color', '-webkit-text-stroke-width', '-webkit-transform',
+  '-webkit-transform-origin', '-webkit-transform-origin-x', '-webkit-transform-origin-y',
+  '-webkit-transform-origin-z', '-webkit-transform-style', '-webkit-transition',
+  '-webkit-transition-delay', '-webkit-transition-duration', '-webkit-transition-property',
+  '-webkit-transition-timing-function', '-webkit-user-drag', '-webkit-user-modify',
+  '-webkit-user-select', '-webkit-writing-mode', 'accent-color', 'align-content', 'align-items',
+  'align-self', 'alignment-baseline', 'all', 'anchor-name', 'anchor-scope', 'animation',
+  'animation-composition', 'animation-delay', 'animation-direction', 'animation-duration',
+  'animation-fill-mode', 'animation-iteration-count', 'animation-name', 'animation-play-state',
+  'animation-range', 'animation-range-end', 'animation-range-start', 'animation-timeline',
+  'animation-timing-function', 'animation-trigger', 'app-region', 'appearance', 'aspect-ratio',
+  'backdrop-filter', 'backface-visibility', 'background', 'background-attachment',
+  'background-blend-mode', 'background-clip', 'background-color', 'background-image',
+  'background-origin', 'background-position', 'background-position-x', 'background-position-y',
+  'background-repeat', 'background-size', 'baseline-shift', 'baseline-source', 'block-size',
+  'border', 'border-block', 'border-block-color', 'border-block-end', 'border-block-end-color',
+  'border-block-end-style', 'border-block-end-width', 'border-block-start',
+  'border-block-start-color', 'border-block-start-style', 'border-block-start-width',
+  'border-block-style', 'border-block-width', 'border-bottom', 'border-bottom-color',
+  'border-bottom-left-radius', 'border-bottom-right-radius', 'border-bottom-style',
+  'border-bottom-width', 'border-collapse', 'border-color', 'border-end-end-radius',
+  'border-end-start-radius', 'border-image', 'border-image-outset', 'border-image-repeat',
+  'border-image-slice', 'border-image-source', 'border-image-width', 'border-inline',
+  'border-inline-color', 'border-inline-end', 'border-inline-end-color', 'border-inline-end-style',
+  'border-inline-end-width', 'border-inline-start', 'border-inline-start-color',
+  'border-inline-start-style', 'border-inline-start-width', 'border-inline-style',
+  'border-inline-width', 'border-left', 'border-left-color', 'border-left-style',
+  'border-left-width', 'border-radius', 'border-right', 'border-right-color', 'border-right-style',
+  'border-right-width', 'border-shape', 'border-spacing', 'border-start-end-radius',
+  'border-start-start-radius', 'border-style', 'border-top', 'border-top-color',
+  'border-top-left-radius', 'border-top-right-radius', 'border-top-style', 'border-top-width',
+  'border-width', 'bottom', 'box-decoration-break', 'box-shadow', 'box-sizing', 'break-after',
+  'break-before', 'break-inside', 'buffered-rendering', 'caption-side', 'caret-animation',
+  'caret-color', 'caret-shape', 'clear', 'clip', 'clip-path', 'clip-rule', 'color',
+  'color-interpolation', 'color-interpolation-filters', 'color-rendering', 'color-scheme',
+  'column-count', 'column-fill', 'column-gap', 'column-height', 'column-rule', 'column-rule-break',
+  'column-rule-color', 'column-rule-inset', 'column-rule-inset-cap', 'column-rule-inset-cap-end',
+  'column-rule-inset-cap-start', 'column-rule-inset-end', 'column-rule-inset-junction',
+  'column-rule-inset-junction-end', 'column-rule-inset-junction-start', 'column-rule-inset-start',
+  'column-rule-style', 'column-rule-visibility-items', 'column-rule-width', 'column-span',
+  'column-width', 'column-wrap', 'columns', 'contain', 'contain-intrinsic-block-size',
+  'contain-intrinsic-height', 'contain-intrinsic-inline-size', 'contain-intrinsic-size',
+  'contain-intrinsic-width', 'container', 'container-name', 'container-type', 'content',
+  'content-visibility', 'corner-block-end-shape', 'corner-block-start-shape',
+  'corner-bottom-left-shape', 'corner-bottom-right-shape', 'corner-bottom-shape',
+  'corner-end-end-shape', 'corner-end-start-shape', 'corner-inline-end-shape',
+  'corner-inline-start-shape', 'corner-left-shape', 'corner-right-shape', 'corner-shape',
+  'corner-start-end-shape', 'corner-start-start-shape', 'corner-top-left-shape',
+  'corner-top-right-shape', 'corner-top-shape', 'counter-increment', 'counter-reset', 'counter-set',
+  'cursor', 'cx', 'cy', 'd', 'direction', 'display', 'dominant-baseline', 'dynamic-range-limit',
+  'empty-cells', 'field-sizing', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'flex',
+  'flex-basis', 'flex-direction', 'flex-flow', 'flex-grow', 'flex-line-count', 'flex-shrink',
+  'flex-wrap', 'float', 'flood-color', 'flood-opacity', 'font', 'font-family',
+  'font-feature-settings', 'font-kerning', 'font-language-override', 'font-optical-sizing',
+  'font-palette', 'font-size', 'font-size-adjust', 'font-stretch', 'font-style', 'font-synthesis',
+  'font-synthesis-small-caps', 'font-synthesis-style', 'font-synthesis-weight', 'font-variant',
+  'font-variant-alternates', 'font-variant-caps', 'font-variant-east-asian', 'font-variant-emoji',
+  'font-variant-ligatures', 'font-variant-numeric', 'font-variant-position',
+  'font-variation-settings', 'font-weight', 'forced-color-adjust', 'gap', 'grid', 'grid-area',
+  'grid-auto-columns', 'grid-auto-flow', 'grid-auto-rows', 'grid-column', 'grid-column-end',
+  'grid-column-gap', 'grid-column-start', 'grid-gap', 'grid-row', 'grid-row-end', 'grid-row-gap',
+  'grid-row-start', 'grid-template', 'grid-template-areas', 'grid-template-columns',
+  'grid-template-rows', 'height', 'hyphenate-character', 'hyphenate-limit-chars', 'hyphens',
+  'image-orientation', 'image-rendering', 'initial-letter', 'inline-size', 'inset', 'inset-block',
+  'inset-block-end', 'inset-block-start', 'inset-inline', 'inset-inline-end', 'inset-inline-start',
+  'interactivity', 'interest-delay', 'interest-delay-end', 'interest-delay-start',
+  'interpolate-size', 'isolation', 'justify-content', 'justify-items', 'justify-self', 'left',
+  'letter-spacing', 'lighting-color', 'line-break', 'line-height', 'list-style', 'list-style-image',
+  'list-style-position', 'list-style-type', 'margin', 'margin-block', 'margin-block-end',
+  'margin-block-start', 'margin-bottom', 'margin-inline', 'margin-inline-end',
+  'margin-inline-start', 'margin-left', 'margin-right', 'margin-top', 'marker', 'marker-end',
+  'marker-mid', 'marker-start', 'mask', 'mask-clip', 'mask-composite', 'mask-image', 'mask-mode',
+  'mask-origin', 'mask-position', 'mask-repeat', 'mask-size', 'mask-type', 'math-depth',
+  'math-shift', 'math-style', 'max-block-size', 'max-height', 'max-inline-size', 'max-width',
+  'min-block-size', 'min-height', 'min-inline-size', 'min-width', 'mix-blend-mode', 'object-fit',
+  'object-position', 'object-view-box', 'offset', 'offset-anchor', 'offset-distance', 'offset-path',
+  'offset-position', 'offset-rotate', 'opacity', 'order', 'orphans', 'outline', 'outline-color',
+  'outline-offset', 'outline-style', 'outline-width', 'overflow', 'overflow-anchor',
+  'overflow-block', 'overflow-clip-margin', 'overflow-inline', 'overflow-wrap', 'overflow-x',
+  'overflow-y', 'overlay', 'overscroll-behavior', 'overscroll-behavior-block',
+  'overscroll-behavior-inline', 'overscroll-behavior-x', 'overscroll-behavior-y', 'padding',
+  'padding-block', 'padding-block-end', 'padding-block-start', 'padding-bottom', 'padding-inline',
+  'padding-inline-end', 'padding-inline-start', 'padding-left', 'padding-right', 'padding-top',
+  'page', 'page-break-after', 'page-break-before', 'page-break-inside', 'page-margin-safety',
+  'page-orientation', 'paint-order', 'perspective', 'perspective-origin', 'place-content',
+  'place-items', 'place-self', 'pointer-events', 'position', 'position-anchor', 'position-area',
+  'position-try', 'position-try-fallbacks', 'position-try-order', 'position-visibility',
+  'print-color-adjust', 'quotes', 'r', 'reading-flow', 'reading-order', 'resize', 'right', 'rotate',
+  'row-gap', 'row-rule', 'row-rule-break', 'row-rule-color', 'row-rule-inset', 'row-rule-inset-cap',
+  'row-rule-inset-cap-end', 'row-rule-inset-cap-start', 'row-rule-inset-end',
+  'row-rule-inset-junction', 'row-rule-inset-junction-end', 'row-rule-inset-junction-start',
+  'row-rule-inset-start', 'row-rule-style', 'row-rule-visibility-items', 'row-rule-width',
+  'ruby-align', 'ruby-overhang', 'ruby-position', 'rule', 'rule-break', 'rule-color', 'rule-inset',
+  'rule-inset-cap', 'rule-inset-end', 'rule-inset-junction', 'rule-inset-start', 'rule-overlap',
+  'rule-style', 'rule-visibility-items', 'rule-width', 'rx', 'ry', 'scale', 'scroll-axis-lock',
+  'scroll-behavior', 'scroll-initial-target', 'scroll-margin', 'scroll-margin-block',
+  'scroll-margin-block-end', 'scroll-margin-block-start', 'scroll-margin-bottom',
+  'scroll-margin-inline', 'scroll-margin-inline-end', 'scroll-margin-inline-start',
+  'scroll-margin-left', 'scroll-margin-right', 'scroll-margin-top', 'scroll-marker-group',
+  'scroll-padding', 'scroll-padding-block', 'scroll-padding-block-end',
+  'scroll-padding-block-start', 'scroll-padding-bottom', 'scroll-padding-inline',
+  'scroll-padding-inline-end', 'scroll-padding-inline-start', 'scroll-padding-left',
+  'scroll-padding-right', 'scroll-padding-top', 'scroll-snap-align', 'scroll-snap-stop',
+  'scroll-snap-type', 'scroll-target-group', 'scroll-timeline', 'scroll-timeline-axis',
+  'scroll-timeline-name', 'scrollbar-color', 'scrollbar-gutter', 'scrollbar-width',
+  'shape-image-threshold', 'shape-margin', 'shape-outside', 'shape-rendering', 'size', 'speak',
+  'stop-color', 'stop-opacity', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'tab-size',
+  'table-layout', 'text-align', 'text-align-last', 'text-anchor', 'text-autospace', 'text-box',
+  'text-box-edge', 'text-box-trim', 'text-combine-upright', 'text-decoration',
+  'text-decoration-color', 'text-decoration-line', 'text-decoration-skip-ink',
+  'text-decoration-style', 'text-decoration-thickness', 'text-emphasis', 'text-emphasis-color',
+  'text-emphasis-position', 'text-emphasis-style', 'text-fit', 'text-indent', 'text-justify',
+  'text-orientation', 'text-overflow', 'text-rendering', 'text-shadow', 'text-size-adjust',
+  'text-spacing-trim', 'text-transform', 'text-underline-offset', 'text-underline-position',
+  'text-wrap', 'text-wrap-mode', 'text-wrap-style', 'timeline-scope', 'timeline-trigger',
+  'timeline-trigger-activation-range', 'timeline-trigger-activation-range-end',
+  'timeline-trigger-activation-range-start', 'timeline-trigger-active-range',
+  'timeline-trigger-active-range-end', 'timeline-trigger-active-range-start',
+  'timeline-trigger-name', 'timeline-trigger-source', 'top', 'touch-action', 'transform',
+  'transform-box', 'transform-origin', 'transform-style', 'transition', 'transition-behavior',
+  'transition-delay', 'transition-duration', 'transition-property', 'transition-timing-function',
+  'translate', 'trigger-scope', 'unicode-bidi', 'user-select', 'vector-effect', 'vertical-align',
+  'view-timeline', 'view-timeline-axis', 'view-timeline-inset', 'view-timeline-name',
+  'view-transition-class', 'view-transition-group', 'view-transition-name', 'view-transition-scope',
+  'visibility', 'white-space', 'white-space-collapse', 'widows', 'width', 'will-change',
+  'window-drag', 'word-break', 'word-spacing', 'word-wrap', 'writing-mode', 'x', 'y', 'z-index',
+  'zoom',
+]);
+// The camelCase property names a Chrome 153 CSSStyleDeclaration answers
+// `in` for (properties and @-rule descriptors alike).
+const _CHROME_STYLE_NAMES = new Set([
+  'accentColor', 'additiveSymbols', 'alignContent', 'alignItems', 'alignSelf', 'alignmentBaseline',
+  'all', 'anchorName', 'anchorScope', 'animation', 'animationComposition', 'animationDelay',
+  'animationDirection', 'animationDuration', 'animationFillMode', 'animationIterationCount',
+  'animationName', 'animationPlayState', 'animationRange', 'animationRangeEnd',
+  'animationRangeStart', 'animationTimeline', 'animationTimingFunction', 'animationTrigger',
+  'appRegion', 'appearance', 'ascentOverride', 'aspectRatio', 'backdropFilter',
+  'backfaceVisibility', 'background', 'backgroundAttachment', 'backgroundBlendMode',
+  'backgroundClip', 'backgroundColor', 'backgroundImage', 'backgroundOrigin', 'backgroundPosition',
+  'backgroundPositionX', 'backgroundPositionY', 'backgroundRepeat', 'backgroundSize', 'basePalette',
+  'baselineShift', 'baselineSource', 'blockSize', 'border', 'borderBlock', 'borderBlockColor',
+  'borderBlockEnd', 'borderBlockEndColor', 'borderBlockEndStyle', 'borderBlockEndWidth',
+  'borderBlockStart', 'borderBlockStartColor', 'borderBlockStartStyle', 'borderBlockStartWidth',
+  'borderBlockStyle', 'borderBlockWidth', 'borderBottom', 'borderBottomColor',
+  'borderBottomLeftRadius', 'borderBottomRightRadius', 'borderBottomStyle', 'borderBottomWidth',
+  'borderCollapse', 'borderColor', 'borderEndEndRadius', 'borderEndStartRadius', 'borderImage',
+  'borderImageOutset', 'borderImageRepeat', 'borderImageSlice', 'borderImageSource',
+  'borderImageWidth', 'borderInline', 'borderInlineColor', 'borderInlineEnd',
+  'borderInlineEndColor', 'borderInlineEndStyle', 'borderInlineEndWidth', 'borderInlineStart',
+  'borderInlineStartColor', 'borderInlineStartStyle', 'borderInlineStartWidth', 'borderInlineStyle',
+  'borderInlineWidth', 'borderLeft', 'borderLeftColor', 'borderLeftStyle', 'borderLeftWidth',
+  'borderRadius', 'borderRight', 'borderRightColor', 'borderRightStyle', 'borderRightWidth',
+  'borderShape', 'borderSpacing', 'borderStartEndRadius', 'borderStartStartRadius', 'borderStyle',
+  'borderTop', 'borderTopColor', 'borderTopLeftRadius', 'borderTopRightRadius', 'borderTopStyle',
+  'borderTopWidth', 'borderWidth', 'bottom', 'boxDecorationBreak', 'boxShadow', 'boxSizing',
+  'breakAfter', 'breakBefore', 'breakInside', 'bufferedRendering', 'captionSide', 'caretAnimation',
+  'caretColor', 'caretShape', 'clear', 'clip', 'clipPath', 'clipRule', 'color',
+  'colorInterpolation', 'colorInterpolationFilters', 'colorRendering', 'colorScheme', 'columnCount',
+  'columnFill', 'columnGap', 'columnHeight', 'columnRule', 'columnRuleBreak', 'columnRuleColor',
+  'columnRuleInset', 'columnRuleInsetCap', 'columnRuleInsetCapEnd', 'columnRuleInsetCapStart',
+  'columnRuleInsetEnd', 'columnRuleInsetJunction', 'columnRuleInsetJunctionEnd',
+  'columnRuleInsetJunctionStart', 'columnRuleInsetStart', 'columnRuleStyle',
+  'columnRuleVisibilityItems', 'columnRuleWidth', 'columnSpan', 'columnWidth', 'columnWrap',
+  'columns', 'contain', 'containIntrinsicBlockSize', 'containIntrinsicHeight',
+  'containIntrinsicInlineSize', 'containIntrinsicSize', 'containIntrinsicWidth', 'container',
+  'containerName', 'containerType', 'content', 'contentVisibility', 'cornerBlockEndShape',
+  'cornerBlockStartShape', 'cornerBottomLeftShape', 'cornerBottomRightShape', 'cornerBottomShape',
+  'cornerEndEndShape', 'cornerEndStartShape', 'cornerInlineEndShape', 'cornerInlineStartShape',
+  'cornerLeftShape', 'cornerRightShape', 'cornerShape', 'cornerStartEndShape',
+  'cornerStartStartShape', 'cornerTopLeftShape', 'cornerTopRightShape', 'cornerTopShape',
+  'counterIncrement', 'counterReset', 'counterSet', 'cursor', 'cx', 'cy', 'd', 'descentOverride',
+  'direction', 'display', 'dominantBaseline', 'dynamicRangeLimit', 'emptyCells', 'fallback',
+  'fieldSizing', 'fill', 'fillOpacity', 'fillRule', 'filter', 'flex', 'flexBasis', 'flexDirection',
+  'flexFlow', 'flexGrow', 'flexLineCount', 'flexShrink', 'flexWrap', 'float', 'floodColor',
+  'floodOpacity', 'font', 'fontDisplay', 'fontFamily', 'fontFeatureSettings', 'fontKerning',
+  'fontLanguageOverride', 'fontOpticalSizing', 'fontPalette', 'fontSize', 'fontSizeAdjust',
+  'fontStretch', 'fontStyle', 'fontSynthesis', 'fontSynthesisSmallCaps', 'fontSynthesisStyle',
+  'fontSynthesisWeight', 'fontVariant', 'fontVariantAlternates', 'fontVariantCaps',
+  'fontVariantEastAsian', 'fontVariantEmoji', 'fontVariantLigatures', 'fontVariantNumeric',
+  'fontVariantPosition', 'fontVariationSettings', 'fontWeight', 'forcedColorAdjust', 'gap', 'grid',
+  'gridArea', 'gridAutoColumns', 'gridAutoFlow', 'gridAutoRows', 'gridColumn', 'gridColumnEnd',
+  'gridColumnGap', 'gridColumnStart', 'gridGap', 'gridRow', 'gridRowEnd', 'gridRowGap',
+  'gridRowStart', 'gridTemplate', 'gridTemplateAreas', 'gridTemplateColumns', 'gridTemplateRows',
+  'height', 'hyphenateCharacter', 'hyphenateLimitChars', 'hyphens', 'imageOrientation',
+  'imageRendering', 'inherits', 'initialLetter', 'initialValue', 'inlineSize', 'inset',
+  'insetBlock', 'insetBlockEnd', 'insetBlockStart', 'insetInline', 'insetInlineEnd',
+  'insetInlineStart', 'interactivity', 'interestDelay', 'interestDelayEnd', 'interestDelayStart',
+  'interpolateSize', 'isolation', 'justifyContent', 'justifyItems', 'justifySelf', 'left',
+  'letterSpacing', 'lightingColor', 'lineBreak', 'lineGapOverride', 'lineHeight', 'listStyle',
+  'listStyleImage', 'listStylePosition', 'listStyleType', 'margin', 'marginBlock', 'marginBlockEnd',
+  'marginBlockStart', 'marginBottom', 'marginInline', 'marginInlineEnd', 'marginInlineStart',
+  'marginLeft', 'marginRight', 'marginTop', 'marker', 'markerEnd', 'markerMid', 'markerStart',
+  'mask', 'maskClip', 'maskComposite', 'maskImage', 'maskMode', 'maskOrigin', 'maskPosition',
+  'maskRepeat', 'maskSize', 'maskType', 'mathDepth', 'mathShift', 'mathStyle', 'maxBlockSize',
+  'maxHeight', 'maxInlineSize', 'maxWidth', 'minBlockSize', 'minHeight', 'minInlineSize',
+  'minWidth', 'mixBlendMode', 'navigation', 'negative', 'objectFit', 'objectPosition',
+  'objectViewBox', 'offset', 'offsetAnchor', 'offsetDistance', 'offsetPath', 'offsetPosition',
+  'offsetRotate', 'opacity', 'order', 'orphans', 'outline', 'outlineColor', 'outlineOffset',
+  'outlineStyle', 'outlineWidth', 'overflow', 'overflowAnchor', 'overflowBlock',
+  'overflowClipMargin', 'overflowInline', 'overflowWrap', 'overflowX', 'overflowY', 'overlay',
+  'overrideColors', 'overscrollBehavior', 'overscrollBehaviorBlock', 'overscrollBehaviorInline',
+  'overscrollBehaviorX', 'overscrollBehaviorY', 'pad', 'padding', 'paddingBlock', 'paddingBlockEnd',
+  'paddingBlockStart', 'paddingBottom', 'paddingInline', 'paddingInlineEnd', 'paddingInlineStart',
+  'paddingLeft', 'paddingRight', 'paddingTop', 'page', 'pageBreakAfter', 'pageBreakBefore',
+  'pageBreakInside', 'pageMarginSafety', 'pageOrientation', 'paintOrder', 'perspective',
+  'perspectiveOrigin', 'placeContent', 'placeItems', 'placeSelf', 'pointerEvents', 'position',
+  'positionAnchor', 'positionArea', 'positionTry', 'positionTryFallbacks', 'positionTryOrder',
+  'positionVisibility', 'prefix', 'printColorAdjust', 'quotes', 'r', 'range', 'readingFlow',
+  'readingOrder', 'resize', 'result', 'right', 'rotate', 'rowGap', 'rowRule', 'rowRuleBreak',
+  'rowRuleColor', 'rowRuleInset', 'rowRuleInsetCap', 'rowRuleInsetCapEnd', 'rowRuleInsetCapStart',
+  'rowRuleInsetEnd', 'rowRuleInsetJunction', 'rowRuleInsetJunctionEnd', 'rowRuleInsetJunctionStart',
+  'rowRuleInsetStart', 'rowRuleStyle', 'rowRuleVisibilityItems', 'rowRuleWidth', 'rubyAlign',
+  'rubyOverhang', 'rubyPosition', 'rule', 'ruleBreak', 'ruleColor', 'ruleInset', 'ruleInsetCap',
+  'ruleInsetEnd', 'ruleInsetJunction', 'ruleInsetStart', 'ruleOverlap', 'ruleStyle',
+  'ruleVisibilityItems', 'ruleWidth', 'rx', 'ry', 'scale', 'scrollAxisLock', 'scrollBehavior',
+  'scrollInitialTarget', 'scrollMargin', 'scrollMarginBlock', 'scrollMarginBlockEnd',
+  'scrollMarginBlockStart', 'scrollMarginBottom', 'scrollMarginInline', 'scrollMarginInlineEnd',
+  'scrollMarginInlineStart', 'scrollMarginLeft', 'scrollMarginRight', 'scrollMarginTop',
+  'scrollMarkerGroup', 'scrollPadding', 'scrollPaddingBlock', 'scrollPaddingBlockEnd',
+  'scrollPaddingBlockStart', 'scrollPaddingBottom', 'scrollPaddingInline', 'scrollPaddingInlineEnd',
+  'scrollPaddingInlineStart', 'scrollPaddingLeft', 'scrollPaddingRight', 'scrollPaddingTop',
+  'scrollSnapAlign', 'scrollSnapStop', 'scrollSnapType', 'scrollTargetGroup', 'scrollTimeline',
+  'scrollTimelineAxis', 'scrollTimelineName', 'scrollbarColor', 'scrollbarGutter', 'scrollbarWidth',
+  'shapeImageThreshold', 'shapeMargin', 'shapeOutside', 'shapeRendering', 'size', 'sizeAdjust',
+  'speak', 'speakAs', 'src', 'stopColor', 'stopOpacity', 'stroke', 'strokeDasharray',
+  'strokeDashoffset', 'strokeLinecap', 'strokeLinejoin', 'strokeMiterlimit', 'strokeOpacity',
+  'strokeWidth', 'suffix', 'symbols', 'syntax', 'system', 'tabSize', 'tableLayout', 'textAlign',
+  'textAlignLast', 'textAnchor', 'textAutospace', 'textBox', 'textBoxEdge', 'textBoxTrim',
+  'textCombineUpright', 'textDecoration', 'textDecorationColor', 'textDecorationLine',
+  'textDecorationSkipInk', 'textDecorationStyle', 'textDecorationThickness', 'textEmphasis',
+  'textEmphasisColor', 'textEmphasisPosition', 'textEmphasisStyle', 'textFit', 'textIndent',
+  'textJustify', 'textOrientation', 'textOverflow', 'textRendering', 'textShadow', 'textSizeAdjust',
+  'textSpacingTrim', 'textTransform', 'textUnderlineOffset', 'textUnderlinePosition', 'textWrap',
+  'textWrapMode', 'textWrapStyle', 'timelineScope', 'timelineTrigger',
+  'timelineTriggerActivationRange', 'timelineTriggerActivationRangeEnd',
+  'timelineTriggerActivationRangeStart', 'timelineTriggerActiveRange',
+  'timelineTriggerActiveRangeEnd', 'timelineTriggerActiveRangeStart', 'timelineTriggerName',
+  'timelineTriggerSource', 'top', 'touchAction', 'transform', 'transformBox', 'transformOrigin',
+  'transformStyle', 'transition', 'transitionBehavior', 'transitionDelay', 'transitionDuration',
+  'transitionProperty', 'transitionTimingFunction', 'translate', 'triggerScope', 'types',
+  'unicodeBidi', 'unicodeRange', 'userSelect', 'vectorEffect', 'verticalAlign', 'viewTimeline',
+  'viewTimelineAxis', 'viewTimelineInset', 'viewTimelineName', 'viewTransitionClass',
+  'viewTransitionGroup', 'viewTransitionName', 'viewTransitionScope', 'visibility',
+  'webkitAlignContent', 'webkitAlignItems', 'webkitAlignSelf', 'webkitAnimation',
+  'webkitAnimationDelay', 'webkitAnimationDirection', 'webkitAnimationDuration',
+  'webkitAnimationFillMode', 'webkitAnimationIterationCount', 'webkitAnimationName',
+  'webkitAnimationPlayState', 'webkitAnimationTimingFunction', 'webkitAppRegion',
+  'webkitAppearance', 'webkitBackfaceVisibility', 'webkitBackgroundClip', 'webkitBackgroundOrigin',
+  'webkitBackgroundSize', 'webkitBorderAfter', 'webkitBorderAfterColor', 'webkitBorderAfterStyle',
+  'webkitBorderAfterWidth', 'webkitBorderBefore', 'webkitBorderBeforeColor',
+  'webkitBorderBeforeStyle', 'webkitBorderBeforeWidth', 'webkitBorderBottomLeftRadius',
+  'webkitBorderBottomRightRadius', 'webkitBorderEnd', 'webkitBorderEndColor',
+  'webkitBorderEndStyle', 'webkitBorderEndWidth', 'webkitBorderHorizontalSpacing',
+  'webkitBorderImage', 'webkitBorderRadius', 'webkitBorderStart', 'webkitBorderStartColor',
+  'webkitBorderStartStyle', 'webkitBorderStartWidth', 'webkitBorderTopLeftRadius',
+  'webkitBorderTopRightRadius', 'webkitBorderVerticalSpacing', 'webkitBoxAlign',
+  'webkitBoxDecorationBreak', 'webkitBoxDirection', 'webkitBoxFlex', 'webkitBoxOrdinalGroup',
+  'webkitBoxOrient', 'webkitBoxPack', 'webkitBoxReflect', 'webkitBoxShadow', 'webkitBoxSizing',
+  'webkitClipPath', 'webkitColumnBreakAfter', 'webkitColumnBreakBefore', 'webkitColumnBreakInside',
+  'webkitColumnCount', 'webkitColumnGap', 'webkitColumnRule', 'webkitColumnRuleColor',
+  'webkitColumnRuleStyle', 'webkitColumnRuleWidth', 'webkitColumnSpan', 'webkitColumnWidth',
+  'webkitColumns', 'webkitFilter', 'webkitFlex', 'webkitFlexBasis', 'webkitFlexDirection',
+  'webkitFlexFlow', 'webkitFlexGrow', 'webkitFlexShrink', 'webkitFlexWrap',
+  'webkitFontFeatureSettings', 'webkitFontSmoothing', 'webkitHyphenateCharacter',
+  'webkitJustifyContent', 'webkitLineBreak', 'webkitLineClamp', 'webkitLocale',
+  'webkitLogicalHeight', 'webkitLogicalWidth', 'webkitMarginAfter', 'webkitMarginBefore',
+  'webkitMarginEnd', 'webkitMarginStart', 'webkitMask', 'webkitMaskBoxImage',
+  'webkitMaskBoxImageOutset', 'webkitMaskBoxImageRepeat', 'webkitMaskBoxImageSlice',
+  'webkitMaskBoxImageSource', 'webkitMaskBoxImageWidth', 'webkitMaskClip', 'webkitMaskComposite',
+  'webkitMaskImage', 'webkitMaskOrigin', 'webkitMaskPosition', 'webkitMaskPositionX',
+  'webkitMaskPositionY', 'webkitMaskRepeat', 'webkitMaskSize', 'webkitMaxLogicalHeight',
+  'webkitMaxLogicalWidth', 'webkitMinLogicalHeight', 'webkitMinLogicalWidth', 'webkitOpacity',
+  'webkitOrder', 'webkitPaddingAfter', 'webkitPaddingBefore', 'webkitPaddingEnd',
+  'webkitPaddingStart', 'webkitPerspective', 'webkitPerspectiveOrigin', 'webkitPerspectiveOriginX',
+  'webkitPerspectiveOriginY', 'webkitPrintColorAdjust', 'webkitRtlOrdering', 'webkitRubyPosition',
+  'webkitShapeImageThreshold', 'webkitShapeMargin', 'webkitShapeOutside', 'webkitTapHighlightColor',
+  'webkitTextCombine', 'webkitTextDecorationsInEffect', 'webkitTextEmphasis',
+  'webkitTextEmphasisColor', 'webkitTextEmphasisPosition', 'webkitTextEmphasisStyle',
+  'webkitTextFillColor', 'webkitTextOrientation', 'webkitTextSecurity', 'webkitTextSizeAdjust',
+  'webkitTextStroke', 'webkitTextStrokeColor', 'webkitTextStrokeWidth', 'webkitTransform',
+  'webkitTransformOrigin', 'webkitTransformOriginX', 'webkitTransformOriginY',
+  'webkitTransformOriginZ', 'webkitTransformStyle', 'webkitTransition', 'webkitTransitionDelay',
+  'webkitTransitionDuration', 'webkitTransitionProperty', 'webkitTransitionTimingFunction',
+  'webkitUserDrag', 'webkitUserModify', 'webkitUserSelect', 'webkitWritingMode', 'whiteSpace',
+  'whiteSpaceCollapse', 'widows', 'width', 'willChange', 'windowDrag', 'wordBreak', 'wordSpacing',
+  'wordWrap', 'writingMode', 'x', 'y', 'zIndex', 'zoom', 'cssFloat',
+]);
+const _CHROME_STYLE_OWN_NAMES = Object.freeze(Array.from(_CHROME_STYLE_NAMES).filter((n) => n !== 'cssFloat'));
+// Whether a CSSStyleDeclaration property name (dashed or camelCase, with
+// webkit/Webkit aliases) names a property Chrome has.
+function _isChromeCssName(prop) {
+  if (typeof prop !== 'string' || !prop) return false;
+  if (_CHROME_STYLE_NAMES.has(prop)) return true;
+  if (!prop.includes('-') || /[A-Z]/.test(prop)) return false;
+  const camel = prop.replace(/^-webkit-/, 'webkit-').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  return camel !== 'cssFloat' && _CHROME_STYLE_NAMES.has(camel);
+}
+const _CSS_WIDE_KEYWORDS = new Set(["initial", "inherit", "unset", "revert", "revert-layer"]);
 function _cssSupportsDeclaration(name, value) {
   name = name.trim().toLowerCase();
   value = value.trim();
   if (typeof __obscuraCore.ops.op_css_supports === "function") {
-    try { return !!__obscuraCore.ops.op_css_supports(name, value); }
+    let supported = false;
+    try { supported = !!__obscuraCore.ops.op_css_supports(name, value); }
     catch (_) { return false; }
+    if (supported || !_CHROME_CSS_PROPERTIES.has(name) || !value || _cssHasInvalidSupportsValueSyntax(value)) return supported;
+    if (_CSS_WIDE_KEYWORDS.has(value.toLowerCase())) return true;
+    // A property the renderer has no grammar for: accept the value, as
+    // the renderer cannot say it is wrong.
+    let known = false;
+    try { known = !!__obscuraCore.ops.op_css_supports(name, "initial"); } catch (_) {}
+    return !known;
   }
   if (!value || _cssHasInvalidSupportsValueSyntax(value)) return false;
   if (name.startsWith("--")) return name.length > 2;
@@ -14763,8 +15669,33 @@ globalThis.CSS = {
       return _cssSupportsCondition(String(prop));
     } catch (e) { return false; }
   },
-  escape(s){ return s; }
+  // CSSOM "serialize an identifier".
+  escape(value) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'escape' on 'CSS': 1 argument required, but only 0 present.");
+    const s = String(value);
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) { out += '\uFFFD'; continue; }
+      if ((c >= 0x1 && c <= 0x1f) || c === 0x7f || (i === 0 && c >= 0x30 && c <= 0x39)
+          || (i === 1 && c >= 0x30 && c <= 0x39 && s.charCodeAt(0) === 0x2d)) {
+        out += '\\' + c.toString(16) + ' ';
+        continue;
+      }
+      if (i === 0 && c === 0x2d && s.length === 1) { out += '\\' + s[i]; continue; }
+      if (c >= 0x80 || c === 0x2d || c === 0x5f || (c >= 0x30 && c <= 0x39)
+          || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) {
+        out += s[i];
+        continue;
+      }
+      out += '\\' + s[i];
+    }
+    return out;
+  },
+  [Symbol.toStringTag]: 'CSS',
 };
+_markNative(globalThis.CSS.supports);
+_markNative(globalThis.CSS.escape);
 
 globalThis.HTMLElement = HTMLElement;
 globalThis.HTMLUnknownElement = HTMLUnknownElement;
@@ -16531,7 +17462,10 @@ class _RemoteWindow {
   constructor(frameId) {
     Object.defineProperty(this, '_frameId', { value: frameId, enumerable: false });
   }
-  postMessage(data, targetOrigin, _transfer) { _sendRealmMessage(this._frameId, data, targetOrigin); }
+  postMessage(data, targetOrigin, _transfer) {
+    _checkWindowPostMessage(arguments.length, targetOrigin);
+    _sendRealmMessage(this._frameId, data, targetOrigin);
+  }
   get self() { return this; }
   get window() { return this; }
   get frames() { return this; }
@@ -16627,6 +17561,7 @@ class _IframeWindow {
   }
 
   postMessage(data, targetOrigin, _transfer) {
+    _checkWindowPostMessage(arguments.length, targetOrigin);
     // Into the frame's own realm, through the host. This used to dispatch the
     // event on the *parent's* window, so a page could never actually talk to
     // the document inside its iframe. A frame that has not loaded yet has no
@@ -16741,6 +17676,55 @@ globalThis.__ariaQuerySelector = function(root, selector) { return null; };
 globalThis.__ariaQuerySelectorAll = async function*(root, selector) { /* yields nothing */ };
 const _MAX_CANVAS_DIMENSION = 32767;
 const _MAX_CANVAS_PIXELS = 67108864;
+// TextMetrics with its attributes on the prototype, as in Chrome
+// (JSON.stringify of one is "{}").
+const _textMetricsData = new WeakMap();
+function TextMetrics() { throw new TypeError('Illegal constructor'); }
+for (const name of ['width', 'actualBoundingBoxLeft', 'actualBoundingBoxRight', 'fontBoundingBoxAscent',
+  'fontBoundingBoxDescent', 'actualBoundingBoxAscent', 'actualBoundingBoxDescent', 'emHeightAscent',
+  'emHeightDescent', 'hangingBaseline', 'alphabeticBaseline', 'ideographicBaseline']) {
+  Object.defineProperty(TextMetrics.prototype, name, {
+    get: _markNativeAs({ get [name]() {
+      const data = _textMetricsData.get(this);
+      if (!data) throw new TypeError('Illegal invocation');
+      return data[name];
+    } }.__lookupGetter__(name), 'function get ' + name + '() { [native code] }'),
+    enumerable: true, configurable: true,
+  });
+}
+Object.defineProperty(TextMetrics.prototype, Symbol.toStringTag, { value: 'TextMetrics', configurable: true });
+_markNative(TextMetrics);
+globalThis.TextMetrics = TextMetrics;
+function _makeTextMetrics(values) {
+  const metrics = Object.create(TextMetrics.prototype);
+  _textMetricsData.set(metrics, values);
+  return metrics;
+}
+// [r, g, b, a] for a CSS color string, or null.
+function _canvasParseColor(text) {
+  const value = String(text).trim();
+  if (/^transparent$/i.test(value)) return [0, 0, 0, 0];
+  if (typeof __obscuraCore.ops.op_parse_css_color === 'function') {
+    try {
+      const rgba = __obscuraCore.ops.op_parse_css_color(value);
+      if (rgba) return rgba;
+    } catch (_e) {}
+  }
+  const m = value.match(/^rgba?\(\s*(\d+(?:\.\d+)?%?)\s*[,\s]\s*(\d+(?:\.\d+)?%?)\s*[,\s]\s*(\d+(?:\.\d+)?%?)\s*(?:[,/]\s*(\d*\.?\d+%?))?\s*\)$/i);
+  if (!m) return null;
+  const channel = (v) => Math.max(0, Math.min(255, Math.round(v.endsWith('%') ? parseFloat(v) * 2.55 : parseFloat(v))));
+  const alpha = m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+  return [channel(m[1]), channel(m[2]), channel(m[3]), Math.round(Math.max(0, Math.min(1, alpha)) * 255)];
+}
+// The value a fill/stroke style assignment stores, or undefined to ignore it.
+function _canvasStyleValue(value) {
+  if (value !== null && typeof value === 'object') return value;
+  const rgba = _canvasParseColor(String(value));
+  if (!rgba) return undefined;
+  const [r, g, b, a] = rgba;
+  if (a === 255) return '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('');
+  return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + (a === 0 ? '0' : String(Math.round(a / 255 * 1000) / 1000)) + ')';
+}
 class _Canvas2D {
   constructor(canvas) {
     this.canvas = canvas;
@@ -16753,6 +17737,12 @@ class _Canvas2D {
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
+  // Styles serialize as Chrome does ("#0c2238", or "rgba(r, g, b, a)" when
+  // translucent), and a string that is not a color leaves the style as is.
+  get fillStyle() { return this._fillStyle; }
+  set fillStyle(value) { const next = _canvasStyleValue(value); if (next !== undefined) this._fillStyle = next; }
+  get strokeStyle() { return this._strokeStyle; }
+  set strokeStyle(value) { const next = _canvasStyleValue(value); if (next !== undefined) this._strokeStyle = next; }
   _resetDrawingState() {
     this.fillStyle = '#000000';
     this.strokeStyle = '#000000';
@@ -16783,7 +17773,7 @@ class _Canvas2D {
         this._buf.byteOffset,
         this._buf.byteLength,
       );
-      if (!register(this.canvas._nid, this._w, this._h, bytes)) {
+      if (!register(this.canvas._nid, this._w, this._h, bytes, _realmFrameId)) {
         throw new RangeError('Canvas backing store allocation failed');
       }
     }
@@ -16794,11 +17784,13 @@ class _Canvas2D {
     queueMicrotask(() => {
       this._damageQueued = false;
       const damage = __obscuraCore.ops.op_canvas_paint_damage;
-      if (typeof damage === 'function') damage(this.canvas._nid);
+      if (typeof damage === 'function') damage(this.canvas._nid, _realmFrameId);
     });
   }
   _parseColor(css) {
     if (!css || typeof css !== 'string' || css === 'none') return [0,0,0,0];
+    const parsed = _canvasParseColor(css);
+    if (parsed) return parsed;
     if (css.startsWith('#')) {
       const hex = css.slice(1);
       if (hex.length === 3) return [parseInt(hex[0]+hex[0],16),parseInt(hex[1]+hex[1],16),parseInt(hex[2]+hex[2],16),255];
@@ -16898,7 +17890,24 @@ class _Canvas2D {
       try { width = __obscuraCore.ops.op_measure_text(String(t), String(this.font)); } catch (_e) {}
     }
     if (!(width >= 0)) width = String(t).length * fontSize * 0.55;
-    return { width, actualBoundingBoxAscent: fontSize * 0.72, actualBoundingBoxDescent: fontSize * 0.21 };
+    // Chrome's font box is whole pixels; the ink box of an empty string is
+    // empty. Fractional noise in either is a canvas-spoofing tell.
+    const empty = String(t).length === 0;
+    const ascent = Math.round(fontSize * 0.905), descent = Math.round(fontSize * 0.212);
+    return _makeTextMetrics({
+      width,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: empty ? 0 : width,
+      fontBoundingBoxAscent: ascent,
+      fontBoundingBoxDescent: descent,
+      actualBoundingBoxAscent: empty ? 0 : Math.round(fontSize * 0.716),
+      actualBoundingBoxDescent: empty ? 0 : Math.round(fontSize * 0.015),
+      emHeightAscent: ascent,
+      emHeightDescent: descent,
+      hangingBaseline: Math.round(fontSize * 0.724 * 1000) / 1000,
+      alphabeticBaseline: 0,
+      ideographicBaseline: -descent,
+    });
   }
   getImageData(x, y, w, h) {
     x=Math.round(x); y=Math.round(y); w=Math.round(w); h=Math.round(h);
@@ -17531,20 +18540,32 @@ _markNative(HTMLCanvasElement.prototype.toDataURL);
 _markNative(HTMLCanvasElement.prototype.toBlob);
 
 Element.prototype.attachShadow = function attachShadow(opts) {
-  var _mode = opts == null ? undefined : opts.mode;
+  // Chrome's argument checks and messages, in its order: pages compare the
+  // error text, and Turnstile posts it back.
+  if (arguments.length < 1) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': 1 argument required, but only 0 present.");
+  }
+  if (opts === null || (typeof opts !== 'object' && typeof opts !== 'function')) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': The provided value is not of type 'ShadowRootInit'.");
+  }
+  var _mode = opts.mode;
+  if (_mode === undefined) {
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': Required member is undefined.");
+  }
+  _mode = String(_mode);
   if (_mode !== 'open' && _mode !== 'closed') {
-    throw new TypeError('Failed to execute attachShadow on Element: the mode value is not a valid ShadowRootMode.');
+    throw new TypeError("Failed to execute 'attachShadow' on 'Element': Failed to read the 'mode' property from 'ShadowRootInit': The provided value '" + _mode + "' is not a valid enum value of type ShadowRootMode.");
   }
   var _ln = (this.localName || '').toLowerCase();
   if (!globalThis.__obscura_shadowHostNames.has(_ln) && _ln.indexOf('-') === -1) {
-    throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow", 'NotSupportedError');
   }
-  if (__obscuraCore.ops.op_shadow_root_info(this._nid)) {
-    throw new DOMException('Failed to execute attachShadow on Element: the element already hosts a shadow tree.', 'NotSupportedError');
+  if (__obscuraCore.ops.op_shadow_root_info(this._nid, _realmFrameId)) {
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': Shadow root cannot be created on a host which already hosts a shadow tree.", 'NotSupportedError');
   }
-  const rootNid = __obscuraCore.ops.op_shadow_attach(this._nid, _mode);
+  const rootNid = __obscuraCore.ops.op_shadow_attach(this._nid, _mode, _realmFrameId);
   if (rootNid < 0) {
-    throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
+    throw new DOMException("Failed to execute 'attachShadow' on 'Element': This element does not support attachShadow", 'NotSupportedError');
   }
   const shadow = new ShadowRoot(rootNid, this, opts);
   _treeMutationEpoch++;
@@ -17562,7 +18583,7 @@ _markNative(Element.prototype.attachShadow);
 
 function _shadowRootForHost(host, includeClosed) {
   if (!host) return null;
-  const info = __obscuraCore.ops.op_shadow_root_info(host._nid);
+  const info = __obscuraCore.ops.op_shadow_root_info(host._nid, _realmFrameId);
   if (!info) return null;
   const parts = info.split('\0');
   if (!includeClosed && parts[1] !== 'open') return null;
@@ -17620,11 +18641,15 @@ globalThis.AudioContext = class AudioContext {
   removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type]=this._listeners[type].filter(h=>h!==fn); }
   _ap(v, min=-3.4028235e38, max=3.4028235e38) { return { value: v, defaultValue: v, minValue: min, maxValue: max, setValueAtTime(){} }; }
   createOscillator() { return {context:this,type:'sine',frequency:this._ap(440, -22050, 22050),detune:this._ap(0, -153600, 153600),connect(){},start(){},stop(){},disconnect(){},addEventListener(){},removeEventListener(){}}; }
-  createDynamicsCompressor() { return {context:this,threshold:this._ap(_fp('compThreshold'), -100, 0),knee:this._ap(_fp('compKnee'), 0, 40),ratio:this._ap(_fp('compRatio'), 1, 20),attack:this._ap(0.003, 0, 1),release:this._ap(0.25, 0, 1),reduction:0,connect(){},disconnect(){}}; }
+  // Chrome's defaults; `reduction` reads 0 until a render has run through it.
+  createDynamicsCompressor() { const node = {context:this,threshold:this._ap(-24, -100, 0),knee:this._ap(30, 0, 40),ratio:this._ap(12, 1, 20),attack:this._ap(0.003, 0, 1),release:this._ap(0.25, 0, 1),reduction:0,connect(){},disconnect(){}}; (this._compressors || (this._compressors = [])).push(node); return node; }
   createAnalyser() {
     return {context:this,fftSize:2048,frequencyBinCount:1024,channelCount:2,channelCountMode:'max',channelInterpretation:'speakers',maxDecibels:-30,minDecibels:-100,numberOfInputs:1,numberOfOutputs:1,smoothingTimeConstant:0.8,connect(){},disconnect(){},
-      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=Math.floor(_fpRand(600+i)*10);},
-      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-100+_fpRand(700+i)*5;}
+      // Nothing has played through the analyser: silence, as in Chrome.
+      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=0;},
+      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-Infinity;},
+      getByteTimeDomainData(a){for(let i=0;i<a.length;i++)a[i]=128;},
+      getFloatTimeDomainData(a){for(let i=0;i<a.length;i++)a[i]=0;}
     };
   }
   createGain() { return {context:this,gain:this._ap(1),connect(){},disconnect(){}}; }
@@ -17665,6 +18690,9 @@ globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext 
     for (var i = 4500; i < 5000; i++) s += Math.abs(data[i]);
     var scale = s > 0 ? target / s : 0;
     for (var i = 0; i < self.length; i++) data[i] *= scale;
+    // The compressor's 6 ms look-ahead: Chrome's output starts with silence.
+    for (var i = 0; i < Math.min(self.length, 265); i++) data[i] = 0;
+    for (const node of self._compressors || []) node.reduction = -20.538288116455078;
     // Fire oncomplete + 'complete' listeners on next microtask so callers
     // can register handlers synchronously after startRendering().
     var p = Promise.resolve().then(function() {
@@ -17683,13 +18711,18 @@ globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext 
 };
 globalThis.webkitAudioContext = globalThis.AudioContext;
 
+// Chrome on Linux without speech-dispatcher voices lists none; Google's
+// network voices only appear on Windows and macOS builds.
 globalThis.speechSynthesis = {
   speaking: false, pending: false, paused: false,
-  getVoices() { return [{ name:'Google US English', lang:'en-US', default:true, localService:true, voiceURI:'Google US English' }]; },
+  getVoices() { return []; },
   speak() {}, cancel() {}, pause() {}, resume() {},
   addEventListener() {}, removeEventListener() {},
   onvoiceschanged: null,
 };
+for (const name of ['getVoices', 'speak', 'cancel', 'pause', 'resume', 'addEventListener', 'removeEventListener']) {
+  _markNative(globalThis.speechSynthesis[name]);
+}
 globalThis.SpeechSynthesisUtterance = class SpeechSynthesisUtterance { constructor(t){this.text=t;this.lang='en-US';this.rate=1;this.pitch=1;this.volume=1;} };
 
 globalThis.MediaStream = class MediaStream { constructor(){this.id='';this.active=true;} getTracks(){return [];} getAudioTracks(){return [];} getVideoTracks(){return [];} addTrack(){} removeTrack(){} clone(){return new MediaStream();} };
@@ -17760,8 +18793,208 @@ navigator.wakeLock = { request() { return Promise.reject(new DOMException('Not a
 
 globalThis.opener = null;
 
+
+// A dedicated worker runs on the page's thread here, against a global scope
+// object that looks like DedicatedWorkerGlobalScope: `self.navigator` is a
+// WorkerNavigator carrying the page's identity, `self.location` is the
+// worker's own URL, `importScripts` loads synchronously, and window-only
+// members (`document`, `window`, `localStorage`, ...) are absent. Anything
+// else falls through to the page's globals, which hold the same builtins a
+// worker realm has.
+const _workerHiddenGlobals = new Set([
+  'window', 'document', 'parent', 'top', 'frames', 'opener', 'frameElement',
+  'localStorage', 'sessionStorage', 'alert', 'confirm', 'prompt', 'print',
+  'open', 'close', 'stop', 'focus', 'blur', 'history', 'screen', 'visualViewport',
+  'customElements', 'getComputedStyle', 'getSelection', 'matchMedia',
+  'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight', 'screenX', 'screenY',
+  'screenLeft', 'screenTop', 'scrollX', 'scrollY', 'pageXOffset', 'pageYOffset',
+  'devicePixelRatio', 'external', 'clientInformation', 'styleMedia', 'menubar',
+  'toolbar', 'locationbar', 'personalbar', 'scrollbars', 'statusbar', 'speechSynthesis',
+  'chrome', 'event', 'length', 'name', 'status', 'closed', 'originAgentCluster',
+  'Window', 'Document', 'HTMLDocument', 'Element', 'Node', 'Text', 'Comment',
+  'DocumentFragment', 'ShadowRoot', 'Attr', 'CharacterData', 'Range', 'Selection',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver', 'DOMParser',
+  'XMLSerializer', 'Location', 'History', 'Screen', 'Storage', 'Image', 'Audio', 'Option',
+  'Navigator', 'Worker', 'SharedWorker', 'localName',
+]);
+function _isWindowOnlyGlobal(name) {
+  return typeof name === 'string' && (_workerHiddenGlobals.has(name)
+    || /^(HTML|SVG|CSS(?!S)|on)/.test(name) || name.startsWith('__obscura') || name.startsWith('_'));
+}
+class WorkerNavigator {
+  constructor(key) { if (key !== _workerConstructionKey) throw new TypeError('Illegal constructor'); }
+}
+class WorkerLocation {
+  constructor(key) { if (key !== _workerConstructionKey) throw new TypeError('Illegal constructor'); }
+}
+const _workerConstructionKey = {};
+const _workerLocationUrls = new WeakMap();
+(function _defineWorkerInterfaces() {
+  const navProps = ['appCodeName', 'appName', 'appVersion', 'platform', 'product',
+    'userAgent', 'language', 'languages', 'onLine', 'hardwareConcurrency', 'deviceMemory',
+    'userAgentData', 'connection', 'storage', 'locks', 'permissions',
+    'mediaCapabilities', 'gpu', 'serviceWorker', 'serial', 'hid', 'usb', 'ml'];
+  for (const prop of navProps) {
+    const get = ({ get [prop]() {
+      if (!(this instanceof WorkerNavigator) || this === WorkerNavigator.prototype) throw new TypeError('Illegal invocation');
+      const nav = globalThis.navigator;
+      return nav ? nav[prop] : undefined;
+    } }).__lookupGetter__(prop);
+    _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
+    Object.defineProperty(WorkerNavigator.prototype, prop, { get, enumerable: true, configurable: true });
+  }
+  Object.defineProperty(WorkerNavigator.prototype, Symbol.toStringTag, { value: 'WorkerNavigator', configurable: true });
+  const locProps = ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
+  for (const prop of locProps) {
+    const get = ({ get [prop]() {
+      if (!_workerLocationUrls.has(this)) throw new TypeError('Illegal invocation');
+      const href = _workerLocationUrls.get(this) || '';
+      if (prop === 'href') return href;
+      try {
+        const url = new URL(href);
+        if (prop === 'origin' && url.protocol === 'blob:') {
+          try { return new URL(url.pathname).origin; } catch (_e) { return 'null'; }
+        }
+        return url[prop];
+      } catch (_e) { return ''; }
+    } }).__lookupGetter__(prop);
+    _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
+    Object.defineProperty(WorkerLocation.prototype, prop, { get, enumerable: true, configurable: true });
+  }
+  const toString = { toString() { return _workerLocationUrls.get(this) || ''; } }.toString;
+  _markNative(toString);
+  Object.defineProperty(WorkerLocation.prototype, 'toString', { value: toString, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(WorkerLocation.prototype, Symbol.toStringTag, { value: 'WorkerLocation', configurable: true });
+  _markNative(WorkerNavigator);
+  _markNative(WorkerLocation);
+})();
+function _workerScriptSource(url) {
+  if (globalThis.__blobStore && Object.prototype.hasOwnProperty.call(globalThis.__blobStore, url)) {
+    return globalThis.__blobStore[url];
+  }
+  if (url.startsWith('data:')) {
+    const comma = url.indexOf(',');
+    const meta = url.slice(5, comma);
+    const payload = url.slice(comma + 1);
+    if (/;base64$/i.test(meta)) {
+      const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+    return decodeURIComponent(payload);
+  }
+  const raw = __obscuraCore.ops.op_fetch_script_sync(url, _realmFrameId);
+  let result = null;
+  try { result = JSON.parse(raw); } catch (_e) {}
+  if (!result || !result.ok) return null;
+  return result.body;
+}
+function _runInWorkerScope(scope, code, url) {
+  // Direct eval inside `with` resolves free names against the worker scope;
+  // the code runs as its own script so stack traces name its URL.
+  const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
+  const named = String(code) + (url && !/\n\/\/# sourceURL=/.test(code) ? '\n//# sourceURL=' + url : '');
+  fn.call(scope, scope, named);
+}
+function _makeWorkerScope(worker) {
+  const own = {
+    onmessage: null,
+    onmessageerror: null,
+    onerror: null,
+    _ev: null,
+  };
+  const navigator = new WorkerNavigator(_workerConstructionKey);
+  const location = new WorkerLocation(_workerConstructionKey);
+  _workerLocationUrls.set(location, worker._url || '');
+  let proxy = null;
+  // Messages between a worker and its owner are dispatched by the user agent,
+  // so they are trusted; challenge workers drop any message that is not.
+  const fire = (data) => (typeof MessageEvent === 'function'
+    ? globalThis.__obscura_markTrusted(new MessageEvent('message', { data }))
+    : { data });
+  Object.defineProperty(own, Symbol.toStringTag, { value: 'DedicatedWorkerGlobalScope', configurable: true });
+  Object.assign(own, {
+    navigator,
+    location,
+    name: worker._name || '',
+    origin: location.origin,
+    isSecureContext: globalThis.isSecureContext,
+    crossOriginIsolated: !!globalThis.crossOriginIsolated,
+    WorkerGlobalScope: function WorkerGlobalScope() { throw new TypeError('Illegal constructor'); },
+    DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() { throw new TypeError('Illegal constructor'); },
+    WorkerNavigator,
+    WorkerLocation,
+    postMessage: function postMessage(msg) {
+      if (arguments.length < 1) {
+        throw new TypeError("Failed to execute 'postMessage' on 'DedicatedWorkerGlobalScope': 1 argument required, but only 0 present.");
+      }
+      if (worker._terminated) return;
+      setTimeout(() => {
+        if (worker._terminated) return;
+        const evt = fire(msg);
+        try {
+          if (typeof worker.onmessage === 'function') worker.onmessage(evt);
+          for (const h of (worker._listeners['message'] || []).slice()) h.call(worker, evt);
+        } catch (e) {
+          if (typeof reportError === 'function') reportError(e);
+        }
+      }, 0);
+    },
+    addEventListener: function addEventListener(type, fn) {
+      if (!own._ev) own._ev = {};
+      if (!own._ev[type]) own._ev[type] = [];
+      if (fn && !own._ev[type].includes(fn)) own._ev[type].push(fn);
+    },
+    removeEventListener: function removeEventListener(type, fn) {
+      if (own._ev && own._ev[type]) own._ev[type] = own._ev[type].filter((h) => h !== fn);
+    },
+    dispatchEvent: function dispatchEvent(event) {
+      const list = (own._ev && own._ev[event && event.type]) || [];
+      for (const h of list.slice()) h.call(proxy, event);
+      return true;
+    },
+    close: function close() { worker.terminate(); },
+    importScripts: function importScripts(...urls) {
+      const base = worker._url || globalThis.location.href;
+      for (const raw of urls) {
+        let url;
+        try { url = new URL(String(raw), base).href; }
+        catch (_e) { throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The URL '" + raw + "' is invalid.", 'SyntaxError'); }
+        const source = _workerScriptSource(url);
+        if (source === null || source === undefined) {
+          throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '" + url + "' failed to load.", 'NetworkError');
+        }
+        _runInWorkerScope(proxy, source, url);
+      }
+    },
+  });
+  for (const name of ['postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'close', 'importScripts']) {
+    _markNative(own[name]);
+  }
+  proxy = new Proxy(own, {
+    has(target, key) {
+      if (key === Symbol.unscopables) return false;
+      if (key === 'self' || key === 'globalThis' || key in target) return true;
+      // Window-only names must resolve to nothing, not fall through `with` to
+      // the page's own globals.
+      if (_isWindowOnlyGlobal(key)) return key in globalThis;
+      return false;
+    },
+    get(target, key) {
+      if (key === Symbol.unscopables) return undefined;
+      if (key === 'self' || key === 'globalThis') return proxy;
+      if (key in target) return target[key];
+      if (_isWindowOnlyGlobal(key)) return undefined;
+      return globalThis[key];
+    },
+    set(target, key, value) { target[key] = value; return true; },
+    getPrototypeOf() { return Object.prototype; },
+  });
+  return proxy;
+}
 globalThis.Worker = class Worker {
-  constructor(url) {
+  constructor(url, options) {
+    this._url = String(url);
+    this._name = options && options.name !== undefined ? String(options.name) : '';
     this.onmessage = null;
     this.onerror = null;
     this._terminated = false;
@@ -17783,6 +19016,7 @@ globalThis.Worker = class Worker {
       if (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('data:')) {
         try { resolvedUrl = new URL(url, globalThis.location?.href || '').href; } catch(e) {}
       }
+      worker._url = resolvedUrl;
       (async () => {
         try {
           const resp = await fetch(resolvedUrl);
@@ -17794,41 +19028,7 @@ globalThis.Worker = class Worker {
   }
   _makeScope() {
     const worker = this;
-    const scope = {
-      onmessage: null,
-      WorkerGlobalScope: function WorkerGlobalScope() {},
-      DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() {},
-      postMessage: (msg) => {
-        if (worker._terminated) return;
-        const evt = { data: msg };
-        if (worker.onmessage) worker.onmessage(evt);
-        const ls = worker._listeners['message'] || [];
-        for (const h of ls) h(evt);
-      },
-      addEventListener: (type, fn) => {
-        if (!scope._ev) scope._ev = {};
-        if (!scope._ev[type]) scope._ev[type] = [];
-        scope._ev[type].push(fn);
-      },
-      close: () => { worker.terminate(); },
-      crypto: globalThis.crypto,
-      Crypto: globalThis.Crypto,
-      TextEncoder: globalThis.TextEncoder,
-      TextDecoder: globalThis.TextDecoder,
-      atob: globalThis.atob,
-      btoa: globalThis.btoa,
-      setTimeout: globalThis.setTimeout,
-      setInterval: globalThis.setInterval,
-      clearTimeout: globalThis.clearTimeout,
-      clearInterval: globalThis.clearInterval,
-      scheduler: globalThis.scheduler,
-      Scheduler: globalThis.Scheduler,
-      fetch: globalThis.fetch,
-      console: globalThis.console,
-      performance: globalThis.performance,
-      location: globalThis.location,
-    };
-    scope.self = scope;
+    const scope = _makeWorkerScope(worker);
     return scope;
   }
   _autoRun() {
@@ -17837,11 +19037,9 @@ globalThis.Worker = class Worker {
     try {
       // Direct eval preserves script directives and resolves bare handler names
       // against the worker scope. Run once so message closures retain their state.
-      const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
-      fn.call(scope, scope, this._code);
+      _runInWorkerScope(scope, this._code, this._url);
     } catch(e) {
-      console.error('Worker error:', e.message);
-      if (this.onerror) this.onerror(e);
+      this._reportError(e);
     } finally {
       if (!this._terminated) {
         this._scope = scope;
@@ -17849,7 +19047,24 @@ globalThis.Worker = class Worker {
       }
     }
   }
+  // An exception the worker did not handle reaches the Worker object as an
+  // ErrorEvent, as it does in Chrome.
+  _reportError(e) {
+    console.error('Worker error:', e && e.message);
+    const message = 'Uncaught ' + (e && e.name ? e.name + ': ' + e.message : String(e));
+    const event = typeof ErrorEvent === 'function'
+      ? globalThis.__obscura_markTrusted(
+        new ErrorEvent('error', { message, error: e, filename: this._url || '', lineno: 0, colno: 0 }))
+      : e;
+    try {
+      if (typeof this.onerror === 'function') this.onerror(event);
+      for (const handler of (this._listeners['error'] || []).slice()) handler.call(this, event);
+    } catch (_ignored) {}
+  }
   postMessage(data) {
+    if (arguments.length < 1) {
+      throw new TypeError("Failed to execute 'postMessage' on 'Worker': 1 argument required, but only 0 present.");
+    }
     if (this._terminated) return;
     if (!this._scope) {
       this._pendingMessages.push(data);
@@ -17860,13 +19075,14 @@ globalThis.Worker = class Worker {
       if (worker._terminated || !worker._scope) return;
       const scope = worker._scope;
       try {
-        const event = { data };
+        const event = typeof MessageEvent === 'function'
+          ? globalThis.__obscura_markTrusted(new MessageEvent('message', { data }))
+          : { data };
         if (typeof scope.onmessage === 'function') scope.onmessage.call(scope, event);
         const evs = (scope._ev && scope._ev['message']) || [];
         for (const handler of evs.slice()) handler.call(scope, event);
       } catch(e) {
-        console.error('Worker error:', e.message);
-        if (worker.onerror) worker.onerror(e);
+        worker._reportError(e);
       }
     }, 0);
   }
@@ -17885,6 +19101,8 @@ globalThis.Worker = class Worker {
 };
 
 globalThis.__blobStore = globalThis.__blobStore || {};
+// The Blob behind each live blob: URL, for fetch() and XHR.
+const _blobObjects = new Map();
 URL.createObjectURL = function(blob) {
   // Chrome mints blob:<document-origin>/<v4-uuid> (blob:null/<uuid> on an opaque
   // origin) and throws a TypeError on missing/non-Blob input. The old code named
@@ -17916,6 +19134,7 @@ URL.createObjectURL = function(blob) {
           return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
         });
     const id = 'blob:' + origin + '/' + uuid;
+    _blobObjects.set(id, blob);
     // Store synchronously so a Worker built from the blob URL in the same
     // tick sees its source. Blob-URL Worker construction is synchronous in
     // real browsers; the previous async blob.text().then() store raced the
@@ -17937,6 +19156,7 @@ URL.createObjectURL = function(blob) {
 };
 URL.revokeObjectURL = function(url) {
   delete globalThis.__blobStore[url];
+  _blobObjects.delete(String(url));
 };
 /* MEDIA_EXTRAS */
 
@@ -18016,7 +19236,22 @@ globalThis.stop = function() {}; _markNative(globalThis.stop);
 // that posted to itself and waited for the `message` event waited forever.
 // Same realm, so this needs no host round trip; it is queued as a task because
 // postMessage never delivers synchronously.
-globalThis.postMessage = function(data, targetOrigin, _transfer) {
+// Window.postMessage argument checks, in Chrome's order and wording. Pages
+// call it with no arguments and expect the TypeError a browser throws.
+function _checkWindowPostMessage(count, targetOrigin) {
+  if (count < 1) {
+    throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+  }
+  if (typeof targetOrigin !== 'string' || targetOrigin === '*' || targetOrigin === '/') return;
+  let valid = false;
+  try { valid = new URL(targetOrigin).origin !== 'null'; } catch (_e) {}
+  if (!valid) {
+    throw new DOMException("Failed to execute 'postMessage' on 'Window': Invalid target origin '"
+      + targetOrigin + "' in a call to 'postMessage'.", 'SyntaxError');
+  }
+}
+globalThis.postMessage = function postMessage(data, targetOrigin, _transfer) {
+  _checkWindowPostMessage(arguments.length, targetOrigin);
   _sendRealmMessage(_realmFrameId, data, targetOrigin);
 };
 _markNative(globalThis.postMessage);
@@ -18756,13 +19991,35 @@ if (typeof EventSource === 'undefined') {
 if (typeof WebSocket === 'undefined') {
   globalThis.WebSocket = class WebSocket {
     constructor(url, protocols) {
-      // Validate URL scheme per spec — Chrome throws SyntaxError for non-ws/wss URLs
-      if (typeof url !== 'string' || !/^wss?:\/\//i.test(url)) {
+      // The URL resolves against the document like any other, and http(s)
+      // maps to ws(s), as Chrome does; only an unparseable URL or another
+      // scheme is a SyntaxError.
+      if (arguments.length < 1) {
+        throw new TypeError("Failed to construct 'WebSocket': 1 argument required, but only 0 present.");
+      }
+      let parsed = null;
+      try { parsed = new URL(String(url), globalThis.document ? document.baseURI : undefined); } catch (_e) {}
+      if (!parsed) {
         throw new DOMException(
           "Failed to construct 'WebSocket': The URL '" + url + "' is invalid.",
           'SyntaxError'
         );
       }
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+      else if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+        throw new DOMException(
+          "Failed to construct 'WebSocket': The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '" + parsed.protocol.slice(0, -1) + "' is not allowed.",
+          'SyntaxError'
+        );
+      }
+      if (parsed.hash) {
+        throw new DOMException(
+          "Failed to construct 'WebSocket': The URL contains a fragment identifier ('" + parsed.hash.slice(1) + "'). Fragment identifiers are not allowed in WebSocket URLs.",
+          'SyntaxError'
+        );
+      }
+      url = parsed.href;
       this.url = url;
       this.readyState = 0; // CONNECTING
       this.bufferedAmount = 0;
@@ -19200,8 +20457,20 @@ if (typeof FontFace === 'undefined') {
       this._status = 'loading';
       this._changed();
       const loaded = this.loaded;
+      // A source made only of local() faces loads when one of them is a
+      // font this engine has; otherwise it fails, as Chrome's does for a
+      // font the machine lacks. Resolving every local() name made each
+      // probed font "installed" (CreepJS: 51 of 51, "Like Windows 11").
+      const locals = _fontFaceLocalNames(this._source);
+      const missing = locals !== null && !locals.some((name) => _LOCAL_FONT_NAMES.has(name));
       Promise.resolve().then(() => {
         if (this._status !== 'loading') return;
+        if (missing) {
+          this._status = 'error';
+          this._rejectLoaded?.(new DOMException('A network error occurred.', 'NetworkError'));
+          this._changed();
+          return;
+        }
         this._status = 'loaded';
         this._scriptLoaded = true;
         this._resolveLoaded?.(this);
@@ -19209,6 +20478,27 @@ if (typeof FontFace === 'undefined') {
       });
       return loaded;
     }
+  };
+  // The faces local() can name: the engine's bundled fonts, by full and
+  // PostScript name.
+  const _LOCAL_FONT_NAMES = new Set([
+    'liberation sans', 'liberationsans', 'liberation sans bold', 'liberationsans-bold',
+    'liberation sans italic', 'liberationsans-italic', 'liberation sans bold italic', 'liberationsans-bolditalic',
+    'liberation serif', 'liberationserif', 'liberation serif bold', 'liberationserif-bold',
+    'liberation serif italic', 'liberationserif-italic', 'liberation serif bold italic', 'liberationserif-bolditalic',
+    'liberation mono', 'liberationmono', 'liberation mono bold', 'liberationmono-bold',
+    'liberation mono italic', 'liberationmono-italic', 'liberation mono bold italic', 'liberationmono-bolditalic',
+    'dejavu sans', 'dejavusans', 'dejavu sans bold', 'dejavusans-bold',
+    'noto color emoji', 'notocoloremoji',
+  ]);
+  // The local() names of a src list, or null when it has any url() source.
+  const _fontFaceLocalNames = (source) => {
+    if (typeof source !== 'string' || /url\s*\(/i.test(source)) return null;
+    const names = [];
+    const re = /local\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
+    let match;
+    while ((match = re.exec(source))) names.push((match[1] ?? match[2] ?? match[3] ?? '').trim().toLowerCase());
+    return names.length ? names : null;
   };
 
   const _fontFaceSelection = font => {
@@ -19440,7 +20730,7 @@ if (typeof SharedWorker === 'undefined') {
   };
 }
 if (typeof ServiceWorkerContainer === 'undefined') {
-  globalThis.ServiceWorkerContainer = class { register(){return Promise.resolve();} getRegistrations(){return Promise.resolve([]);} };
+  globalThis.ServiceWorkerContainer = class ServiceWorkerContainer { register(){return Promise.resolve();} getRegistrations(){return Promise.resolve([]);} };
 }
 
 if (typeof URLPattern === 'undefined') {
@@ -19751,9 +21041,17 @@ const _documentMembers = Object.freeze(Object.fromEntries([
   }],
 ]));
 
+let _nativeSourcesRecorded = false;
 globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
+  // Functions marked while the snapshot was built get their private
+  // toString record here, once per realm, in case the snapshot dropped it.
+  if (!_nativeSourcesRecorded) {
+    _nativeSourcesRecorded = true;
+    for (const fn of _nativeFns) _recordNativeSource(fn, '');
+    for (const [fn, text] of _nativeStr) _recordNativeSource(fn, text);
+  }
   _scriptingEnabled = _domParse('scripting_enabled') !== false;
   _sandboxOpaqueOrigin = _domParse('sandbox_opaque_origin') === true;
   globalThis.__obscura_update_media_preferences();
@@ -19763,7 +21061,10 @@ globalThis.__obscura_init = function() {
     _realmFrameId);
   _browserPostedTaskWakePending = false;
   for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
-  _fpSeed = Date.now() ^ (Math.random() * 0xFFFFFFFF >>> 0);
+  // An embedder (or a test) may pin the seed; otherwise it is the machine's.
+  _fpSeed = Number.isInteger(globalThis.__obscura_fp_seed)
+    ? globalThis.__obscura_fp_seed | 0
+    : __obscuraCore.ops.op_fingerprint_seed() | 0;
   _fpCache = null;
   // A real navigation just completed (this runs after set_url), so drop any
   // URL a location setter previewed synchronously and let document_url drive
@@ -19812,10 +21113,25 @@ globalThis.__obscura_init = function() {
   globalThis.innerWidth = vw; globalThis.innerHeight = vh;
   globalThis.outerWidth = sw; globalThis.outerHeight = sh - 40;
 
-  var hwValues = globalThis.__obscura_stealth ? [4, 6, 8, 12, 16] : [2, 4, 6, 8, 12, 16];
-  globalThis.__obscura_hw = hwValues[Math.floor(_fpRand(400) * hwValues.length)];
-  var memValues = globalThis.__obscura_stealth ? [4, 8] : [0.25, 0.5, 1, 2, 4, 8];
-  globalThis.__obscura_mem = memValues[Math.floor(_fpRand(401) * memValues.length)];
+  // The machine's own core count and memory, as Chrome reports them: memory
+  // in GiB rounded to the nearest power of two, between 0.25 and 32.
+  const [hostCores, hostGib] = __obscuraCore.ops.op_host_hardware();
+  globalThis.__obscura_hw = hostCores > 0 ? hostCores : 8;
+  globalThis.__obscura_mem = hostGib > 0
+    ? Math.min(32, Math.max(0.25, Math.pow(2, Math.round(Math.log2(hostGib)))))
+    : 8;
+  // navigator.share exists in Chrome on Windows, macOS and ChromeOS only.
+  if ((globalThis.__obscura_ua_platform || '') === 'Linux') {
+    delete Navigator.prototype.share;
+    delete Navigator.prototype.canShare;
+  }
+  // A window that is not maximized: as wide as the viewport (plus the frame
+  // on Windows) and taller by the tab strip and toolbar.
+  {
+    const windows = (globalThis.__obscura_ua_platform || '') === 'Windows';
+    globalThis.outerWidth = Math.min(screen.availWidth || sw, vw + (windows ? 16 : 0));
+    globalThis.outerHeight = Math.min(screen.availHeight || sh, vh + (windows ? 87 : 85));
+  }
 
   const timing = {};
   for (const name of Object.keys(JSON.parse(_dom('performance_timing')))) {
@@ -20997,6 +22313,518 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
   }
 })();
 
+// CSSStyleDeclaration members Chrome lists on its prototype.
+(function _completeStyleDeclaration() {
+  const proto = globalThis.CSSStyleDeclaration && globalThis.CSSStyleDeclaration.prototype;
+  if (!proto) return;
+  if (!Object.getOwnPropertyDescriptor(proto, 'parentRule')) {
+    Object.defineProperty(proto, 'parentRule', {
+      get: { get parentRule() { return this._parentRule || null; } }.__lookupGetter__('parentRule'),
+      enumerable: true, configurable: true,
+    });
+  }
+  if (!Object.getOwnPropertyDescriptor(proto, 'cssFloat')) {
+    Object.defineProperty(proto, 'cssFloat', {
+      get: { get cssFloat() { return this.getPropertyValue('float'); } }.__lookupGetter__('cssFloat'),
+      set: { set cssFloat(v) { this.setProperty('float', v); } }.__lookupSetter__('cssFloat'),
+      enumerable: true, configurable: true,
+    });
+  }
+})();
+
+// Navigator, shaped like Chrome's. Every member of `navigator` is an
+// accessor or operation on Navigator.prototype, in Chrome's order, and the
+// instance itself has no own properties: `Object.keys(navigator)` is [] and
+// `Object.prototype.toString.call(navigator)` is "[object Navigator]" in a
+// browser, and fingerprinting scripts compare both. The member objects
+// (`navigator.mediaDevices`, `navigator.permissions`, ...) are instances of
+// their own interfaces, with their members on the interface prototype.
+(function _shapeNavigator() {
+  const nav = globalThis.navigator;
+  const navProto = Navigator.prototype;
+  const hop = Object.getPrototypeOf(nav);
+  const values = new Map();
+  for (const key of Reflect.ownKeys(nav)) {
+    values.set(key, Object.getOwnPropertyDescriptor(nav, key).value);
+    delete nav[key];
+  }
+  const getters = new Map();
+  if (hop && hop !== navProto) {
+    for (const key of Reflect.ownKeys(hop)) {
+      const d = Object.getOwnPropertyDescriptor(hop, key);
+      if (d.get) getters.set(key, d.get);
+      else if (typeof d.value === 'function') values.set(key, d.value);
+    }
+  }
+  Object.setPrototypeOf(nav, navProto);
+  Object.defineProperty(navProto, Symbol.toStringTag, { value: 'Navigator', configurable: true });
+
+  const illegal = (name) => {
+    const Ctor = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+    _markNative(Ctor);
+    return Ctor;
+  };
+  // An instance of interface `name` whose members are those of `members`,
+  // moved onto the interface prototype. Data members become read-only
+  // accessors, except event handler slots (`on*`), which stay writable.
+  const ifaceCtors = new Map();
+  const ifaceSlots = new WeakMap();
+  function asInterface(name, members, parent, expose) {
+    let Ctor = ifaceCtors.get(name);
+    if (!Ctor) {
+      Ctor = typeof globalThis[name] === 'function' && expose ? globalThis[name] : illegal(name);
+      if (!Ctor.prototype || Ctor.prototype === Function.prototype) Ctor.prototype = {};
+      const proto = Ctor.prototype;
+      if (parent && Object.getPrototypeOf(proto) === Object.prototype) Object.setPrototypeOf(proto, parent);
+      Object.defineProperty(proto, 'constructor', { value: Ctor, writable: true, configurable: true, enumerable: false });
+      Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
+      ifaceCtors.set(name, Ctor);
+      if (expose && typeof globalThis[name] !== 'function') {
+        Object.defineProperty(globalThis, name, { value: Ctor, writable: true, configurable: true, enumerable: false });
+      }
+    }
+    const proto = Ctor.prototype;
+    const inst = Object.create(proto);
+    const slots = new Map();
+    ifaceSlots.set(inst, slots);
+    for (const key of Reflect.ownKeys(members || {})) {
+      const d = Object.getOwnPropertyDescriptor(members, key);
+      if (typeof key === 'symbol') continue;
+      if ('value' in d && typeof d.value === 'function' && !/^on/.test(key)) {
+        Object.defineProperty(d.value, 'name', { value: key, configurable: true });
+        _markNative(d.value);
+        Object.defineProperty(proto, key, { value: d.value, writable: true, enumerable: true, configurable: true });
+      } else if (d.get || d.set) {
+        if (d.get) _markNativeAs(d.get, 'function get ' + key + '() { [native code] }');
+        if (d.set) _markNativeAs(d.set, 'function set ' + key + '() { [native code] }');
+        Object.defineProperty(proto, key, { get: d.get, set: d.set, enumerable: true, configurable: true });
+      } else {
+        slots.set(key, d.value);
+        const get = _markNativeAs(function () {
+          const own = ifaceSlots.get(this);
+          return own ? own.get(key) : undefined;
+        }, 'function get ' + key + '() { [native code] }');
+        const set = /^on/.test(key)
+          ? _markNativeAs(function (v) {
+            const own = ifaceSlots.get(this);
+            if (own) own.set(key, typeof v === 'function' || (v && typeof v === 'object') ? v : null);
+          }, 'function set ' + key + '() { [native code] }')
+          : undefined;
+        Object.defineProperty(proto, key, { get, set, enumerable: true, configurable: true });
+      }
+    }
+    return inst;
+  }
+  const eventTargetMembers = {
+    addEventListener(type, listener, options) { _eventTargetAdd(this, type, listener, options); },
+    removeEventListener(type, listener, options) { _eventTargetRemove(this, type, listener, options); },
+    dispatchEvent(event) { return _eventTargetDispatch(this, event); },
+  };
+  const withEvents = (members) => Object.assign({}, eventTargetMembers, members);
+  const etProto = EventTarget.prototype;
+  const rejectNotAllowed = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'));
+
+  // Existing member objects, re-homed onto their interfaces.
+  const member = (key, name, parent, expose) => {
+    const v = values.get(key);
+    if (v && typeof v === 'object' && !(v instanceof Navigator)) values.set(key, asInterface(name, v, parent, expose));
+  };
+  const conn = values.get('connection');
+  if (conn) {
+    values.set('connection', asInterface('NetworkInformation', withEvents({
+      get effectiveType() { return '4g'; },
+      get rtt() { return 50; },
+      get downlink() { return 10; },
+      get saveData() { return false; },
+      onchange: null,
+    }), etProto, true));
+  }
+  member('mediaDevices', 'MediaDevices', etProto, true);
+  const md = values.get('mediaDevices');
+  if (md) {
+    const mdProto = Object.getPrototypeOf(md);
+    for (const k of ['addEventListener', 'removeEventListener']) delete mdProto[k];
+    Object.defineProperty(mdProto, 'enumerateDevices', {
+      value: _markNative({ enumerateDevices() {
+        // Before a capture permission is granted Chrome lists one entry
+        // per kind present, with empty ids and labels.
+        const info = (kind) => asInterface(kind === 'audiooutput' ? 'MediaDeviceInfo' : 'InputDeviceInfo',
+          { deviceId: '', kind, label: '', groupId: '', toJSON() { return { deviceId: this.deviceId, kind: this.kind, label: this.label, groupId: this.groupId }; } },
+          undefined, true);
+        return Promise.resolve([info('audioinput'), info('audiooutput')]);
+      } }.enumerateDevices),
+      writable: true, enumerable: true, configurable: true,
+    });
+    Object.defineProperty(mdProto, 'getSupportedConstraints', {
+      value: _markNative({ getSupportedConstraints() {
+        const out = {};
+        for (const k of ['aspectRatio', 'autoGainControl', 'brightness', 'channelCount', 'colorTemperature', 'contrast', 'deviceId', 'displaySurface', 'echoCancellation', 'exposureCompensation', 'exposureMode', 'exposureTime', 'facingMode', 'focusDistance', 'focusMode', 'frameRate', 'groupId', 'height', 'iso', 'latency', 'noiseSuppression', 'pan', 'pointsOfInterest', 'resizeMode', 'restrictOwnAudio', 'sampleRate', 'sampleSize', 'saturation', 'sharpness', 'suppressLocalAudioPlayback', 'tilt', 'torch', 'voiceIsolation', 'whiteBalanceMode', 'width', 'zoom']) out[k] = true;
+        return out;
+      } }.getSupportedConstraints),
+      writable: true, enumerable: true, configurable: true,
+    });
+    Object.defineProperty(mdProto, 'ondevicechange', { get: _markNative(function () { return null; }), set: _markNative(function () {}), enumerable: true, configurable: true });
+    Object.setPrototypeOf(mdProto, etProto);
+  }
+  member('serviceWorker', 'ServiceWorkerContainer', etProto, true);
+  member('clipboard', 'Clipboard', etProto, true);
+  member('permissions', 'Permissions', undefined, true);
+  member('geolocation', 'Geolocation', undefined, true);
+  member('storage', 'StorageManager', undefined, true);
+  member('credentials', 'CredentialsContainer', undefined, true);
+  member('mediaCapabilities', 'MediaCapabilities', undefined, true);
+  member('locks', 'LockManager', undefined, true);
+  member('keyboard', 'Keyboard', undefined, true);
+  member('gpu', 'GPU', undefined, true);
+  member('wakeLock', 'WakeLock', undefined, true);
+  member('userAgentData', 'NavigatorUAData', undefined, true);
+  const storage = values.get('storage');
+  if (storage) {
+    Object.defineProperty(Object.getPrototypeOf(storage), 'getDirectory', {
+      value: _markNative({ getDirectory() { return Promise.reject(new DOMException('The request is not allowed by the user agent or the platform in the current context.', 'SecurityError')); } }.getDirectory),
+      writable: true, enumerable: true, configurable: true,
+    });
+  }
+
+  // Members Chrome has that had no object here.
+  const deprecatedQuota = () => asInterface('DeprecatedStorageQuota', {
+    queryUsageAndQuota(success) { if (typeof success === 'function') setTimeout(() => success(0, 10737418240), 0); },
+    requestQuota(size, success) { if (typeof success === 'function') setTimeout(() => success(0), 0); },
+  });
+  const stubs = {
+    vendorSub: '',
+    appCodeName: 'Mozilla',
+    appName: 'Netscape',
+    scheduling: asInterface('Scheduling', { isInputPending() { return false; } }, undefined, true),
+    userActivation: asInterface('UserActivation', {
+      get hasBeenActive() { return _hasStickyActivation; },
+      get isActive() { return false; },
+    }, undefined, true),
+    webkitTemporaryStorage: deprecatedQuota(),
+    webkitPersistentStorage: deprecatedQuota(),
+    windowControlsOverlay: asInterface('WindowControlsOverlay', withEvents({
+      get visible() { return false; },
+      getTitlebarAreaRect() { return new DOMRect(0, 0, 0, 0); },
+      ongeometrychange: null,
+    }), etProto, true),
+    vibrate(pattern) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'vibrate' on 'Navigator': 1 argument required, but only 0 present.");
+      return false;
+    },
+    managed: asInterface('NavigatorManagedData', withEvents({ onmanagedconfigurationchange: null }), etProto, true),
+    virtualKeyboard: asInterface('VirtualKeyboard', withEvents({
+      get boundingRect() { return new DOMRect(0, 0, 0, 0); },
+      get overlaysContent() { return false; },
+      show() {}, hide() {}, ongeometrychange: null,
+    }), etProto, true),
+    login: asInterface('NavigatorLogin', { setStatus() { return Promise.resolve(); } }, undefined, true),
+    ink: asInterface('Ink', { requestPresenter() { return Promise.reject(new DOMException('Not supported', 'NotSupportedError')); } }, undefined, true),
+    devicePosture: asInterface('DevicePosture', withEvents({ get type() { return 'continuous'; }, onchange: null }), etProto, true),
+    hid: asInterface('HID', withEvents({ getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.resolve([]); }, onconnect: null, ondisconnect: null }), etProto, true),
+    mediaSession: asInterface('MediaSession', { metadata: null, playbackState: 'none', setActionHandler() {}, setPositionState() {}, setCameraActive() { return Promise.resolve(); }, setMicrophoneActive() { return Promise.resolve(); } }, undefined, true),
+    presentation: asInterface('Presentation', { defaultRequest: null, receiver: null }, undefined, true),
+    serial: asInterface('Serial', withEvents({ getPorts() { return Promise.resolve([]); }, requestPort() { return Promise.reject(new DOMException('No port selected by the user.', 'NotFoundError')); }, onconnect: null, ondisconnect: null }), etProto, true),
+    usb: asInterface('USB', withEvents({ getDevices() { return Promise.resolve([]); }, requestDevice() { return Promise.reject(new DOMException('No device selected.', 'NotFoundError')); }, onconnect: null, ondisconnect: null }), etProto, true),
+    xr: asInterface('XRSystem', withEvents({ isSessionSupported() { return Promise.resolve(false); }, requestSession() { return Promise.reject(new DOMException('The specified session configuration is not supported.', 'NotSupportedError')); }, supportsSession() { return Promise.reject(new DOMException('Not supported', 'NotSupportedError')); }, ondevicechange: null }), etProto, true),
+    storageBuckets: asInterface('StorageBucketManager', { open() { return Promise.reject(new DOMException('Not allowed', 'SecurityError')); }, keys() { return Promise.resolve([]); }, delete() { return Promise.resolve(); } }, undefined, true),
+    clearAppBadge() { return Promise.resolve(); },
+    getUserMedia(constraints, success, failure) {
+      if (arguments.length < 3) throw new TypeError("Failed to execute 'getUserMedia' on 'Navigator': 3 arguments required, but only " + arguments.length + " present.");
+      if (typeof failure === 'function') setTimeout(() => failure(new DOMException('Permission denied', 'NotAllowedError')), 0);
+    },
+    requestMIDIAccess() { return rejectNotAllowed(); },
+    setAppBadge() { return Promise.resolve(); },
+    getInstalledRelatedApps() { return Promise.resolve([]); },
+    registerProtocolHandler(scheme, url) {
+      if (arguments.length < 2) throw new TypeError("Failed to execute 'registerProtocolHandler' on 'Navigator': 2 arguments required, but only " + arguments.length + " present.");
+    },
+    unregisterProtocolHandler(scheme, url) {
+      if (arguments.length < 2) throw new TypeError("Failed to execute 'unregisterProtocolHandler' on 'Navigator': 2 arguments required, but only " + arguments.length + " present.");
+    },
+  };
+  stubs.webkitGetUserMedia = function (constructor, success, failure) {
+    if (arguments.length < 3) throw new TypeError("Failed to execute 'webkitGetUserMedia' on 'Navigator': 3 arguments required, but only " + arguments.length + " present.");
+    if (typeof failure === 'function') setTimeout(() => failure(new DOMException('Permission denied', 'NotAllowedError')), 0);
+  };
+  // Chrome's coarse CPU tier (1-4) from the core count.
+  getters.set('cpuPerformance', function () {
+    const cores = globalThis.__obscura_hw || 0;
+    return cores <= 0 ? 0 : cores <= 2 ? 1 : cores <= 4 ? 2 : cores <= 8 ? 3 : 4;
+  });
+  values.set('sendBeacon', function sendBeacon(url, data) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': 1 argument required, but only 0 present.");
+    try { new URL(String(url), document.baseURI); }
+    catch (_e) { throw new TypeError("Failed to execute 'sendBeacon' on 'Navigator': The URL argument is ill-formed or unsupported."); }
+    return true;
+  });
+  const getBattery = values.get('getBattery');
+  if (getBattery) {
+    // A desktop without a battery reports a full, charging one.
+    values.set('getBattery', function getBattery() {
+      return Promise.resolve(asInterface('BatteryManager', withEvents({
+        get charging() { return true; }, get chargingTime() { return 0; },
+        get dischargingTime() { return Infinity; }, get level() { return 1; },
+        onchargingchange: null, onchargingtimechange: null, ondischargingtimechange: null, onlevelchange: null,
+      }), etProto, true));
+    });
+  }
+
+  const order = [
+    'vendorSub', 'productSub', 'vendor', 'maxTouchPoints', 'scheduling', 'userActivation', 'geolocation',
+    'doNotTrack', 'webkitTemporaryStorage', 'webkitPersistentStorage', 'windowControlsOverlay',
+    'hardwareConcurrency', 'cookieEnabled', 'appCodeName', 'appName', 'appVersion', 'platform', 'product',
+    'userAgent', 'language', 'languages', 'onLine', 'webdriver', 'plugins', 'mimeTypes', 'pdfViewerEnabled',
+    'connection', 'getGamepads', 'javaEnabled', 'sendBeacon', 'vibrate', 'constructor', 'cpuPerformance', 'clipboard',
+    'credentials', 'keyboard', 'managed', 'mediaDevices', 'serviceWorker', 'virtualKeyboard', 'wakeLock',
+    'deviceMemory', 'userAgentData', 'locks', 'storage', 'gpu', 'login', 'ink', 'mediaCapabilities',
+    'permissions', 'devicePosture', 'hid', 'mediaSession', 'presentation', 'serial', 'usb', 'xr',
+    'storageBuckets', 'clearAppBadge', 'getBattery', 'getUserMedia', 'requestMIDIAccess',
+    'requestMediaKeySystemAccess', 'setAppBadge', 'webkitGetUserMedia', 'getInstalledRelatedApps',
+    'registerProtocolHandler', 'unregisterProtocolHandler', 'share', 'canShare',
+  ];
+  const existing = new Map();
+  for (const key of Reflect.ownKeys(navProto)) {
+    if (typeof key === 'symbol') continue;
+    existing.set(key, Object.getOwnPropertyDescriptor(navProto, key));
+    delete navProto[key];
+  }
+  for (const key of order) {
+    let d = existing.get(key);
+    if (!d) {
+      const getter = getters.get(key);
+      const has = values.has(key) || Object.prototype.hasOwnProperty.call(stubs, key);
+      const value = values.has(key) ? values.get(key) : stubs[key];
+      if (getter) d = { get: getter, set: undefined };
+      else if (!has) continue;
+      else if (typeof value === 'function') {
+        Object.defineProperty(value, 'name', { value: key, configurable: true });
+        d = { value: _markNative(value), writable: true };
+      } else {
+        d = { get: _markNativeAs(function () { return value; }, 'function get ' + key + '() { [native code] }'), set: undefined };
+      }
+    }
+    Object.defineProperty(navProto, key, Object.assign({ enumerable: true, configurable: true }, d));
+  }
+})();
+
+
+// Interfaces Chrome 153 exposes on window that cannot be constructed there
+// either (`new X()` throws "Illegal constructor"), so a stub is exactly as
+// usable as the real one to page code that only detects or brand-checks
+// them. Feature-detection scripts date the browser by which of these exist;
+// without them it read as Chrome 95. Interfaces a page can construct are
+// not stubbed: a constructor that cannot do its job is worse than none.
+(function _exposeIllegalInterfaces() {
+  // Interfaces whose static operations pages call after detecting them
+  // (PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable,
+  // LanguageModel.availability, ...) stay absent: a stub without them throws.
+  const usable = new Set(['TaskSignal', 'RTCRtpSender', 'RTCRtpReceiver', 'CSSStyleValue', 'CSSNumericValue',
+    'Credential', 'PublicKeyCredential', 'DigitalCredential', 'IdentityCredential', 'IdentityProvider',
+    'LanguageDetector', 'LanguageModel', 'Summarizer', 'Translator', 'CropTarget', 'RestrictionTarget']);
+  const list = JSON.parse('[["FeaturePolicy","Object",{}],["XPathExpression","Object",{}],["XMLHttpRequestUpload","XMLHttpRequestEventTarget",{}],["WritableStreamDefaultController","Object",{}],["WebGLVertexArrayObject","WebGLObject",{}],["WebGLUniformLocation","Object",{}],["WebGLTransformFeedback","WebGLObject",{}],["WebGLTexture","WebGLObject",{}],["WebGLSync","WebGLObject",{}],["WebGLShaderPrecisionFormat","Object",{}],["WebGLShader","WebGLObject",{}],["WebGLSampler","WebGLObject",{}],["WebGLRenderbuffer","WebGLObject",{}],["WebGLQuery","WebGLObject",{}],["WebGLProgram","WebGLObject",{}],["WebGLObject","Object",{}],["WebGLFramebuffer","WebGLObject",{}],["WebGLBuffer","WebGLObject",{}],["WebGLActiveInfo","Object",{}],["VisualViewport","EventTarget",{}],["VisibilityStateEntry","PerformanceEntry",{}],["ViewTransitionTypeSet","Object",{}],["ViewTransition","Object",{}],["VideoPlaybackQuality","Object",{}],["TrustedTypePolicyFactory","Object",{}],["TrustedTypePolicy","Object",{}],["TrustedScriptURL","Object",{}],["TrustedScript","Object",{}],["TrustedHTML","Object",{}],["TransformStreamDefaultController","Object",{}],["TouchList","Object",{}],["TextEvent","UIEvent",{}],["TaskSignal","AbortSignal",{}],["TaskAttributionTiming","PerformanceEntry",{}],["SyncManager","Object",{}],["Subscriber","Object",{}],["StylePropertyMapReadOnly","Object",{}],["StylePropertyMap","StylePropertyMapReadOnly",{}],["ScriptProcessorNode","AudioNode",{}],["ScreenOrientation","EventTarget",{}],["SVGUnitTypes","Object",{"SVG_UNIT_TYPE_UNKNOWN":0,"SVG_UNIT_TYPE_USERSPACEONUSE":1,"SVG_UNIT_TYPE_OBJECTBOUNDINGBOX":2}],["SVGTransformList","Object",{}],["SVGTransform","Object",{"SVG_TRANSFORM_UNKNOWN":0,"SVG_TRANSFORM_MATRIX":1,"SVG_TRANSFORM_TRANSLATE":2,"SVG_TRANSFORM_SCALE":3,"SVG_TRANSFORM_ROTATE":4,"SVG_TRANSFORM_SKEWX":5,"SVG_TRANSFORM_SKEWY":6}],["SVGStringList","Object",{}],["SVGRect","Object",{}],["SVGPreserveAspectRatio","Object",{"SVG_PRESERVEASPECTRATIO_UNKNOWN":0,"SVG_PRESERVEASPECTRATIO_NONE":1,"SVG_PRESERVEASPECTRATIO_XMINYMIN":2,"SVG_PRESERVEASPECTRATIO_XMIDYMIN":3,"SVG_PRESERVEASPECTRATIO_XMAXYMIN":4,"SVG_PRESERVEASPECTRATIO_XMINYMID":5,"SVG_PRESERVEASPECTRATIO_XMIDYMID":6,"SVG_PRESERVEASPECTRATIO_XMAXYMID":7,"SVG_PRESERVEASPECTRATIO_XMINYMAX":8,"SVG_PRESERVEASPECTRATIO_XMIDYMAX":9,"SVG_PRESERVEASPECTRATIO_XMAXYMAX":10,"SVG_MEETORSLICE_UNKNOWN":0,"SVG_MEETORSLICE_MEET":1,"SVG_MEETORSLICE_SLICE":2}],["SVGPointList","Object",{}],["SVGPoint","Object",{}],["SVGNumberList","Object",{}],["SVGNumber","Object",{}],["SVGMatrix","Object",{}],["SVGMPathElement","SVGElement",{}],["SVGLengthList","Object",{}],["SVGLength","Object",{"SVG_LENGTHTYPE_UNKNOWN":0,"SVG_LENGTHTYPE_NUMBER":1,"SVG_LENGTHTYPE_PERCENTAGE":2,"SVG_LENGTHTYPE_EMS":3,"SVG_LENGTHTYPE_EXS":4,"SVG_LENGTHTYPE_PX":5,"SVG_LENGTHTYPE_CM":6,"SVG_LENGTHTYPE_MM":7,"SVG_LENGTHTYPE_IN":8,"SVG_LENGTHTYPE_PT":9,"SVG_LENGTHTYPE_PC":10}],["SVGAnimatedTransformList","Object",{}],["SVGAnimatedString","Object",{}],["SVGAnimatedRect","Object",{}],["SVGAnimatedPreserveAspectRatio","Object",{}],["SVGAnimatedNumberList","Object",{}],["SVGAnimatedNumber","Object",{}],["SVGAnimatedLengthList","Object",{}],["SVGAnimatedLength","Object",{}],["SVGAnimatedInteger","Object",{}],["SVGAnimatedEnumeration","Object",{}],["SVGAnimatedBoolean","Object",{}],["SVGAnimatedAngle","Object",{}],["SVGAngle","Object",{"SVG_ANGLETYPE_UNKNOWN":0,"SVG_ANGLETYPE_UNSPECIFIED":1,"SVG_ANGLETYPE_DEG":2,"SVG_ANGLETYPE_RAD":3,"SVG_ANGLETYPE_GRAD":4}],["ReportBody","Object",{}],["ReadableStreamDefaultController","Object",{}],["ReadableStreamBYOBRequest","Object",{}],["ReadableByteStreamController","Object",{}],["RadioNodeList","NodeList",{}],["RTCStatsReport","Object",{}],["RTCSctpTransport","EventTarget",{}],["RTCRtpTransceiver","Object",{}],["RTCRtpSender","Object",{}],["RTCRtpReceiver","Object",{}],["RTCIceTransport","EventTarget",{}],["RTCDtlsTransport","EventTarget",{}],["RTCDTMFSender","EventTarget",{}],["RTCCertificate","Object",{}],["PictureInPictureWindow","EventTarget",{}],["PermissionsPolicy","Object",{}],["PermissionStatus","EventTarget",{}],["PerformanceTimingConfidence","Object",{}],["PerformanceTiming","Object",{}],["PerformanceServerTiming","Object",{}],["PerformanceResourceTiming","PerformanceEntry",{}],["PerformancePaintTiming","PerformanceEntry",{}],["PerformanceNavigationTiming","PerformanceResourceTiming",{}],["PerformanceNavigation","Object",{"TYPE_NAVIGATE":0,"TYPE_RELOAD":1,"TYPE_BACK_FORWARD":2,"TYPE_RESERVED":255}],["PerformanceLongTaskTiming","PerformanceEntry",{}],["PerformanceEventTiming","PerformanceEntry",{}],["PerformanceElementTiming","PerformanceEntry",{}],["OffscreenCanvasRenderingContext2D","Object",{}],["NodeIterator","Object",{}],["NavigationTransition","Object",{}],["NavigationPrecommitController","Object",{}],["NavigationHistoryEntry","EventTarget",{}],["NavigationDestination","Object",{}],["NavigationActivation","Object",{}],["Navigation","EventTarget",{}],["MediaStreamTrackVideoStats","Object",{}],["MediaStreamTrackAudioStats","Object",{}],["MediaSourceHandle","Object",{}],["MediaList","Object",{}],["MediaError","Object",{"MEDIA_ERR_ABORTED":1,"MEDIA_ERR_NETWORK":2,"MEDIA_ERR_DECODE":3,"MEDIA_ERR_SRC_NOT_SUPPORTED":4}],["MathMLElement","Element",{}],["LayoutShiftAttribution","Object",{}],["LayoutShift","PerformanceEntry",{}],["LargestContentfulPaint","PerformanceEntry",{}],["InputDeviceInfo","MediaDeviceInfo",{}],["ImageBitmapRenderingContext","Object",{}],["IdleDeadline","Object",{}],["IDBRecord","Object",{}],["HighlightRegistry","Object",{}],["HTMLSelectedContentElement","HTMLElement",{}],["HTMLOptionsCollection","HTMLCollection",{}],["HTMLMarqueeElement","HTMLElement",{}],["HTMLFrameSetElement","HTMLElement",{}],["HTMLFrameElement","HTMLElement",{}],["HTMLFormControlsCollection","HTMLCollection",{}],["HTMLAllCollection","Object",{}],["GeolocationPositionError","Object",{"PERMISSION_DENIED":1,"POSITION_UNAVAILABLE":2,"TIMEOUT":3}],["GeolocationPosition","Object",{}],["GeolocationCoordinates","Object",{}],["GamepadHapticActuator","Object",{}],["GamepadButton","Object",{}],["Gamepad","Object",{}],["External","Object",{}],["EventCounts","Object",{}],["DelegatedInkTrailPresenter","Object",{}],["DataTransferItemList","Object",{}],["DataTransferItem","Object",{}],["DOMImplementation","Object",{}],["CustomStateSet","Object",{}],["CanvasPattern","Object",{}],["CanvasGradient","Object",{}],["CanvasCaptureMediaStreamTrack","MediaStreamTrack",{}],["CSSViewTransitionRule","CSSRule",{}],["CSSTransition","Animation",{}],["CSSTransformComponent","Object",{}],["CSSStyleValue","Object",{}],["CSSStartingStyleRule","CSSGroupingRule",{}],["CSSScopeRule","CSSGroupingRule",{}],["CSSPropertyRule","CSSRule",{}],["CSSPositionTryRule","CSSRule",{}],["CSSPositionTryDescriptors","CSSStyleDeclaration",{}],["CSSPageRule","CSSGroupingRule",{}],["CSSNumericValue","CSSStyleValue",{}],["CSSNumericArray","Object",{}],["CSSNestedDeclarations","CSSRule",{}],["CSSNamespaceRule","CSSRule",{}],["CSSMathValue","CSSNumericValue",{}],["CSSMarginRule","CSSRule",{}],["CSSLayerStatementRule","CSSRule",{}],["CSSLayerBlockRule","CSSGroupingRule",{}],["CSSKeyframesRule","CSSRule",{}],["CSSKeyframeRule","CSSRule",{}],["CSSImportRule","CSSRule",{}],["CSSImageValue","CSSStyleValue",{}],["CSSFontPaletteValuesRule","CSSRule",{}],["CSSFontFaceRule","CSSRule",{}],["CSSCounterStyleRule","CSSRule",{}],["CSSContainerRule","CSSConditionRule",{}],["CSPViolationReportBody","ReportBody",{}],["BrowserCaptureMediaStreamTrack","MediaStreamTrack",{}],["BaseAudioContext","EventTarget",{}],["BarProp","Object",{}],["AudioSinkInfo","Object",{}],["AudioScheduledSourceNode","AudioNode",{}],["AudioParamMap","Object",{}],["AudioParam","Object",{}],["AudioNode","EventTarget",{}],["AudioListener","Object",{}],["AudioDestinationNode","AudioNode",{}],["AnimationTimeline","Object",{}],["AnimationEffect","Object",{}],["AbstractRange","Object",{}],["AudioWorklet","Worklet",{}],["BatteryManager","EventTarget",{}],["Cache","Object",{}],["CacheStorage","Object",{}],["CookieStore","EventTarget",{}],["CookieStoreManager","Object",{}],["CreateMonitor","EventTarget",{}],["Credential","Object",{}],["DeviceMotionEventAcceleration","Object",{}],["DeviceMotionEventRotationRate","Object",{}],["GPUAdapter","Object",{}],["GPUAdapterInfo","Object",{}],["GPUBindGroup","Object",{}],["GPUBindGroupLayout","Object",{}],["GPUBuffer","Object",{}],["GPUCanvasContext","Object",{}],["GPUCommandBuffer","Object",{}],["GPUCommandEncoder","Object",{}],["GPUCompilationInfo","Object",{}],["GPUCompilationMessage","Object",{}],["GPUComputePassEncoder","Object",{}],["GPUComputePipeline","Object",{}],["GPUDevice","EventTarget",{}],["GPUDeviceLostInfo","Object",{}],["GPUError","Object",{}],["GPUExternalTexture","Object",{}],["GPUPipelineLayout","Object",{}],["GPUQuerySet","Object",{}],["GPUQueue","Object",{}],["GPURenderBundle","Object",{}],["GPURenderBundleEncoder","Object",{}],["GPURenderPassEncoder","Object",{}],["GPURenderPipeline","Object",{}],["GPUSampler","Object",{}],["GPUShaderModule","Object",{}],["GPUSupportedFeatures","Object",{}],["GPUSupportedLimits","Object",{}],["GPUTexture","Object",{}],["GPUTextureView","Object",{}],["ImageTrack","Object",{}],["ImageTrackList","Object",{}],["KeyboardLayoutMap","Object",{}],["MIDIAccess","EventTarget",{}],["MIDIInput","MIDIPort",{}],["MIDIInputMap","Object",{}],["MIDIOutput","MIDIPort",{}],["MIDIOutputMap","Object",{}],["MIDIPort","EventTarget",{}],["MediaDeviceInfo","Object",{}],["NavigationPreloadManager","Object",{}],["OrientationSensor","Sensor",{}],["ProtectedAudience","Object",{}],["ScreenDetailed","Screen",{}],["ScreenDetails","EventTarget",{}],["Sensor","EventTarget",{}],["ServiceWorkerRegistration","EventTarget",{}],["WGSLLanguageFeatures","Object",{}],["WebTransportBidirectionalStream","Object",{}],["WebTransportDatagramDuplexStream","Object",{}],["Worklet","Object",{}],["XRDOMOverlayState","Object",{}],["XRLayer","EventTarget",{}],["AudioPlaybackStats","Object",{}],["AuthenticatorAssertionResponse","AuthenticatorResponse",{}],["AuthenticatorAttestationResponse","AuthenticatorResponse",{}],["AuthenticatorResponse","Object",{}],["PublicKeyCredential","Credential",{}],["CrashReportContext","Object",{}],["DigitalCredential","Credential",{}],["DocumentPictureInPicture","EventTarget",{}],["FetchLaterResult","Object",{}],["FileSystemDirectoryHandle","FileSystemHandle",{}],["FileSystemFileHandle","FileSystemHandle",{}],["FileSystemHandle","Object",{}],["FileSystemWritableFileStream","WritableStream",{}],["FontData","Object",{}],["FragmentDirective","Object",{}],["HIDDevice","EventTarget",{}],["HIDInputReportEvent","Event",{}],["IdentityCredential","Credential",{}],["IdentityProvider","Object",{}],["LanguageDetector","Object",{}],["LanguageModel","EventTarget",{}],["Lock","Object",{}],["ServiceWorker","EventTarget",{}],["ModelContext","EventTarget",{}],["NotRestoredReasonDetails","Object",{}],["NotRestoredReasons","Object",{}],["OTPCredential","Credential",{}],["PaymentAddress","Object",{}],["PaymentResponse","EventTarget",{}],["PaymentManager","Object",{}],["PresentationAvailability","EventTarget",{}],["PresentationConnection","EventTarget",{}],["PresentationConnectionList","EventTarget",{}],["PresentationReceiver","Object",{}],["PressureRecord","Object",{}],["SerialPort","EventTarget",{}],["StorageBucket","Object",{}],["Summarizer","Object",{}],["Translator","Object",{}],["USBDevice","Object",{}],["WakeLockSentinel","EventTarget",{}],["XRAnchor","Object",{}],["XRAnchorSet","Object",{}],["XRBoundedReferenceSpace","XRReferenceSpace",{}],["XRCPUDepthInformation","XRDepthInformation",{}],["XRCamera","Object",{}],["XRDepthInformation","Object",{}],["XRFrame","Object",{}],["XRHand","Object",{}],["XRHitTestResult","Object",{}],["XRHitTestSource","Object",{}],["XRInputSource","Object",{}],["XRInputSourceArray","Object",{}],["XRJointPose","XRPose",{}],["XRJointSpace","XRSpace",{}],["XRLightEstimate","Object",{}],["XRLightProbe","EventTarget",{}],["XRPose","Object",{}],["XRReferenceSpace","XRSpace",{}],["XRRenderState","Object",{}],["XRSession","EventTarget",{}],["XRSpace","EventTarget",{}],["XRTransientInputHitTestResult","Object",{}],["XRTransientInputHitTestSource","Object",{}],["XRView","Object",{}],["XRViewerPose","XRPose",{}],["XRViewport","Object",{}],["XRWebGLDepthInformation","XRDepthInformation",{}],["XRCompositionLayer","XRLayer",{}],["XRProjectionLayer","XRCompositionLayer",{}],["XRCubeLayer","XRCompositionLayer",{}],["XRCylinderLayer","XRCompositionLayer",{}],["XREquirectLayer","XRCompositionLayer",{}],["XRQuadLayer","XRCompositionLayer",{}],["XRSubImage","Object",{}],["XRWebGLSubImage","XRSubImage",{}],["XRPlane","Object",{}],["XRPlaneSet","Object",{}],["AnimationTrigger","Object",{}],["BackgroundFetchManager","Object",{}],["BackgroundFetchRecord","Object",{}],["BackgroundFetchRegistration","EventTarget",{}],["CSSFontFeatureValuesRule","CSSRule",{}],["CSSFunctionDeclarations","CSSRule",{}],["CSSFunctionDescriptors","CSSStyleDeclaration",{}],["CSSFunctionRule","CSSGroupingRule",{}],["CSSPseudoElement","Object",{}],["ChapterInformation","Object",{}],["CropTarget","Object",{}],["Fence","Object",{}],["FencedFrameConfig","Object",{}],["HTMLFencedFrameElement","HTMLElement",{}],["HTMLCameraElement","HTMLElement",{}],["HTMLMicrophoneElement","HTMLElement",{}],["HTMLGeolocationElement","HTMLElement",{}],["HTMLUserMediaElement","HTMLElement",{}],["IntegrityViolationReportBody","ReportBody",{}],["InteractionContentfulPaint","PerformanceEntry",{}],["PerformanceSoftNavigation","PerformanceEntry",{}],["LaunchParams","Object",{}],["LaunchQueue","Object",{}],["NodeRange","AbstractRange",{}],["OpaqueRange","AbstractRange",{}],["PerformanceLongAnimationFrameTiming","PerformanceEntry",{}],["PerformanceScriptTiming","PerformanceEntry",{}],["RTCDataChannel","EventTarget",{}],["PeriodicSyncManager","Object",{}],["PushManager","Object",{}],["PushSubscription","Object",{}],["PushSubscriptionOptions","Object",{}],["RemotePlayback","EventTarget",{}],["RestrictionTarget","Object",{}],["SnapEvent","Event",{}],["SpeechSynthesis","EventTarget",{}],["SpeechSynthesisVoice","Object",{}],["TimelineTriggerRange","Object",{}],["TimelineTriggerRangeList","Object",{}],["Viewport","Object",{}]]');
+  const pending = new Map(list.filter((entry) => !usable.has(entry[0])).map((entry) => [entry[0], entry]));
+  const define = (name) => {
+    const entry = pending.get(name);
+    if (!entry) return;
+    pending.delete(name);
+    const [, parentName, consts] = entry;
+    if (Object.prototype.hasOwnProperty.call(globalThis, name)) return;
+    if (pending.has(parentName)) define(parentName);
+    const Parent = parentName && parentName !== 'Object' ? globalThis[parentName] : null;
+    const Ctor = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+    const proto = Object.create(Parent && Parent.prototype ? Parent.prototype : Object.prototype);
+    Object.defineProperty(proto, 'constructor', { value: Ctor, writable: true, enumerable: false, configurable: true });
+    Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
+    Object.defineProperty(Ctor, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+    if (Parent) Object.setPrototypeOf(Ctor, Parent);
+    for (const [key, value] of Object.entries(consts)) {
+      const d = { value, writable: false, enumerable: true, configurable: false };
+      Object.defineProperty(Ctor, key, d);
+      Object.defineProperty(proto, key, d);
+    }
+    _markNative(Ctor);
+    Object.defineProperty(globalThis, name, { value: Ctor, writable: true, enumerable: false, configurable: true });
+  };
+  for (const name of Array.from(pending.keys())) define(name);
+})();
+
+// Window members Chrome has as own properties of the global object.
+(function _windowMembers() {
+  const define = (name, desc) => {
+    if (Object.prototype.hasOwnProperty.call(globalThis, name)) return;
+    if (desc.get) _markNativeAs(desc.get, 'function get ' + name + '() { [native code] }');
+    if (desc.set) _markNativeAs(desc.set, 'function set ' + name + '() { [native code] }');
+    if (typeof desc.value === 'function') {
+      Object.defineProperty(desc.value, 'name', { value: name, configurable: true });
+      _markNative(desc.value);
+    }
+    Object.defineProperty(globalThis, name, Object.assign({ enumerable: true, configurable: true }, desc));
+  };
+  const slot = (initial) => {
+    let value = initial;
+    return { get() { return value; }, set(v) { value = v; } };
+  };
+  let windowName = '';
+  define('name', { get() { return windowName; }, set(v) { windowName = String(v); } });
+  define('status', slot(''));
+  define('closed', { get() { return false; } });
+  define('origin', { get() { try { return new URL(globalThis.location.href).origin; } catch (_e) { return 'null'; } } });
+  define('isSecureContext', { get() {
+    try {
+      const url = new URL(globalThis.location.href);
+      return url.protocol === 'https:' || url.protocol === 'file:' || url.protocol === 'wss:'
+        || /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)
+        || url.hostname.endsWith('.localhost')
+        || (url.protocol === 'about:' && !!(globalThis.parent && globalThis.parent !== globalThis));
+    } catch (_e) { return false; }
+  } });
+  define('crossOriginIsolated', { get() { return false; } });
+  define('originAgentCluster', { get() { return false; } });
+  define('credentialless', { get() { return false; } });
+  define('offscreenBuffering', { get() { return true; } });
+  define('event', { get() { return undefined; }, set() {} });
+  define('clientInformation', { get() { return globalThis.navigator; } });
+  const BarProp = globalThis.BarProp;
+  for (const bar of ['locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar']) {
+    const value = Object.create(BarProp ? BarProp.prototype : Object.prototype);
+    define(bar, { get() { return value; } });
+  }
+  if (BarProp && !Object.getOwnPropertyDescriptor(BarProp.prototype, 'visible')) {
+    Object.defineProperty(BarProp.prototype, 'visible', {
+      get: _markNativeAs({ get visible() { return true; } }.__lookupGetter__('visible'), 'function get visible() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+  }
+  const External = globalThis.External;
+  const external = Object.create(External ? External.prototype : Object.prototype);
+  if (External) {
+    for (const op of ['AddSearchProvider', 'IsSearchProviderInstalled']) {
+      Object.defineProperty(External.prototype, op, { value: _markNative({ [op]() { return undefined; } }[op]), writable: true, enumerable: true, configurable: true });
+    }
+  }
+  define('external', { get() { return external; }, set() {} });
+  const styleMedia = { type: 'screen', matchMedium(query) { return globalThis.matchMedia(String(query)).matches; } };
+  _markNative(styleMedia.matchMedium);
+  define('styleMedia', { get() { return styleMedia; } });
+  for (const name of ['captureEvents', 'releaseEvents']) define(name, { value: { [name]() {} }[name], writable: true });
+  define('find', { value: { find() { return false; } }.find, writable: true });
+  for (const name of ['moveBy', 'moveTo', 'resizeBy', 'resizeTo']) define(name, { value: { [name](x, y) {} }[name], writable: true });
+  define('webkitRequestAnimationFrame', { value: { webkitRequestAnimationFrame(cb) { return globalThis.requestAnimationFrame(cb); } }.webkitRequestAnimationFrame, writable: true });
+  define('webkitCancelAnimationFrame', { value: { webkitCancelAnimationFrame(id) { return globalThis.cancelAnimationFrame(id); } }.webkitCancelAnimationFrame, writable: true });
+  define('webkitURL', { value: globalThis.URL, writable: true, enumerable: false });
+  // File and font pickers need a user gesture, which script never has.
+  const gesture = (what) => () => Promise.reject(new DOMException('Must be handling a user gesture to ' + what + '.', 'SecurityError'));
+  define('showOpenFilePicker', { value: { showOpenFilePicker() { return gesture('show a file picker')(); } }.showOpenFilePicker, writable: true });
+  define('showSaveFilePicker', { value: { showSaveFilePicker() { return gesture('show a file picker')(); } }.showSaveFilePicker, writable: true });
+  define('showDirectoryPicker', { value: { showDirectoryPicker() { return gesture('show a file picker')(); } }.showDirectoryPicker, writable: true });
+  define('queryLocalFonts', { value: { queryLocalFonts() { return Promise.reject(new DOMException('User activation is required.', 'SecurityError')); } }.queryLocalFonts, writable: true });
+  define('getScreenDetails', { value: { getScreenDetails() { return Promise.reject(new DOMException('Permission denied.', 'NotAllowedError')); } }.getScreenDetails, writable: true });
+  // Trusted Types: policies pass their callbacks' results through, as a
+  // page with no enforced CSP sees.
+  const TrustedTypePolicyFactory = globalThis.TrustedTypePolicyFactory;
+  const TrustedTypePolicy = globalThis.TrustedTypePolicy;
+  if (TrustedTypePolicyFactory && TrustedTypePolicy) {
+    const policies = new WeakMap();
+    const factory = Object.create(TrustedTypePolicyFactory.prototype);
+    const op = (proto, name, fn) => Object.defineProperty(proto, name, { value: _markNative({ [name]: fn }[name]), writable: true, enumerable: true, configurable: true });
+    const make = (kind) => function (input, ...args) {
+      const rules = policies.get(this);
+      if (!rules) throw new TypeError('Illegal invocation');
+      const fn = rules[kind];
+      if (typeof fn !== 'function') throw new TypeError("Failed to execute '" + kind + "' on 'TrustedTypePolicy': Policy " + rules.name + "'s TrustedTypePolicyOptions did not specify a '" + kind + "' member.");
+      const out = fn(input, ...args);
+      return out === undefined || out === null ? '' : String(out);
+    };
+    op(TrustedTypePolicy.prototype, 'createHTML', make('createHTML'));
+    op(TrustedTypePolicy.prototype, 'createScript', make('createScript'));
+    op(TrustedTypePolicy.prototype, 'createScriptURL', make('createScriptURL'));
+    Object.defineProperty(TrustedTypePolicy.prototype, 'name', {
+      get: _markNativeAs({ get name() { const r = policies.get(this); if (!r) throw new TypeError('Illegal invocation'); return r.name; } }.__lookupGetter__('name'), 'function get name() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+    let defaultPolicy = null;
+    op(TrustedTypePolicyFactory.prototype, 'createPolicy', function (name, options) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'createPolicy' on 'TrustedTypePolicyFactory': 1 argument required, but only 0 present.");
+      const policy = Object.create(TrustedTypePolicy.prototype);
+      const o = options || {};
+      policies.set(policy, { name: String(name), createHTML: o.createHTML, createScript: o.createScript, createScriptURL: o.createScriptURL });
+      if (String(name) === 'default') defaultPolicy = policy;
+      return policy;
+    });
+    op(TrustedTypePolicyFactory.prototype, 'isHTML', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'isScript', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'isScriptURL', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'getAttributeType', () => null);
+    op(TrustedTypePolicyFactory.prototype, 'getPropertyType', () => null);
+    for (const [key, value] of [['emptyHTML', ''], ['emptyScript', ''], ['defaultPolicy', null]]) {
+      Object.defineProperty(TrustedTypePolicyFactory.prototype, key, {
+        get: _markNativeAs({ get [key]() { return key === 'defaultPolicy' ? defaultPolicy : value; } }.__lookupGetter__(key), 'function get ' + key + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      });
+    }
+    define('trustedTypes', { get() { return factory; } });
+  }
+  // Event handler attributes of Window that had no slot here.
+  const handlers = ['search', 'appinstalled', 'beforeinstallprompt', 'beforeinput', 'beforematch', 'beforetoggle',
+    'command', 'contentvisibilityautostatechange', 'contextlost', 'contextrestored', 'mousewheel', 'scrollend',
+    'securitypolicyviolation', 'slotchange', 'webkitanimationend', 'webkitanimationiteration', 'webkitanimationstart',
+    'webkittransitionend', 'auxclick', 'selectstart', 'selectionchange', 'animationcancel', 'animationend',
+    'animationiteration', 'animationstart', 'transitionrun', 'transitionstart', 'transitionend', 'transitioncancel',
+    'beforexrselect', 'afterprint', 'messageerror', 'devicemotion', 'deviceorientation', 'deviceorientationabsolute',
+    'pointerrawupdate', 'pageswap', 'pagereveal', 'scrollsnapchange', 'scrollsnapchanging', 'gamepadconnected',
+    'gamepaddisconnected'];
+  for (const type of handlers) {
+    let current = null, listener = null;
+    define('on' + type, {
+      get() { return current; },
+      set(value) {
+        if (listener) globalThis.removeEventListener(type, listener);
+        current = typeof value === 'function' || (value !== null && typeof value === 'object') ? value : null;
+        listener = typeof current === 'function' ? function (event) { return current.call(this, event); } : null;
+        if (listener) globalThis.addEventListener(type, listener);
+      },
+    });
+  }
+})();
+
+// A function written in this file, as opposed to a V8 builtin. Classes are
+// left alone: they are constructors, as interface objects are.
+function _isScriptFunction(fn) {
+  if (typeof fn !== 'function') return false;
+  const source = _origToString.call(fn);
+  return !/\{\s*\[native code\]\s*\}$/.test(source) && !/^class\b/.test(source);
+}
+// Web IDL operations and attribute accessors are not constructors, have no
+// `prototype`, own only `length` and `name`, and an accessor called on the
+// interface prototype itself throws "Illegal invocation". A plain `function`
+// written here is a constructor with a `prototype`, so fingerprinting
+// scripts (`new fn()`, `class extends fn`, `'prototype' in fn`) tell it from
+// a browser's. Each such member is replaced by a method or accessor of the
+// same name and length that forwards to it.
+function _nativizeMember(proto, key, d) {
+  const out = { enumerable: d.enumerable, configurable: d.configurable };
+  if ('value' in d) {
+    const fn = d.value;
+    if (!_isScriptFunction(fn) || !Object.prototype.hasOwnProperty.call(fn, 'prototype')) return d;
+    const wrapper = { [key](...args) { return Reflect.apply(fn, this, args); } }[key];
+    Object.defineProperty(wrapper, 'length', { value: fn.length, configurable: true });
+    out.value = wrapper;
+    out.writable = d.writable;
+  } else {
+    const get = d.get, set = d.set;
+    out.get = get && ({ get [key]() {
+      if (this === proto) throw new TypeError('Illegal invocation');
+      return Reflect.apply(get, this, []);
+    } }).__lookupGetter__(key);
+    out.set = set && ({ set [key](value) {
+      if (this === proto) throw new TypeError('Illegal invocation');
+      Reflect.apply(set, this, [value]);
+    } }).__lookupSetter__(key);
+  }
+  try { Object.defineProperty(proto, key, out); } catch (_e) { return d; }
+  return out;
+}
+
 (function _markBuiltinsNative() {
   var seen = new Set();
   function walk(ctor) {
@@ -21011,12 +22839,26 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
       var d;
       try { d = Object.getOwnPropertyDescriptor(proto, key); } catch (e) { continue; }
       if (!d) { continue; }
+      if (key !== 'constructor' && (_isScriptFunction(d.value) || _isScriptFunction(d.get) || _isScriptFunction(d.set))) {
+        d = _nativizeMember(proto, key, d);
+      }
       if (typeof d.value === 'function') { _markNative(d.value); }
       if (typeof d.get === 'function') { _markNativeAs(d.get, 'function get ' + key + '() { [native code] }'); }
       if (typeof d.set === 'function') { _markNativeAs(d.set, 'function set ' + key + '() { [native code] }'); }
     }
   }
   var names = Object.getOwnPropertyNames(globalThis);
+  // Window operations (fetch, postMessage, atob, ...) live on the global
+  // object itself and must look like operations too.
+  for (var gi = 0; gi < names.length; gi++) {
+    var gname = names[gi];
+    if (!/^[a-z]/.test(gname) || /^webkit/.test(gname) || gname === 'constructor') { continue; }
+    var gd = Object.getOwnPropertyDescriptor(globalThis, gname);
+    if (gd && typeof gd.value === 'function' && _isScriptFunction(gd.value)
+        && Object.prototype.hasOwnProperty.call(gd.value, 'prototype')) {
+      _markNative(_nativizeMember(globalThis, gname, gd).value);
+    }
+  }
   for (var i = 0; i < names.length; i++) {
     var name = names[i];
     if (!/^[A-Z]/.test(name)) { continue; }

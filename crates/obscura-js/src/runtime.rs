@@ -708,6 +708,12 @@ impl ObscuraJsRuntime {
                 op_state.put(Rc::new(RefCell::new(crate::ops::RealmStates::default())));
             }
 
+            // Replaces deno_core's callback, which ours delegates to after
+            // dropping engine frames from the stack.
+            runtime
+                .v8_isolate()
+                .set_prepare_stack_trace_callback(crate::stack::prepare_stack_trace_callback);
+
             let isolate_handle = runtime.v8_isolate().thread_safe_handle();
             let heap_limit_state = std::sync::Arc::new(HeapLimitState::default());
             install_heap_limit_guard(
@@ -6995,9 +7001,11 @@ mod tests {
             rt.evaluate("__workerReplies").unwrap(),
             serde_json::json!(["started"])
         );
+        // The worker's onerror gets an ErrorEvent whose message is Chrome's
+        // "Uncaught <name>: <message>" text.
         assert_eq!(
             rt.evaluate("__workerErrors").unwrap(),
-            serde_json::json!(["initialization failed"])
+            serde_json::json!(["Uncaught Error: initialization failed"])
         );
         rt.execute_script(
             "worker-cleanup",
@@ -16246,7 +16254,7 @@ mod tests {
         // a 2x devicePixelContentBoxSize surface.
         rt.execute_script(
             "deterministic-high-resolution-screen",
-            "Date.now = () => 0; Math.random = () => 2 / 0xFFFFFFFF;",
+            "globalThis.__obscura_fp_seed = 2;",
         )
         .unwrap();
         rt.run_page_init();

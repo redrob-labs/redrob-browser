@@ -6173,6 +6173,11 @@ pub(crate) fn parse_color(value: &str) -> Option<[u8; 4]> {
     parse_color_for_scheme(value, false)
 }
 
+/// [`parse_color`] for callers outside the renderer (canvas fill styles).
+pub fn parse_css_color(value: &str) -> Option<[u8; 4]> {
+    parse_color(value)
+}
+
 fn parse_color_for_scheme(value: &str, dark_scheme: bool) -> Option<[u8; 4]> {
     let raw = value.trim();
     // CSS Color 5 `light-dark(light, dark)` selects by the used color scheme.

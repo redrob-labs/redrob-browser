@@ -1120,6 +1120,274 @@ fn op_fetch_cancel_handle(state: &mut OpState) -> u32 {
         .add(FetchCancelResource(CancelHandle::new_rc()))
 }
 
+/// Runs a classic script the way a `<script>` element does: compiled as its
+/// own script whose origin is `name` (the script URL, or empty for inline
+/// code), in the realm whose code is calling.
+///
+/// Indirect `eval` would run the same code, but every stack trace taken
+/// inside it then reads `eval at execute (<obscura:bootstrap>...)`, which
+/// names the engine to any page that inspects `Error.stack`.
+///
+/// Returns `undefined` on success. A thrown value comes back wrapped as
+/// `{ error }` so the caller can rethrow it from its own `catch` path.
+#[op2]
+fn op_run_classic_script<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    #[string] source: &str,
+    #[string] name: &str,
+) -> v8::Local<'s, v8::Value> {
+    let entered = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let context = v8::Local::new(scope, &entered);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    let (Some(code), Some(resource)) =
+        (v8::String::new(scope, source), v8::String::new(scope, name))
+    else {
+        return undefined;
+    };
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        resource.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    v8::tc_scope!(let tc, scope);
+    let ran = v8::Script::compile(tc, code, Some(&origin)).and_then(|script| script.run(tc));
+    if ran.is_some() {
+        return undefined;
+    }
+    if tc.has_terminated() || tc.is_execution_terminating() {
+        tc.rethrow();
+        return undefined;
+    }
+    let Some(exception) = tc.exception() else {
+        return undefined;
+    };
+    let wrapper = v8::Object::new(tc);
+    if let Some(key) = v8::String::new(tc, "error") {
+        wrapper.set(tc, key.into(), exception);
+    }
+    wrapper.into()
+}
+
+/// `performance.now()` for the realm's document: monotonic milliseconds since
+/// its time origin, coarsened to Chrome's 100 microseconds. A millisecond
+/// clock (the old `Date.now()` difference) is itself a tell: challenge scripts
+/// measure the smallest step between two readings.
+#[op2(fast)]
+fn op_performance_now(state: &OpState, frame_id: u32) -> f64 {
+    let shared = frame_state(state, frame_id);
+    let micros = shared
+        .borrow()
+        .navigation_timing
+        .origin
+        .elapsed()
+        .as_micros();
+    (micros / 100) as f64 / 10.0
+}
+
+/// `navigator.hardwareConcurrency` and `navigator.deviceMemory` of the
+/// machine the engine runs on, as `[cores, gibibytes]` (0 when unknown).
+/// Chrome reports the real logical core count and the physical memory
+/// rounded to a power of two; a random pick from a list contradicts the
+/// worker, WebGL and timing surfaces that also reflect the real machine.
+#[op2]
+#[serde]
+fn op_host_hardware() -> (u32, f64) {
+    host_hardware()
+}
+
+fn host_hardware() -> (u32, f64) {
+    static HOST: std::sync::OnceLock<(u32, f64)> = std::sync::OnceLock::new();
+    *HOST.get_or_init(|| {
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(0);
+        let gib = host_memory_bytes().map_or(0.0, |bytes| bytes as f64 / (1u64 << 30) as f64);
+        (cores, gib)
+    })
+}
+
+/// A per-machine seed for the values the engine has to pick rather than
+/// measure (canvas text glyphs, screen and GPU from a pool). A browser gives
+/// the same answers on every page, frame and run on one machine; a seed drawn
+/// per page made each frame and each reload a different "device".
+#[op2(fast)]
+fn op_fingerprint_seed() -> u32 {
+    static SEED: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *SEED.get_or_init(|| {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            if let Ok(id) = std::fs::read_to_string(path) {
+                hasher.update(id.trim().as_bytes());
+                break;
+            }
+        }
+        for var in ["COMPUTERNAME", "HOSTNAME", "USER", "USERNAME"] {
+            if let Ok(value) = std::env::var(var) {
+                hasher.update(value.as_bytes());
+            }
+        }
+        let (cores, gib) = host_hardware();
+        hasher.update(cores.to_le_bytes());
+        hasher.update(gib.to_le_bytes());
+        let digest = hasher.finalize();
+        u32::from_le_bytes([digest[0], digest[1], digest[2], digest[3]])
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn host_memory_bytes() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
+}
+
+#[cfg(target_os = "macos")]
+fn host_memory_bytes() -> Option<u64> {
+    unsafe extern "C" {
+        fn sysctlbyname(
+            name: *const std::ffi::c_char,
+            oldp: *mut std::ffi::c_void,
+            oldlenp: *mut usize,
+            newp: *mut std::ffi::c_void,
+            newlen: usize,
+        ) -> std::ffi::c_int;
+    }
+    let mut bytes: u64 = 0;
+    let mut len = std::mem::size_of::<u64>();
+    // SAFETY: hw.memsize is a u64; `bytes` and `len` describe that buffer.
+    let status = unsafe {
+        sysctlbyname(
+            c"hw.memsize".as_ptr(),
+            (&mut bytes as *mut u64).cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (status == 0 && bytes > 0).then_some(bytes)
+}
+
+#[cfg(target_os = "windows")]
+fn host_memory_bytes() -> Option<u64> {
+    #[repr(C)]
+    struct MemoryStatusEx {
+        length: u32,
+        memory_load: u32,
+        total_phys: u64,
+        avail_phys: u64,
+        total_page_file: u64,
+        avail_page_file: u64,
+        total_virtual: u64,
+        avail_virtual: u64,
+        avail_extended_virtual: u64,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GlobalMemoryStatusEx(buffer: *mut MemoryStatusEx) -> i32;
+    }
+    let mut status = MemoryStatusEx {
+        length: std::mem::size_of::<MemoryStatusEx>() as u32,
+        memory_load: 0,
+        total_phys: 0,
+        avail_phys: 0,
+        total_page_file: 0,
+        avail_page_file: 0,
+        total_virtual: 0,
+        avail_virtual: 0,
+        avail_extended_virtual: 0,
+    };
+    // SAFETY: `status` is a MEMORYSTATUSEX with its length field set.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
+    (ok != 0 && status.total_phys > 0).then_some(status.total_phys)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn host_memory_bytes() -> Option<u64> {
+    None
+}
+
+fn native_source_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "obscura.nativeSource")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+/// Records the `Function.prototype.toString` text of an engine function on
+/// the function itself, under a private key no script can see. Every realm
+/// (page, frames) shares the isolate's private keys, so a frame's
+/// `Function.prototype.toString.call(parentFunction)` answers the same
+/// `[native code]` text the page's does. A per-realm registry answered
+/// with the source code, which CreepJS reads through a nested iframe.
+#[op2(fast)]
+fn op_mark_native<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    function: v8::Local<'s, v8::Value>,
+    #[string] text: String,
+) {
+    let Ok(object) = function.try_cast::<v8::Object>() else {
+        return;
+    };
+    let (Some(key), Some(value)) = (native_source_key(scope), v8::String::new(scope, &text)) else {
+        return;
+    };
+    object.set_private(scope, key, value.into());
+}
+
+/// The text `op_mark_native` recorded for `function`, or undefined.
+#[op2]
+fn op_native_source<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    function: v8::Local<'s, v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    if function.is_proxy() {
+        return undefined;
+    }
+    let Ok(object) = function.try_cast::<v8::Object>() else {
+        return undefined;
+    };
+    let Some(key) = native_source_key(scope) else {
+        return undefined;
+    };
+    match object.get_private(scope, key) {
+        Some(value) if value.is_string() => value,
+        _ => undefined,
+    }
+}
+
+/// What kind of value console formatting is looking at, answered by V8
+/// without running page code: `"proxy"`, `"error"`, `"array"` or `""`.
+///
+/// Chrome builds console messages without calling getters, `toString` or
+/// proxy traps, and pages detect a console that does (a `stack` getter on an
+/// Error passed to `console.debug` fires only under an inspecting client).
+/// `instanceof` and `Array.isArray` consult the prototype chain, which a
+/// proxy can trap, so the question goes to V8.
+#[op2]
+#[string]
+fn op_console_value_kind(value: v8::Local<v8::Value>) -> String {
+    if value.is_proxy() {
+        "proxy"
+    } else if value.is_native_error() {
+        "error"
+    } else if value.is_array() {
+        "array"
+    } else {
+        ""
+    }
+    .to_string()
+}
+
 // Private signal state survives realm crossings without public prototype
 // forgeries or a native Global handle that would keep dead signals alive.
 #[op2]
@@ -2103,8 +2371,8 @@ fn fragment_context_and_html(arg: &str) -> (html5ever::QualName, &str) {
 }
 
 #[op2(fast)]
-fn op_script_mark_started(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_script_mark_started(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return false;
@@ -2120,8 +2388,8 @@ fn op_script_mark_started(state: &OpState, nid: u32) -> bool {
 /// Atomically claim an executable script.  A false result means the node was
 /// created inert by an HTML-string API or has already been prepared once.
 #[op2(fast)]
-fn op_script_try_start(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_script_try_start(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return false;
@@ -2138,13 +2406,13 @@ fn op_script_try_start(state: &OpState, nid: u32) -> bool {
 /// tree. Layout intentionally remains unaware of the detached root until
 /// scoped style, slot assignment, and composed-tree paint are implemented.
 #[op2(fast)]
-fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String) -> i32 {
+fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String, frame_id: u32) -> i32 {
     let mode = match mode.as_str() {
         "open" => ShadowRootMode::Open,
         "closed" => ShadowRootMode::Closed,
         _ => return -1,
     };
-    let shared = state.borrow::<SharedState>().clone();
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return -1;
@@ -2161,8 +2429,8 @@ fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String) -> i
 /// visibility in bootstrap.js.
 #[op2]
 #[string]
-fn op_shadow_root_info(state: &OpState, host_nid: u32) -> String {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_shadow_root_info(state: &OpState, host_nid: u32, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return String::new();
@@ -6733,6 +7001,68 @@ mod tests {
     }
 }
 
+/// Fetches a worker's `importScripts()` dependency and blocks until it lands.
+///
+/// `importScripts` is synchronous by definition: the next statement of the
+/// worker may use what the imported script defined. Workers run on the page's
+/// own thread here, so the request runs on a short-lived thread with its own
+/// reactor while this one waits, the way a real worker thread blocks.
+///
+/// Returns `{"ok":true,"url":..,"body":..}` or `{"ok":false,"error":..}`.
+#[op2]
+#[string]
+fn op_fetch_script_sync(state: &OpState, #[string] url: String, frame_id: u32) -> String {
+    let fail = |error: String| serde_json::json!({ "ok": false, "error": error }).to_string();
+    let shared = frame_state(state, frame_id);
+    let (client, initiator) = {
+        let gs = shared.borrow();
+        (gs.http_client.clone(), gs.url.clone())
+    };
+    let Some(client) = client else {
+        return fail("no network".to_string());
+    };
+    let parsed = match url::Url::parse(&url) {
+        Ok(parsed) => parsed,
+        Err(error) => return fail(error.to_string()),
+    };
+    if let Err(reason) = validate_fetch_url(&parsed, client.allow_private_network) {
+        return fail(reason);
+    }
+    let initiator = url::Url::parse(&initiator).unwrap_or_else(|_| parsed.clone());
+    let request =
+        obscura_net::ResourceRequest::subresource(obscura_net::ResourceType::Script, &initiator);
+    let fetched = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                runtime.block_on(async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        client.fetch_resource_with_callbacks(&parsed, request, None),
+                    )
+                    .await
+                    .map_err(|_| "timed out".to_string())?
+                    .map_err(|error| error.to_string())
+                })
+            })
+            .join()
+            .unwrap_or_else(|_| Err("fetch thread panicked".to_string()))
+    });
+    match fetched {
+        Ok(response) if (200..300).contains(&response.status) => serde_json::json!({
+            "ok": true,
+            "url": response.url.to_string(),
+            "body": response.text(),
+        })
+        .to_string(),
+        Ok(response) => fail(format!("HTTP {}", response.status)),
+        Err(error) => fail(error),
+    }
+}
+
 fn validate_fetch_url(url: &url::Url, allow_private_network: bool) -> Result<(), String> {
     let scheme = url.scheme();
     // file:// is denied by default here, matching Page.navigate /
@@ -8204,6 +8534,7 @@ fn op_canvas_register_surface(
     width: u32,
     height: u32,
     #[buffer] pixels: JsBuffer,
+    frame_id: u32,
 ) -> bool {
     const MAX_CANVAS_DIMENSION: u32 = 32_767;
     const MAX_CANVAS_PIXELS: usize = 67_108_864;
@@ -8222,7 +8553,7 @@ fn op_canvas_register_surface(
         return false;
     }
 
-    let shared = state.borrow::<SharedState>().clone();
+    let shared = frame_state(state, frame_id);
     let mut state = shared.borrow_mut();
     let node = NodeId::new(nid);
     let is_canvas = state
@@ -8267,8 +8598,8 @@ fn op_canvas_register_surface(
 /// screencast/readiness without throwing away otherwise-valid layout.
 #[cfg(feature = "render")]
 #[op2(fast)]
-fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_canvas_paint_damage(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let mut state = shared.borrow_mut();
     let node = NodeId::new(nid);
     if !state.canvas_surfaces.contains_key(&node) {
@@ -8306,6 +8637,14 @@ pub fn build_extension() -> Extension {
         op_fetch_url(),
         op_fetch_cancel_handle(),
         op_abort_signal_state(),
+        op_run_classic_script(),
+        op_console_value_kind(),
+        op_performance_now(),
+        op_host_hardware(),
+        op_mark_native(),
+        op_native_source(),
+        op_fingerprint_seed(),
+        op_fetch_script_sync(),
         op_fetch_body(),
         op_get_cookies(),
         op_set_cookie(),
@@ -8372,6 +8711,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
         ops.push(op_css_supports());
+        ops.push(op_parse_css_color());
         ops.push(op_layout_metrics());
         ops.push(op_element_scroll_metrics());
         ops.push(op_element_scroll_to());
@@ -9103,8 +9443,8 @@ fn cached_image_metadata_for_node(gs: &ObscuraState, node_id: NodeId) -> String 
 #[cfg(feature = "render")]
 #[op2]
 #[string]
-fn op_image_metadata(state: &OpState, nid: u32, _cached_only: bool) -> String {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_image_metadata(state: &OpState, nid: u32, _cached_only: bool, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
     let gs = shared.borrow();
     let node_id = NodeId::new(nid);
     let is_image = gs.dom.as_ref().is_some_and(|dom| {
@@ -9189,11 +9529,8 @@ fn finish_async_image_metadata(
 #[cfg(feature = "render")]
 #[op2]
 #[string]
-async fn op_load_image_metadata(state: Rc<RefCell<OpState>>, nid: u32) -> String {
-    let shared = {
-        let state = state.borrow();
-        state.borrow::<SharedState>().clone()
-    };
+async fn op_load_image_metadata(state: Rc<RefCell<OpState>>, nid: u32, frame_id: u32) -> String {
+    let shared = frame_state(&state.borrow(), frame_id);
     let node_id = NodeId::new(nid);
     let (
         document_generation,
@@ -10160,6 +10497,16 @@ fn op_set_hovered(state: &OpState, nid: u32, frame_id: u32) {
 /// Use the renderer's declaration parser as the single feature-query source
 /// of truth. Keeping this bridge synchronous and state-free makes the common
 /// two-argument `CSS.supports()` overload a single native call.
+/// A CSS color as `[r, g, b, a]` (0-255), or null when the renderer's color
+/// parser does not accept it. Canvas fill and stroke styles use it so they
+/// take every color the page's CSS can use.
+#[cfg(feature = "render")]
+#[op2]
+#[serde]
+fn op_parse_css_color(#[string] value: &str) -> Option<[u8; 4]> {
+    obscura_render::style::parse_css_color(value)
+}
+
 #[cfg(feature = "render")]
 #[op2(fast)]
 fn op_css_supports(#[string] name: &str, #[string] value: &str) -> bool {

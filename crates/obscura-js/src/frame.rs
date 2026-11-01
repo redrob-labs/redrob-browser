@@ -125,6 +125,25 @@ impl FrameRealm {
         }
         parent.share_resources_with(&mut state);
 
+        // `location.ancestorOrigins`, nearest first. Only the parent and the
+        // top document are known here, which is exact for the usual one or
+        // two levels of embedding.
+        let mut ancestor_origins = Vec::new();
+        if parent_frame_id != 0 {
+            if let Some(creator) = realms.borrow().by_frame_id(parent_frame_id) {
+                let creator = creator.borrow();
+                ancestor_origins.push(
+                    creator
+                        .inherited_origin
+                        .clone()
+                        .unwrap_or_else(|| origin_of(&creator.url)),
+                );
+            }
+        }
+        ancestor_origins.push(parent.page_origin());
+        let ancestor_origins =
+            serde_json::to_string(&ancestor_origins).unwrap_or_else(|_| "[]".to_string());
+
         let realms = parent.realm_states();
         realms.borrow_mut().register(
             context.clone(),
@@ -149,6 +168,7 @@ impl FrameRealm {
                 &format!(
                     "globalThis.__obscura_frameId = {frame_id};\
                      globalThis.__obscura_parentFrameId = {parent_frame_id};\
+                     globalThis.__obscura_ancestorOrigins = {ancestor_origins};\
                      globalThis.__obscura_init();"
                 ),
             )
