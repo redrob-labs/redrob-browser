@@ -1905,6 +1905,15 @@ pub struct LayoutStyle {
     /// resolves against the absolute box's real containing block. Owned
     /// here for the lifetime of every layout of this style.
     pub(crate) inset_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
+    /// calc() paddings with a percentage (top/right/bottom/left), handed to
+    /// Taffy so the percentage resolves against the final containing-block
+    /// width. `padding` holds the style pass's estimate until layout syncs it.
+    pub(crate) padding_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
+    /// calc() sizes with a percentage (width, height, min/max width, min/max
+    /// height) of an absolutely positioned box, handed to Taffy so they
+    /// resolve against the real containing block (the positioned ancestor's
+    /// padding box), which the style pass cannot know.
+    pub(crate) size_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 6],
 
     /// `overflow`/-x/-y other than `visible`: clips this element's descendants
     /// to its border box during paint. This is what makes the ubiquitous
@@ -3249,6 +3258,31 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         width: dimension(style.max_width),
         height: dimension(style.max_height),
     };
+    if style.position == Some(taffy::Position::Absolute) && !style.position_fixed {
+        let calc = |index: usize| {
+            style.size_calc[index]
+                .as_ref()
+                .map(|calc| taffy::Dimension::calc(std::sync::Arc::as_ptr(calc).cast()))
+        };
+        if let Some(value) = calc(0) {
+            s.size.width = value;
+        }
+        if let Some(value) = calc(1) {
+            s.size.height = value;
+        }
+        if let Some(value) = calc(2) {
+            s.min_size.width = value;
+        }
+        if let Some(value) = calc(3) {
+            s.min_size.height = value;
+        }
+        if let Some(value) = calc(4) {
+            s.max_size.width = value;
+        }
+        if let Some(value) = calc(5) {
+            s.max_size.height = value;
+        }
+    }
     // Two definite replaced axes size independently of the preferred ratio.
     // Keep the decoded ratio in LayoutStyle for object fitting, but do not let
     // Taffy transfer min/max constraints to the other authored axis. Percentage
@@ -3366,6 +3400,19 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
 
     s.margin = rect_auto(style.margin, style.margin_auto);
     s.padding = rect_lp_percent(style.padding, style.padding_percent);
+    for (index, side) in [
+        &mut s.padding.top,
+        &mut s.padding.right,
+        &mut s.padding.bottom,
+        &mut s.padding.left,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if let Some(calc) = &style.padding_calc[index] {
+            *side = taffy::style::LengthPercentage::calc(std::sync::Arc::as_ptr(calc).cast());
+        }
+    }
     s.border = rect_lp(style.border);
     if style.ignores_used_box_sizes() {
         // Block-axis margins on an ordinary non-replaced inline neither move

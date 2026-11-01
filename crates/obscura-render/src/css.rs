@@ -5195,6 +5195,7 @@ fn set_padding_animation_value(style: &mut LayoutStyle, index: usize, value: Ani
     style.padding_percent[index] = None;
     style.padding_relative[index] = None;
     style.padding_expressions[index] = None;
+    style.padding_calc[index] = None;
     *edge_value_mut(&mut style.padding, index) = 0.0;
     match value {
         AnimatedLength::Auto | AnimatedLength::Dimension(crate::Dimension::Auto) => {}
@@ -5205,7 +5206,11 @@ fn set_padding_animation_value(style: &mut LayoutStyle, index: usize, value: Ani
             style.padding_percent[index] = Some(value)
         }
         AnimatedLength::Dimension(value) => style.padding_relative[index] = Some(value),
-        AnimatedLength::Expression(value) => style.padding_expressions[index] = Some(value),
+        AnimatedLength::Expression(value) => {
+            style.padding_calc[index] =
+                crate::style::GridCalcExpression::parse_padding(&value).map(std::sync::Arc::new);
+            style.padding_expressions[index] = Some(value);
+        }
     }
 }
 
