@@ -665,20 +665,6 @@ fn match_retained_subtree(
         (Ok(a), Ok(b)) => {
             if a != b {
                 note_taffy_miss(0);
-                if crate::prof::enabled() && std::env::var_os("OBSCURA_TAFFY_MISS_DEBUG").is_some()
-                {
-                    let (fa, fb) = (format!("{a:?}"), format!("{b:?}"));
-                    let tokens_b: HashSet<&str> = fb.split(", ").collect();
-                    let differing: Vec<&str> = fa
-                        .split(", ")
-                        .filter(|token| !tokens_b.contains(token))
-                        .take(4)
-                        .collect();
-                    eprintln!(
-                        "[timing] taffy-miss style dom={:?} new={differing:?}",
-                        id_map.get(&new).map(|id| id.index())
-                    );
-                }
                 false
             } else if taffy_style_uses_calc(a) && !calc_retained() {
                 note_taffy_miss(1);
@@ -730,10 +716,9 @@ fn match_retained_subtree(
         };
         match partner {
             Some(partner) => {
-                let child_same =
-                    match_retained_subtree(
-                        tree, child, old, partner, id_map, engine, ifc_store, fresh, equal,
-                    );
+                let child_same = match_retained_subtree(
+                    tree, child, old, partner, id_map, engine, ifc_store, fresh, equal,
+                );
                 same &= child_same && old_children.get(index) == Some(&partner);
             }
             None => {
@@ -3750,6 +3735,40 @@ fn cascade_node_style(
     ))
 }
 
+/// Flat-tree and light-tree ancestors of every fresh node. A retained
+/// element outside this set roots a subtree whose styles are all retained.
+fn fresh_style_ancestors(tree: &DomTree, fresh: &HashSet<NodeId>) -> HashSet<NodeId> {
+    // Both the flat tree (a slotted node is visited from its slot) and
+    // the light tree (an unslotted host child is visited from its host).
+    let light_parent = |node: NodeId| {
+        let parent = tree.with_node(node, |node| node.parent).flatten()?;
+        Some(
+            tree.shadow_root_info(parent)
+                .map_or(parent, |root| root.host),
+        )
+    };
+    let mut flat = HashSet::new();
+    let mut light = HashSet::new();
+    for &node in fresh {
+        let mut current = rendered_parent(tree, node);
+        while let Some(parent) = current {
+            if !flat.insert(parent) {
+                break;
+            }
+            current = rendered_parent(tree, parent);
+        }
+        let mut current = light_parent(node);
+        while let Some(parent) = current {
+            if !light.insert(parent) {
+                break;
+            }
+            current = light_parent(parent);
+        }
+    }
+    flat.extend(light);
+    flat
+}
+
 /// Compute the UA + author style for every element in preorder, maintaining
 /// `matcher`'s ancestor filter as we descend so descendant-combinator rules
 /// fast-reject correctly. Non-element nodes (text, comments) are skipped but
@@ -3778,38 +3797,8 @@ fn cascade_walk(
     inherited_cell_padding: Option<f32>,
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
+    fresh_ancestors: Option<&HashSet<NodeId>>,
 ) {
-    // Flat-tree ancestors of every fresh node. A retained element outside
-    // this set roots a subtree whose styles are all retained: nothing in it
-    // needs the cascade, so the walk does not descend into it.
-    let fresh_ancestors = fresh_styles.map(|fresh| {
-        // Both the flat tree (a slotted node is visited from its slot) and
-        // the light tree (an unslotted host child is visited from its host).
-        let light_parent = |node: NodeId| {
-            let parent = tree.with_node(node, |node| node.parent).flatten()?;
-            Some(tree.shadow_root_info(parent).map_or(parent, |root| root.host))
-        };
-        let mut flat = HashSet::new();
-        let mut light = HashSet::new();
-        for &node in fresh {
-            let mut current = rendered_parent(tree, node);
-            while let Some(parent) = current {
-                if !flat.insert(parent) {
-                    break;
-                }
-                current = rendered_parent(tree, parent);
-            }
-            let mut current = light_parent(node);
-            while let Some(parent) = current {
-                if !light.insert(parent) {
-                    break;
-                }
-                current = light_parent(parent);
-            }
-        }
-        flat.extend(light);
-        flat
-    });
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum MatcherBase {
         // Push/pop on the matcher currently on top (the caller's matcher, or
@@ -3917,7 +3906,7 @@ fn cascade_walk(
                 else {
                     continue;
                 };
-                if let (Some(fresh), Some(ancestors)) = (fresh_styles, fresh_ancestors.as_ref()) {
+                if let (Some(fresh), Some(ancestors)) = (fresh_styles, fresh_ancestors) {
                     if is_element
                         && !fresh.contains(&visit.id)
                         && !ancestors.contains(&visit.id)
@@ -6685,6 +6674,9 @@ fn layout_dom_once(
         })
         .unwrap_or(false)
     });
+    let fresh_ancestors = fresh_styles
+        .as_ref()
+        .map(|fresh| fresh_style_ancestors(tree, fresh));
     cascade_walk(
         tree,
         tree.document(),
@@ -6703,6 +6695,7 @@ fn layout_dom_once(
         None,
         false,
         fresh_styles.as_ref(),
+        fresh_ancestors.as_ref(),
     );
     resolve_css_counters(tree, &mut styles);
     let cascade_time = t1.elapsed();
@@ -7194,8 +7187,18 @@ fn layout_dom_once(
                     inh.cb_height_definite = child_cb_height_definite;
                     inh.cb_height_deferred = child_cb_height_deferred;
                 }
-                for child in style_children(tree, id).into_iter().rev() {
-                    queue.push((child, inh.clone()));
+                // A retained `display: none` subtree with no fresh style has
+                // no box and nothing left to resolve.
+                let hidden_and_clean = styles
+                    .get(&id)
+                    .is_some_and(|style| style.display == crate::Display::None)
+                    && fresh_ancestors
+                        .as_ref()
+                        .is_some_and(|ancestors| !ancestors.contains(&id));
+                if !hidden_and_clean {
+                    for child in style_children(tree, id).into_iter().rev() {
+                        queue.push((child, inh.clone()));
+                    }
                 }
                 continue;
             }
@@ -8721,15 +8724,14 @@ fn layout_dom_once(
                 &styles,
                 &ifc_items.static_positions,
             );
-            let (seeded, previous_nodes) =
-                seed_from_retained_taffy(
-                    &mut taffy_tree,
-                    taffy_root,
-                    &id_map,
-                    &engine,
-                    &mut ifc_items.ifc,
-                    fresh_styles.as_ref(),
-                );
+            let (seeded, previous_nodes) = seed_from_retained_taffy(
+                &mut taffy_tree,
+                taffy_root,
+                &id_map,
+                &engine,
+                &mut ifc_items.ifc,
+                fresh_styles.as_ref(),
+            );
             if crate::prof::enabled() {
                 eprintln!(
                     "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={} misses(style,calc,measure,children,partner)={:?}",

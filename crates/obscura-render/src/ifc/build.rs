@@ -198,7 +198,11 @@ impl IfcReuseKey {
             || self.items.len() != items.len()
             || self.quirks != tree.is_quirks()
             || self.params != *params
-            || !self.items.iter().zip(items).all(|(key, item)| key.matches(item))
+            || !self
+                .items
+                .iter()
+                .zip(items)
+                .all(|(key, item)| key.matches(item))
             || self.root_style != *root_style
             || !fonts.matches_key(&self.fonts)
         {
@@ -268,7 +272,10 @@ pub(crate) fn retain_templates(templates: Vec<IfcTemplate>, laid: Vec<Option<Box
             previous.clear();
         }
         for template in templates {
-            previous.entry(template.key.root).or_default().push(template);
+            previous
+                .entry(template.key.root)
+                .or_default()
+                .push(template);
         }
     });
     let _ = PREVIOUS_LAID.try_with(|previous| {
@@ -317,9 +324,9 @@ fn take_template(
             let mut previous = previous.borrow_mut();
             let candidates = previous.get_mut(&root)?;
             let index = candidates.iter().position(|template| {
-                template
-                    .key
-                    .matches(tree, styles, fonts, root, root_style, anonymous, items, params)
+                template.key.matches(
+                    tree, styles, fonts, root, root_style, anonymous, items, params,
+                )
             })?;
             let template = candidates.swap_remove(index);
             if candidates.is_empty() {
@@ -735,9 +742,9 @@ impl IfcStore {
             ) {
                 let mut ifc = template.ifc.clone();
                 let mut nodes = items.iter().filter_map(|item| match item {
-                    Item::Atomic { node, .. } | Item::Float { node, .. } | Item::OutOfFlow { node, .. } => {
-                        Some(*node)
-                    }
+                    Item::Atomic { node, .. }
+                    | Item::Float { node, .. }
+                    | Item::OutOfFlow { node, .. } => Some(*node),
                     _ => None,
                 });
                 for inline_box in &mut ifc.boxes {
@@ -1233,7 +1240,9 @@ impl IfcStore {
         });
 
         let key = reuse.then(|| {
-            IfcReuseKey::new(tree, styles, fonts, root, root_style, anonymous, items, &params)
+            IfcReuseKey::new(
+                tree, styles, fonts, root, root_style, anonymous, items, &params,
+            )
         });
         let index = self.ifcs.len();
         let ifc = Box::new(Ifc {

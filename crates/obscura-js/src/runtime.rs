@@ -696,6 +696,7 @@ impl ObscuraJsRuntime {
                 extensions: vec![build_extension()],
                 module_loader: Some(module_loader),
                 startup_snapshot: Some(SNAPSHOT),
+                op_metrics_factory_fn: crate::op_profile::factory(),
                 ..Default::default()
             });
 

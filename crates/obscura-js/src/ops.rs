@@ -8737,19 +8737,6 @@ fn ensure_prepared_render_with_base_url(
     }) || !state.pending_style_mutations.is_empty()
         || lazy_image_due;
     if needs_rebuild {
-        if std::env::var_os("OBSCURA_RENDER_TIMING_CALLER").is_some() {
-            let trace = std::backtrace::Backtrace::force_capture().to_string();
-            let ops: Vec<&str> = trace
-                .lines()
-                .filter_map(|line| line.trim().split(": ").nth(1))
-                .filter(|name| name.contains("::op_"))
-                .take(2)
-                .collect();
-            eprintln!(
-                "[timing] layout-caller ops={ops:?} mutations={} incompatible={incompatible} lazy={lazy_image_due}",
-                state.pending_style_mutations.len()
-            );
-        }
         if let Some(dom) = state.dom.as_ref() {
             state.animation_timeline.materialize_start_candidates(dom);
         }
@@ -9789,6 +9776,7 @@ fn op_resize_observer_measurements(
     let shared = frame_state(state, frame_id);
     let mut gs = shared.borrow_mut();
     sample_live_document_animations(&mut gs);
+    let profile_started = std::time::Instant::now();
     if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
         return serde_json::to_string(&vec![serde_json::Value::Null; nids.len()])
             .unwrap_or_else(|_| "[]".to_string());
@@ -9802,6 +9790,8 @@ fn op_resize_observer_measurements(
             .unwrap_or_else(|_| "[]".to_string());
     };
 
+    let layout_done = std::time::Instant::now();
+    let target_count = nids.len();
     let style_value = |snapshot: &std::collections::HashMap<&'static str, String>,
                        name: &'static str| {
         snapshot.get(name).cloned().unwrap_or_default()
@@ -9831,6 +9821,13 @@ fn op_resize_observer_measurements(
             }))
         })
         .collect::<Vec<_>>();
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] resize-observer targets={target_count} layout={:?} measure={:?}",
+            layout_done.duration_since(profile_started),
+            layout_done.elapsed()
+        );
+    }
     serde_json::to_string(&measurements).unwrap_or_else(|_| "[]".to_string())
 }
 

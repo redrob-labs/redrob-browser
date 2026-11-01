@@ -1644,7 +1644,15 @@ fn note_selector_dependencies(
 }
 
 fn note_selector_for_invalidation(map: &mut InvalidationMap, selector: &str, rule_order: usize) {
-    note_selector_dependencies(map, selector, InvalidationReaches::SELF, rule_order, true, None, &[]);
+    note_selector_dependencies(
+        map,
+        selector,
+        InvalidationReaches::SELF,
+        rule_order,
+        true,
+        None,
+        &[],
+    );
 }
 
 /// Record element attributes read from declaration values.
@@ -2768,8 +2776,20 @@ impl Stylesheet {
             .get(first..)?
             .iter()
             .map(|rule| &rule.sel)
-            .chain(self.before_rules.rules.get(resume.before..)?.iter().map(|rule| &rule.sel))
-            .chain(self.after_rules.rules.get(resume.after..)?.iter().map(|rule| &rule.sel))
+            .chain(
+                self.before_rules
+                    .rules
+                    .get(resume.before..)?
+                    .iter()
+                    .map(|rule| &rule.sel),
+            )
+            .chain(
+                self.after_rules
+                    .rules
+                    .get(resume.after..)?
+                    .iter()
+                    .map(|rule| &rule.sel),
+            )
             .chain(
                 self.placeholder_rules
                     .rules
@@ -2841,11 +2861,7 @@ impl StylesheetCache {
         self.misses = self.misses.saturating_add(1);
         if crate::prof::enabled() {
             if let Some(entry) = self.entry.as_ref() {
-                let first_diff = entry
-                    .sources
-                    .iter()
-                    .zip(sources)
-                    .position(|(a, b)| a != b);
+                let first_diff = entry.sources.iter().zip(sources).position(|(a, b)| a != b);
                 eprintln!(
                     "[timing] sheet-miss old_sources={} new_sources={} first_diff={first_diff:?} diff_lens={:?}",
                     entry.sources.len(),
