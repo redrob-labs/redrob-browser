@@ -54,6 +54,10 @@ open = "5"
 wry = "0.57"
 tao = "0.37"
 
+# The sandbox check before CEF starts (bundle.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # Start-up on Windows (startup.rs: the log file, the message box) and the
 # setup's language (i18n.rs).

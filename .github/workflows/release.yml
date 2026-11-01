@@ -5,7 +5,9 @@
 #
 # Each package holds three programs: redrob-browser (CLI and engine), redrob-browser-worker and
 # redrob-browser-window (the window); Windows adds redrob-browser-protected (DRM pages) and ships a
-# branded setup (installer/windows) beside the zip. Every platform builds with video (the `media` feature,
+# branded setup (installer/windows) beside the zip. The window runs its tabs on Chromium through CEF
+# (docs/CEF.md): every job fetches CEF's prebuilt binaries for its platform (CEF_VERSION, cached) and
+# the package carries the CEF runtime beside the window (docs/RELEASE.md). Every platform builds with video (the `media` feature,
 # GStreamer, docs/MEDIA.md). Linux uses the distribution's GStreamer; macOS and Windows install the
 # official GStreamer runtime in the job and carry it inside the package, so nothing else has to be
 # installed to play video.
@@ -47,6 +49,10 @@ env:
   GSTREAMER_MACOS_DEVEL_PKG_SHA256: 5135a7bc87a75a512f0017aa52e9774d47a5d3eca380210b815d5dc0648bb7bf
   GSTREAMER_WINDOWS_MSI_SHA256: 31cbc21fa0950b5c1e79c80959b2799805cb05a7a35953a13a9f790776137605
   GSTREAMER_WINDOWS_DEVEL_MSI_SHA256: af0a0720692052aaf5fb0cf2847ef34a87016ef0f914328d516f049e6c86f587
+  # The `cef` crate the window builds with (Cargo.lock); export-cef-dir of the same version fetches
+  # the matching CEF binary distribution (Chromium 156) from CEF's builds CDN. The build links
+  # against CEF_PATH and the packaging copies its runtime from there.
+  CEF_VERSION: 156.3.0+156.0.15
 
 jobs:
   version:
@@ -123,6 +129,23 @@ jobs:
           "GSTREAMER_ROOT=$root" >> $env:GITHUB_ENV
           "PKG_CONFIG_PATH=$root\lib\pkgconfig" >> $env:GITHUB_ENV
           "$root\bin" >> $env:GITHUB_PATH
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cef
+          key: cef-windows-x64-${{ env.CEF_VERSION }}
+      - name: Fetch CEF
+        shell: pwsh
+        run: |
+          $cef = Join-Path $env:RUNNER_TEMP cef
+          if (-not (Test-Path "$cef\archive.json")) {
+            $tool = Join-Path $env:RUNNER_TEMP cef-tool
+            cargo install export-cef-dir --version "=$env:CEF_VERSION" --locked --root $tool
+            if ($LASTEXITCODE -ne 0) { throw "cargo install export-cef-dir failed" }
+            & "$tool\bin\export-cef-dir.exe" --force $cef
+            if ($LASTEXITCODE -ne 0) { throw "export-cef-dir failed" }
+          }
+          if (-not (Test-Path "$cef\libcef.dll")) { throw "$cef has no libcef.dll" }
+          "CEF_PATH=$cef" >> $env:GITHUB_ENV
       - name: Build (unsigned)
         shell: pwsh
         run: |
@@ -134,6 +157,28 @@ jobs:
           $app = 'dist/app'
           New-Item -ItemType Directory -Force $app | Out-Null
           Copy-Item target/release/redrob-browser.exe, target/release/redrob-browser-worker.exe, target/release/redrob-browser-window.exe, target/release/redrob-browser-protected.exe, LICENSE, NOTICE $app
+          # CEF beside the window: libcef.dll and the DLLs it loads (chrome_elf, ANGLE, SwiftShader,
+          # Vulkan, the DirectX compilers), its .pak resources, ICU data, the V8 snapshot, CREDITS.html
+          # (Chromium's and CEF's licences, linked from the About page) and English and Korean of
+          # its translations. Build files (.lib, cmake, headers) stay out.
+          $cef = $env:CEF_PATH
+          Get-ChildItem $cef -File | Where-Object {
+            $_.Extension -in '.dll', '.pak', '.dat', '.bin', '.json' -and $_.Name -ne 'archive.json'
+          } | Copy-Item -Destination $app
+          python scripts/cef-credits.py $cef "$app\CREDITS.html"
+          if ($LASTEXITCODE -ne 0) { throw "CREDITS.html failed" }
+          New-Item -ItemType Directory -Force "$app\locales" | Out-Null
+          Get-ChildItem "$cef\locales" -File | Where-Object { $_.Name -like 'en-US*.pak' -or $_.Name -like 'ko*.pak' } |
+            Copy-Item -Destination "$app\locales"
+          # With CEF's Windows sandbox the window is a DLL that CEF's bootstrap.exe (a GUI program)
+          # loads under its own name, so bootstrap.exe ships as redrob-browser-window.exe.
+          if (Test-Path target/release/redrob_browser_window.dll) {
+            Copy-Item target/release/redrob_browser_window.dll "$app\redrob-browser-window.dll"
+            Copy-Item "$cef\bootstrap.exe" "$app\redrob-browser-window.exe" -Force
+          }
+          foreach ($need in 'libcef.dll', 'chrome_elf.dll', 'icudtl.dat', 'resources.pak', 'v8_context_snapshot.bin', 'CREDITS.html', 'locales\en-US.pak', 'locales\ko.pak') {
+            if (-not (Test-Path "$app\$need")) { throw "missing from the package: $need" }
+          }
           $gst = $env:GSTREAMER_ROOT
           Copy-Item "$gst\bin\*.dll" $app
           New-Item -ItemType Directory -Force "$app\lib\gstreamer-1.0" | Out-Null
@@ -195,10 +240,25 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # Every .exe and .dll in the package carries a valid Authenticode signature: ours on the
+      # programs, CEF's runtime (CEF's builds are unsigned) and whatever else arrives unsigned;
+      # files that already carry their vendor's signature (the Visual C++ runtime, Microsoft's
+      # DirectX compilers) keep it.
+      - name: List the unsigned executables
+        id: unsigned
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path dist/app).Path
+          $files = Get-ChildItem $root -Recurse -File -Include *.exe, *.dll |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' } |
+            ForEach-Object { 'dist/app/' + $_.FullName.Substring($root.Length + 1).Replace('\', '/') }
+          if ($files | Where-Object { $_ -match '\s' }) { throw "a file name has a space: $($files -join ', ')" }
+          Write-Host "$(@($files).Count) files to sign"
+          "files=$($files -join ' ')" >> $env:GITHUB_OUTPUT
       - name: Sign the executables
         uses: redrob-labs/.github/actions/sign-windows@main
         with:
-          files: dist/app/*.exe
+          files: ${{ steps.unsigned.outputs.files }}
           description: ${{ env.PRODUCT }}
           url: ${{ env.PRODUCT_URL }}
           endpoint: ${{ secrets.ARTIFACT_SIGNING_ENDPOINT }}
@@ -212,6 +272,11 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           New-Item -ItemType Directory -Force dist/release | Out-Null
+          # Every file of the package, so an update replaces exactly those (crates/redrob-shell/src/bundle.rs).
+          $root = (Resolve-Path dist/app).Path
+          $list = @(Get-ChildItem $root -Recurse -File | Where-Object { $_.Name -ne 'bundle-manifest.txt' } |
+            ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace('\', '/') } | Sort-Object -CaseSensitive) + 'bundle-manifest.txt'
+          [IO.File]::WriteAllText("$root\bundle-manifest.txt", (($list -join "`n") + "`n"))
           Compress-Archive -Path dist/app/* -DestinationPath "dist/release/redrob-browser-windows-x64-$env:VERSION.zip"
           python -m pip install --quiet fonttools==4.67.0
           if ($LASTEXITCODE -ne 0) { throw "pip install fonttools failed" }
@@ -288,6 +353,12 @@ jobs:
           gst=/Library/Frameworks/GStreamer.framework/Versions/1.0
           echo "$gst/bin" >> "$GITHUB_PATH"
           echo "PKG_CONFIG_PATH=$gst/lib/pkgconfig" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cef
+          key: cef-macos-arm64-${{ env.CEF_VERSION }}
+      - name: Fetch CEF
+        run: bash scripts/fetch-cef.sh "$RUNNER_TEMP/cef"
       - name: Build
         env:
           # Room in the load commands for the bundle-relative paths package-macos.sh writes.
@@ -337,17 +408,27 @@ jobs:
           sudo apt-get purge -y libunwind-14-dev || true
           sudo apt-get install -y --no-install-recommends libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libxkbcommon-dev libwayland-dev libx11-dev libdbus-1-dev pkg-config
+          # patchelf gives the window the run path $ORIGIN (libcef.so beside it). The libraries
+          # libcef.so links, which every desktop that runs Chrome has, let the packaging check that
+          # every library of the bundle resolves (scripts/package-linux.sh).
+          sudo apt-get install -y --no-install-recommends patchelf libnss3 libnspr4 libatk1.0-0 \
+            libatk-bridge2.0-0 libatspi2.0-0 libcups2 libdrm2 libgbm1 libxcomposite1 libxdamage1 \
+            libxrandr2 libxfixes3 libxext6 libpango-1.0-0 libcairo2 libasound2 libxkbcommon0 libudev1 libexpat1
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cef
+          key: cef-linux-${{ matrix.arch }}-${{ env.CEF_VERSION }}
+      - name: Fetch CEF
+        run: bash scripts/fetch-cef.sh "$RUNNER_TEMP/cef"
       - name: Build and package
         env:
           VERSION: ${{ needs.version.outputs.version }}
           PLATFORM: linux-${{ matrix.arch }}
+        # The same script builds the bundle on a developer's machine (docs/RELEASE.md).
         run: |
           set -euo pipefail
           cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
-          name="redrob-browser-$PLATFORM-$VERSION"
-          mkdir -p "dist/$name" dist/release
-          cp target/release/redrob-browser target/release/redrob-browser-worker target/release/redrob-browser-window LICENSE NOTICE "dist/$name/"
-          tar -C dist -czf "dist/release/$name.tar.gz" "$name"
+          bash scripts/package-linux.sh "$VERSION"
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux-${{ matrix.arch }}

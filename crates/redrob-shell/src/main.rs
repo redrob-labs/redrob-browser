@@ -13,6 +13,7 @@ mod account;
 mod agent_bridge;
 mod autoscroll;
 mod browser;
+mod bundle;
 mod cdp;
 #[allow(dead_code)]
 mod cef;

@@ -6043,6 +6043,7 @@ dependencies = [
  "gstreamer-video",
  "image",
  "keyring",
+ "libc",
  "open",
  "pbkdf2",
  "redrob-scene",
