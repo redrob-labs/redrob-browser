@@ -61,6 +61,8 @@ pub struct Window {
 
 /// Bind on loopback and serve clients against the Chromium DevTools endpoint
 /// on `127.0.0.1:devtools_port`. Returns the relay's ws:// address.
+// tungstenite fixes the handshake callback's error type.
+#[allow(clippy::result_large_err)]
 pub async fn start(devtools_port: u16, window: Window) -> anyhow::Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
@@ -129,10 +131,32 @@ async fn http_get_json(port: u16, path: &str) -> anyhow::Result<Value> {
             .as_bytes(),
     )
     .await?;
-    let mut raw = Vec::new();
-    tokio::time::timeout(Duration::from_secs(10), s.read_to_end(&mut raw)).await??;
-    let raw = String::from_utf8_lossy(&raw);
-    let body = raw.split_once("\r\n\r\n").map(|(_, b)| b).unwrap_or("");
+    // Chromium keeps the connection open: read up to Content-Length.
+    let read = async {
+        let mut raw = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            let n = s.read(&mut buf).await?;
+            raw.extend_from_slice(&buf[..n]);
+            let text = String::from_utf8_lossy(&raw);
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let len = head
+                    .lines()
+                    .find_map(|l| {
+                        let (k, v) = l.split_once(':')?;
+                        k.eq_ignore_ascii_case("content-length")
+                            .then(|| v.trim().parse::<usize>().ok())?
+                    })
+                    .unwrap_or(usize::MAX);
+                if n == 0 || body.len() >= len {
+                    return anyhow::Ok(body.to_string());
+                }
+            } else if n == 0 {
+                anyhow::bail!("DevTools on port {port} closed the connection");
+            }
+        }
+    };
+    let body = tokio::time::timeout(Duration::from_secs(10), read).await??;
     Ok(serde_json::from_str(body.trim())?)
 }
 

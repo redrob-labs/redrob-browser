@@ -1,16 +1,17 @@
-//! One window process, and so one engine, per profile.
+//! One window process per profile.
 //!
-//! The engine gives every CDP connection its own pages (docs/AGENT.md), so
-//! windows that should share tabs, cookies and history must share one engine
-//! connection, which means one process. The first launch takes the profile's
-//! instance lock and starts the engine; a later launch finds the lock held,
-//! reads the running process's relay address from the profile folder and asks
-//! it to open a window (`Redrob.openWindow`), then exits.
+//! Windows that share tabs, cookies and history share one CEF browser
+//! process: Chromium locks a profile's cache folder to one process, and the
+//! window's relay (relay.rs) is the one DevTools door for all its windows. The
+//! first launch takes the profile's instance lock and starts CEF; a later
+//! launch finds the lock held, reads the running process's relay address from
+//! the profile folder and asks it to open a window (`Redrob.openWindow`), then
+//! exits.
 //!
 //! The lock is an OS file lock, released by the OS when the process ends for
 //! any reason, so a crash never leaves the profile locked.
 //!
-//! Incognito windows have their own lock and engine, which keeps nothing on
+//! Incognito windows have their own lock and process, which keeps nothing on
 //! disk: they share each other's session and none of the profile's.
 
 use std::path::PathBuf;
@@ -21,7 +22,7 @@ use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::Message;
 
 pub struct Paths {
-    /// Held for the life of the process that owns the engine.
+    /// Held for the life of the process that owns the profile.
     pub lock: PathBuf,
     /// The relay address that process writes once it listens.
     pub endpoint: PathBuf,
@@ -43,7 +44,7 @@ pub fn paths(incognito: bool) -> Paths {
 }
 
 pub enum Claim {
-    /// This process owns the profile: start the engine. Keep the file open.
+    /// This process owns the profile: start the browser. Keep the file open.
     Owner(std::fs::File),
     /// The running process opened the window; this one is done.
     Handed,
@@ -57,7 +58,7 @@ pub fn claim(paths: &Paths, url: Option<&str>) -> anyhow::Result<Claim> {
             std::fs::create_dir_all(dir)?;
         }
     }
-    // The running process may still be starting its engine: wait for its
+    // The running process may still be starting up: wait for its
     // address for a while, but take over at once if it exits meanwhile.
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {

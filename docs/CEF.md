@@ -48,6 +48,14 @@ go away: Chromium scrolls, plays media and has its own DevTools.
 `crates/redrob-shell/src/cef/mod.rs` defines `Sink`: CEF callbacks report
 `cdp::Event`s for a CEF browser id; the sink maps it to the window `TabId`.
 
+## Agents
+
+The relay (`relay.rs`) fronts the DevTools port: `relay::start(devtools_port, window)`.
+The window sets `relay::Window::open_tab` and opens an agent tab for each URL it receives
+(CEF's own `Target.createTarget` would open a Chrome-style window outside ours); the relay
+finds the new page target and answers the agent with its id. The window fills
+`relay::Places` by target id so `Target.getTargets` shows window numbers and agent marks.
+
 ## Profiles
 
 - One `RequestContext` per profile with `cache_path` = the profile's data dir
