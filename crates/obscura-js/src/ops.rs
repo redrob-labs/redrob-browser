@@ -3724,6 +3724,89 @@ fn op_report_browser_exception<'s, 'i>(
     };
 }
 
+/// Values a cross-realm postMessage transfers (MessagePorts), parked between
+/// the sender's realm and the receiver's. Every realm lives in this isolate,
+/// so the port object itself crosses; only the message data goes as JSON.
+#[derive(Default)]
+struct TransferSlots {
+    next_id: u32,
+    slots: std::collections::BTreeMap<u32, v8::Global<v8::Value>>,
+}
+
+/// A message dropped on the way (queue limit, origin mismatch, frame gone)
+/// never claims its slot; the oldest are evicted past this bound.
+const MAX_TRANSFER_SLOTS: usize = 1024;
+
+#[op2(fast)]
+fn op_transfer_stash(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    value: v8::Local<v8::Value>,
+) -> u32 {
+    if !state.has::<TransferSlots>() {
+        state.put(TransferSlots::default());
+    }
+    let slots = state.borrow_mut::<TransferSlots>();
+    slots.next_id = slots.next_id.wrapping_add(1).max(1);
+    let id = slots.next_id;
+    slots.slots.insert(id, v8::Global::new(scope, value));
+    while slots.slots.len() > MAX_TRANSFER_SLOTS {
+        slots.slots.pop_first();
+    }
+    id
+}
+
+#[op2]
+fn op_transfer_take<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    id: u32,
+) -> v8::Local<'s, v8::Value> {
+    let value = state
+        .try_borrow_mut::<TransferSlots>()
+        .and_then(|slots| slots.slots.remove(&id));
+    match value {
+        Some(value) => v8::Local::new(scope, value),
+        None => v8::undefined(scope).into(),
+    }
+}
+
+/// Run a classic script the way a `<script>` element does: compiled as its
+/// own Script whose origin is the script URL, in the caller's realm.
+///
+/// Indirect eval differs from this in ways pages see. Stack frames read
+/// `eval at ...` instead of the script URL (the IMA SDK refuses to start
+/// unless its frames are on a Google domain), and top-level `let`/`const`
+/// stay inside the eval instead of joining the global lexical scope that
+/// later scripts read. An exception is rethrown to the caller.
+#[op2(nofast, reentrant)]
+fn op_run_classic_script(scope: &mut v8::PinScope, #[string] source: &str, #[string] url: &str) {
+    let Some(source) = v8::String::new(scope, source) else {
+        return;
+    };
+    let Some(name) = v8::String::new(scope, url) else {
+        return;
+    };
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        name.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    v8::tc_scope!(let tc, scope);
+    let ran = v8::Script::compile(tc, source, Some(&origin)).and_then(|script| script.run(tc));
+    if ran.is_none() && tc.has_caught() {
+        tc.rethrow();
+    }
+}
+
 #[op2(fast)]
 fn op_console_msg(
     state: &OpState,
@@ -8303,6 +8386,9 @@ pub fn build_extension() -> Extension {
         op_runtime_events_enabled(),
         op_console_msg(),
         op_report_browser_exception(),
+        op_run_classic_script(),
+        op_transfer_stash(),
+        op_transfer_take(),
         op_fetch_url(),
         op_fetch_cancel_handle(),
         op_abort_signal_state(),

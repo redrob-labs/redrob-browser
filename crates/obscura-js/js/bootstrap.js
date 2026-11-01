@@ -418,6 +418,14 @@ function __startDynClassicFetch(task) {
     error => ({ error }),
   );
 }
+// Classic script execution with the script URL as its origin, like a
+// parser-inserted script (see op_run_classic_script). Falls back to indirect
+// eval where the op is absent.
+function __runClassicScript(source, url) {
+  const run = __obscuraCore.ops.op_run_classic_script;
+  if (typeof run === 'function') run(String(source), String(url || ''));
+  else (0, eval)(source);
+}
 async function __runDynScriptTask(task) {
   try {
     if (task.isModule) {
@@ -439,8 +447,10 @@ async function __runDynScriptTask(task) {
         await new Promise(resolve => {
           const execute = () => {
             globalThis.__currentScriptNid = task.nid;
-            try { (0, eval)(body); }
-            catch(e) { console.error('Dynamic script error (' + task.url + '):', e.message); }
+            try { __runClassicScript(body, task.url); }
+            catch(e) {
+              if (_reportScriptException(e, task.url)) console.error('Dynamic script error (' + task.url + '):', e && e.stack || e);
+            }
             finally { globalThis.__currentScriptNid = task.prevNid || 0; }
             resolve();
           };
@@ -1685,7 +1695,70 @@ class MessageChannel {
 globalThis.MessageChannel = MessageChannel;
 globalThis.MessagePort = MessagePort;
 
-const _cssCamelToKebab = (s) => s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+// `cssFloat` is the IDL name of the `float` property (`float` is reserved in
+// old JS). jQuery 1.x reads `style.cssFloat` to pick its float hook.
+const _cssCamelToKebab = (s) => s === "cssFloat" ? "float" : s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+
+// CSSOM serializes a declared value's numbers canonically: `.55` reads back
+// as `0.55`, `10.50px` as `10.5px`, `03` as `3`. jQuery 1.x detects opacity
+// support with /^0.55$/.test(a.style.opacity) and, when it fails, routes every
+// fade through the IE `filter` hook, which calls style.removeAttribute and
+// throws. Strings, url() and custom properties keep their exact text.
+function _cssNormalizeNumbers(value) {
+  const text = String(value);
+  if (!/[.\d]/.test(text)) return text;
+  let out = "", i = 0;
+  const n = text.length;
+  const identStart = (c) => /[A-Za-z_#\\]/.test(c) || c > "\x7f";
+  const identChar = (c) => /[A-Za-z0-9_#\\+-]/.test(c) || c > "\x7f";
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && text[j] !== c) j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (identStart(c)) {
+      // A whole identifier (`h1`, `#0a0`, `U+0025`, `translate3d`) is copied
+      // verbatim; url(...) keeps its argument untouched.
+      let j = i + 1;
+      while (j < n && identChar(text[j])) j++;
+      if (text[j] === "(" && /^url$/i.test(text.slice(i, j))) {
+        const close = text.indexOf(")", j);
+        j = close < 0 ? n : close + 1;
+      }
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    {
+      const m = /^[+-]?(\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(text.slice(i, i + 40));
+      if (m) {
+        const tok = m[0];
+        const num = Number(tok);
+        let canon = tok;
+        if (Number.isFinite(num) && Math.abs(num) < 1e6) {
+          canon = String(Number(num.toPrecision(6)));
+          if (canon === "-0") canon = "0";
+          if (canon.includes("e")) canon = tok;
+        }
+        out += canon;
+        i += tok.length;
+        // Copy the unit or the rest of an identifier glued to the number.
+        while (i < n && /[A-Za-z%]/.test(text[i])) out += text[i++];
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+function _cssNormalizeValue(key, value) {
+  return key.startsWith("--") ? value : _cssNormalizeNumbers(value);
+}
 const _cssKebabToCamel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // Standard CSS property names (camelCase). Real CSSStyleDeclaration exposes every
@@ -1753,7 +1826,7 @@ function _parseCssInto(props, text) {
   for (const k in props) delete props[k];
   if (text) _splitCssDeclarations(text).forEach((p) => {
     const i = p.indexOf(":");
-    if (i > 0) { const k = p.slice(0, i).trim(); const v = p.slice(i + 1).trim(); if (k && v) props[_cssCamelToKebab(k)] = v; }
+    if (i > 0) { const k = p.slice(0, i).trim(); const v = p.slice(i + 1).trim(); if (k && v) { const key = _cssCamelToKebab(k); props[key] = _cssNormalizeValue(key, v); } }
   });
 }
 // Declaration values routinely contain semicolons in quoted `content`, data
@@ -1853,7 +1926,7 @@ class CSSStyleDeclaration {
       if (old === undefined) return;
       delete this._props[k];
     } else {
-      value = String(value);
+      value = _cssNormalizeValue(k, String(value));
       if (old === value) return;
       this._props[k] = value;
     }
@@ -2388,7 +2461,7 @@ function __prepareInsertedScript(script) {
     __processParserBlockingScriptQueue();
   } else {
     globalThis.__currentScriptNid = script._nid;
-    try { (0, eval)(code); }
+    try { __runClassicScript(code, globalThis.location?.href || ''); }
     catch(e) { console.error('Dynamic inline script error:', e.message); }
     finally { globalThis.__currentScriptNid = prevNid || 0; }
   }
@@ -4202,7 +4275,9 @@ const _innerTextBlockDisplays = new Set([
   'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
 ]);
 
-const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
+// <option> and <optgroup> are not here: Chrome lays options out as blocks
+// (in or out of a <select>) and innerText lists each on its own line.
+const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track']);
 
 function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   if (node.nodeType === 3) {
@@ -4215,8 +4290,7 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   const display = style.display;
   if (display === 'none') return;
   // Elements the UA hides without display:none generate no box, so they
-  // are not being rendered (noscript with scripting on, media sources,
-  // options outside the select popup).
+  // are not being rendered (noscript with scripting on, media sources).
   if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
       && _innerTextUnrenderedTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
@@ -4225,7 +4299,7 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
     return;
   }
   const breaks = visibility === 'visible'
-    ? (node.tagName === 'P' ? 2 : (_innerTextBlockDisplays.has(display) ? 1 : 0))
+    ? (node.tagName === 'P' ? 2 : (_innerTextBlockDisplays.has(display) || node.tagName === 'OPTION' || node.tagName === 'OPTGROUP' ? 1 : 0))
     : 0;
   if (breaks) items.push(breaks);
   for (const child of node.childNodes) {
@@ -7290,7 +7364,7 @@ function _runWrittenParserScript(nid) {
   if (!script) return;
   var prev = globalThis.__currentScriptNid;
   globalThis.__currentScriptNid = nid;
-  try { (0, eval)(script.textContent); }
+  try { __runClassicScript(script.textContent, globalThis.location?.href || ''); }
   catch (e) { console.error('Inline script error:', e && e.message); }
   finally { globalThis.__currentScriptNid = prev || 0; }
 }
@@ -8612,7 +8686,71 @@ globalThis.navigator = {
     },
     toJSON() { return {brands:this.brands,mobile:this.mobile,platform:this.platform}; },
   },
-  serviceWorker: { ready: Promise.resolve(), register(){return Promise.resolve();}, getRegistrations(){return Promise.resolve([]);}, controller: null, oncontrollerchange: null, onmessage: null, addEventListener(){}, removeEventListener(){}, dispatchEvent(){return true;} },
+  // ServiceWorkerContainer. Scripts are not run, so a registration behaves
+  // like a worker that activated with no fetch handler: the page is not
+  // controlled and network goes through as before. Like Chrome, `ready`
+  // stays pending until something registers, and register() resolves a
+  // registration object, so `ready.then(r => r.unregister())` (Instagram)
+  // and `register(...).then(r => r.update())` do not throw on undefined.
+  serviceWorker: (() => {
+    const registrations = new Map();
+    let resolveReady;
+    const ready = new Promise((resolve) => { resolveReady = resolve; });
+    const noopTarget = { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+    const makeRegistration = (scriptURL, scope) => {
+      const active = Object.assign(Object.create(noopTarget), {
+        scriptURL, state: "activated", onstatechange: null, onerror: null, postMessage() {},
+      });
+      const registration = Object.assign(Object.create(noopTarget), {
+        scope, installing: null, waiting: null, active, updateViaCache: "imports", onupdatefound: null,
+        navigationPreload: {
+          enable() { return Promise.resolve(); }, disable() { return Promise.resolve(); },
+          setHeaderValue() { return Promise.resolve(); },
+          getState() { return Promise.resolve({ enabled: false, headerValue: "true" }); },
+        },
+        pushManager: {
+          getSubscription() { return Promise.resolve(null); },
+          permissionState() { return Promise.resolve("prompt"); },
+          subscribe() { return Promise.reject(new DOMException("Registration failed - permission denied", "NotAllowedError")); },
+        },
+        update() { return Promise.resolve(registration); },
+        unregister() { return Promise.resolve(registrations.delete(scope)); },
+        getNotifications() { return Promise.resolve([]); },
+        showNotification() { return Promise.reject(new TypeError("No notification permission has been granted for this origin.")); },
+      });
+      return registration;
+    };
+    return Object.assign(Object.create(noopTarget), {
+      ready, controller: null, oncontrollerchange: null, onmessage: null, onmessageerror: null,
+      register(url, options) {
+        let scriptURL, scope;
+        try {
+          scriptURL = new URL(String(url), location.href).href;
+          scope = new URL(options && options.scope != null ? String(options.scope) : "./", scriptURL).href;
+        } catch (e) {
+          return Promise.reject(new TypeError("Failed to register a ServiceWorker: The URL protocol of the script ('" + url + "') is not supported."));
+        }
+        let registration = registrations.get(scope);
+        if (!registration) {
+          registration = makeRegistration(scriptURL, scope);
+          registrations.set(scope, registration);
+        }
+        resolveReady(registration);
+        return Promise.resolve(registration);
+      },
+      getRegistration(clientURL) {
+        let url = location.href;
+        try { if (clientURL != null) url = new URL(String(clientURL), location.href).href; } catch (e) {}
+        let best;
+        for (const [scope, registration] of registrations) {
+          if (url.startsWith(scope) && (!best || scope.length > best.scope.length)) best = registration;
+        }
+        return Promise.resolve(best);
+      },
+      getRegistrations() { return Promise.resolve([...registrations.values()]); },
+      startMessages() {},
+    });
+  })(),
   mediaDevices: {
     enumerateDevices() {
       return Promise.resolve([
@@ -8712,17 +8850,24 @@ globalThis.navigator = {
   });
 
   // Cache plugins/mimeTypes so navigator.plugins === navigator.plugins.
-  var _plugins = new PluginArray([
-    new Plugin("PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chrome PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Chromium PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("Microsoft Edge PDF Viewer", "internal-pdf-viewer", "Portable Document Format", []),
-    new Plugin("WebKit built-in PDF", "internal-pdf-viewer", "Portable Document Format", []),
-  ]);
-  var _mimeTypes = new MimeTypeArray([
-    new MimeType("application/pdf", "Portable Document Format", "pdf", null),
-    new MimeType("text/pdf", "Portable Document Format", "pdf", null),
-  ]);
+  // As in Chrome, every PDF plugin lists its own two MimeTypes
+  // (plugins[i][0].type is "application/pdf"; analytics read it) whose
+  // enabledPlugin is that plugin; navigator.mimeTypes point at the first.
+  var _pdfMimeTypes = function(plugin) {
+    return [
+      new MimeType("application/pdf", "Portable Document Format", "pdf", plugin),
+      new MimeType("text/pdf", "Portable Document Format", "pdf", plugin),
+    ];
+  };
+  var _plugins = new PluginArray(["PDF Viewer", "Chrome PDF Viewer", "Chromium PDF Viewer",
+    "Microsoft Edge PDF Viewer", "WebKit built-in PDF"].map(function(name) {
+    var plugin = new Plugin(name, "internal-pdf-viewer", "Portable Document Format", []);
+    var types = _pdfMimeTypes(plugin);
+    for (var _i = 0; _i < types.length; _i++) plugin[_i] = types[_i];
+    plugin.length = types.length;
+    return plugin;
+  }));
+  var _mimeTypes = new MimeTypeArray(_pdfMimeTypes(_plugins[0]));
   defGetter('plugins', function() { return _plugins; });
   defGetter('mimeTypes', function() { return _mimeTypes; });
 
@@ -12431,6 +12576,23 @@ globalThis.FocusEvent = class extends Event { constructor(t,o={}) { super(t,o);t
 globalThis.InputEvent = class extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
 globalThis.ErrorEvent = class extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
 const _browserErrorEvent = globalThis.ErrorEvent;
+// An uncaught exception from a script element's top level: like Chrome, the
+// window gets an ErrorEvent (pages hook onerror for telemetry and recovery)
+// and CDP sees Runtime.exceptionThrown. Returns false when a listener
+// cancelled the event, so the caller skips its console report.
+function _reportScriptException(error, filename) {
+  let message;
+  try { message = 'Uncaught ' + String(error && error.name ? error.name + ': ' + error.message : error); }
+  catch (_) { message = 'Uncaught exception'; }
+  const event = new _browserErrorEvent('error', { message, error, cancelable: true });
+  try { Object.defineProperty(event, 'filename', { value: String(filename || ''), configurable: true }); } catch (_) {}
+  let reported = true;
+  try { reported = _eventTargetDispatch(globalThis, event); } catch (_) {}
+  if (reported) {
+    try { __obscuraCore.ops.op_report_browser_exception(error, globalThis.__obscura_frameId || 0); } catch (_) {}
+  }
+  return reported;
+}
 __obscuraCore.setReportExceptionCallback(error => {
   // deno_core's default reporter terminates execution, discarding the rest of
   // the microtask checkpoint. Browser callback errors must leave queued work live.
@@ -16312,8 +16474,28 @@ function _targetOriginAllows(targetOrigin, receiverOrigin, senderOrigin) {
   return receiverOrigin === expected;
 }
 
-function _sendRealmMessage(targetFrameId, data, targetOrigin) {
+// postMessage(message, targetOrigin, transfer) and the options form
+// postMessage(message, { targetOrigin, transfer }). Only MessagePorts are
+// carried across; they arrive as event.ports, which ad and consent frames use
+// to set up a private channel (GPT replies on `event.ports[0]`).
+function _postMessageArgs(targetOrigin, transfer) {
+  if (targetOrigin && typeof targetOrigin === 'object') {
+    transfer = targetOrigin.transfer;
+    targetOrigin = targetOrigin.targetOrigin === undefined ? '/' : targetOrigin.targetOrigin;
+  }
+  const ports = [];
+  if (transfer != null) {
+    for (const item of transfer) {
+      if (item instanceof MessagePort || (item && item.constructor && item.constructor.name === 'MessagePort')) ports.push(item);
+    }
+  }
+  return { targetOrigin, ports };
+}
+function _sendRealmMessage(targetFrameId, data, targetOrigin, transfer) {
   let json;
+  const args = _postMessageArgs(targetOrigin, transfer);
+  targetOrigin = args.targetOrigin;
+  const ports = args.ports;
   // Structured clone cannot cross realms here. JSON carries what postMessage is
   // actually used for; anything else throws the same DataCloneError a browser
   // throws for an unclonable value, rather than arriving silently as null.
@@ -16323,6 +16505,9 @@ function _sendRealmMessage(targetFrameId, data, targetOrigin) {
     throw new DOMException('The object could not be cloned.', 'DataCloneError');
   }
   if (json === undefined) json = '{"v":null}';
+  if (ports.length && typeof __obscuraCore.ops.op_transfer_stash === 'function') {
+    json = json.slice(0, -1) + ',"t":' + __obscuraCore.ops.op_transfer_stash(ports) + '}';
+  }
   // An unspecified targetOrigin stays permissive (empty string); the receiver
   // enforces a specified one against its own origin in __obscura_deliverMessage.
   const to = (targetOrigin === undefined || targetOrigin === null) ? '' : String(targetOrigin);
@@ -16331,11 +16516,13 @@ function _sendRealmMessage(targetFrameId, data, targetOrigin) {
   // drain cross-realm messages. Serialize only once, before scheduling.
   const origin = _realmOrigin();
   if (!_targetOriginAllows(targetOrigin, origin, origin)) return;
-  const clone = JSON.parse(json).v;
+  const parsed = JSON.parse(json);
+  const clone = parsed.v;
+  const localPorts = parsed.t ? _takeTransferredPorts(parsed.t) : [];
   setTimeout(() => {
     try {
       globalThis.dispatchEvent(globalThis.__obscura_markTrusted(
-        new MessageEvent('message', { data: clone, origin, source: globalThis })));
+        new MessageEvent('message', { data: clone, origin, source: globalThis, ports: localPorts })));
     } catch (error) {
       console.error('message listener failed:', error && error.message || error);
     }
@@ -16454,13 +16641,24 @@ function _frameWindowFor(frameId) {
 }
 
 // The host calls this inside the target realm.
+function _takeTransferredPorts(id) {
+  const take = __obscuraCore.ops.op_transfer_take;
+  const ports = typeof take === 'function' ? take(id >>> 0) : undefined;
+  return Array.isArray(ports) ? ports : [];
+}
 globalThis.__obscura_deliverMessage = function(dataJson, origin, sourceFrameId, targetOrigin) {
+  let data = null;
+  let ports = [];
+  try {
+    const parsed = JSON.parse(dataJson);
+    data = parsed.v;
+    // Claimed before the origin check so a dropped message frees its slot.
+    if (parsed.t) ports = _takeTransferredPorts(parsed.t);
+  } catch (_) {}
   // Enforce postMessage's targetOrigin against THIS (the receiving) realm's
   // origin, the same check a real browser does at delivery time. A mismatch
   // drops the message silently.
   if (!_targetOriginAllows(targetOrigin, _realmOrigin(), origin)) return;
-  let data = null;
-  try { data = JSON.parse(dataJson).v; } catch (_) {}
   // Who to reply to: the frame above, or one of the frames below.
   const source = (globalThis.__obscura_frameId !== 0
                   && sourceFrameId === globalThis.__obscura_parentFrameId)
@@ -16472,7 +16670,7 @@ globalThis.__obscura_deliverMessage = function(dataJson, origin, sourceFrameId, 
     // drop anything untrusted, so an untrusted event is not merely suspicious,
     // it is silently discarded and the widget waits forever.
     globalThis.dispatchEvent(globalThis.__obscura_markTrusted(
-      new MessageEvent('message', { data, origin, source })));
+      new MessageEvent('message', { data, origin, source, ports })));
   } catch (error) {
     console.error('message listener failed:', error && error.message || error);
   }
@@ -16488,7 +16686,7 @@ class _RemoteWindow {
   constructor(frameId) {
     Object.defineProperty(this, '_frameId', { value: frameId, enumerable: false });
   }
-  postMessage(data, targetOrigin, _transfer) { _sendRealmMessage(this._frameId, data, targetOrigin); }
+  postMessage(data, targetOrigin, transfer) { _sendRealmMessage(this._frameId, data, targetOrigin, transfer); }
   get self() { return this; }
   get window() { return this; }
   get frames() { return this; }
@@ -16583,13 +16781,13 @@ class _IframeWindow {
     return proxy;
   }
 
-  postMessage(data, targetOrigin, _transfer) {
+  postMessage(data, targetOrigin, transfer) {
     // Into the frame's own realm, through the host. This used to dispatch the
     // event on the *parent's* window, so a page could never actually talk to
     // the document inside its iframe. A frame that has not loaded yet has no
     // browsing context to receive anything.
     if (!this._frameId) return;
-    _sendRealmMessage(this._frameId, data, targetOrigin);
+    _sendRealmMessage(this._frameId, data, targetOrigin, transfer);
   }
 
   setTimeout(fn, ms) { return globalThis.setTimeout(fn, ms); }
@@ -17717,55 +17915,174 @@ navigator.wakeLock = { request() { return Promise.reject(new DOMException('Not a
 
 globalThis.opener = null;
 
+// Dedicated workers run on the page's thread inside a scope object (`with`),
+// not in a separate isolate. importScripts() is synchronous in a browser but
+// network fetches here are async, so an import of a script that is not yet
+// cached throws _WorkerImportPending: the run stops, the scripts are fetched,
+// and the worker's top level runs again from the start on a fresh scope (or
+// the message handler runs again for the same event). Messages the worker
+// posted during an abandoned run are dropped, so the rerun does not repeat
+// them. Literal importScripts("...") URLs are prefetched before the first run
+// so the common case runs once.
+const _workerScriptCache = new Map();
+class _WorkerImportPending {
+  constructor(urls) { this.urls = urls; }
+}
+const _WORKER_MAX_IMPORT_RERUNS = 32;
+function _workerFetchScripts(urls) {
+  return Promise.all(urls.map(async (url) => {
+    if (_workerScriptCache.has(url)) return;
+    let entry;
+    try {
+      const blob = globalThis.__blobStore?.[url];
+      if (blob !== undefined) entry = { source: blob };
+      else {
+        const resp = await fetch(url);
+        entry = resp.ok === false ? { error: 'HTTP ' + resp.status } : { source: await resp.text() };
+      }
+    } catch (e) {
+      entry = { error: (e && e.message) || String(e) };
+    }
+    _workerScriptCache.set(url, entry);
+  }));
+}
+function _workerLiteralImports(source, base) {
+  const urls = [];
+  const re = /importScripts\s*\(\s*(['"])([^'"\n]+)\1/g;
+  let m;
+  while ((m = re.exec(source)) && urls.length < 64) {
+    try { urls.push(new URL(m[2], base).href); } catch (e) {}
+  }
+  return urls;
+}
+function _workerLocation(href) {
+  let u;
+  try { u = new URL(href); } catch (e) { return globalThis.location; }
+  const loc = {};
+  for (const k of ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash']) loc[k] = u[k];
+  loc.toString = function toString() { return this.href; };
+  return loc;
+}
+// Built per call, never in the startup snapshot: V8 aborts (eval_scope_info
+// check) when a direct eval inside a snapshotted function is compiled again
+// after deserialization.
+function _runInWorkerScope(scope, source) {
+  const run = new Function('scope', 'source', 'with (scope) { eval(source); }');
+  return run.call(this, scope, source);
+}
+
 globalThis.Worker = class Worker {
-  constructor(url) {
+  constructor(url, options) {
     this.onmessage = null;
     this.onerror = null;
+    this.onmessageerror = null;
     this._terminated = false;
     this._listeners = {};
     this._scope = null;
     this._pendingMessages = [];
+    this._reruns = 0;
+    this._name = options && options.name != null ? String(options.name) : '';
     const worker = this;
 
-    let resolvedUrl = url;
-    if (typeof url === 'string') {
-      const blob = globalThis.__blobStore?.[url];
-      if (blob) {
-        worker._code = blob;
-        // Auto-start on next tick so caller can set onmessage first.
-        setTimeout(() => worker._autoRun(), 0);
-        return;
-      }
-      // Resolve relative URLs against the current page.
-      if (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('data:')) {
-        try { resolvedUrl = new URL(url, globalThis.location?.href || '').href; } catch(e) {}
-      }
-      (async () => {
-        try {
-          const resp = await fetch(resolvedUrl);
-          worker._code = await resp.text();
-          if (!worker._terminated) worker._autoRun();
-        } catch(e) { if (worker.onerror) worker.onerror(e); }
-      })();
+    let resolvedUrl = String(url);
+    try { resolvedUrl = new URL(resolvedUrl, globalThis.location?.href || undefined).href; } catch (e) {}
+    this._url = resolvedUrl;
+    const blob = globalThis.__blobStore?.[resolvedUrl] ?? globalThis.__blobStore?.[url];
+    if (blob !== undefined) {
+      worker._code = blob;
+      // Auto-start on next tick so caller can set onmessage first.
+      setTimeout(() => worker._start(), 0);
+      return;
     }
+    (async () => {
+      try {
+        const resp = await fetch(resolvedUrl);
+        if (resp && resp.ok === false) throw new Error('Failed to load worker script ' + resolvedUrl + ' (HTTP ' + resp.status + ')');
+        worker._code = await resp.text();
+        if (!worker._terminated) worker._start();
+      } catch (e) { worker._fireError(e); }
+    })();
+  }
+  _start() {
+    if (this._terminated || this._scope || this._code === undefined) return;
+    const imports = _workerLiteralImports(this._code, this._url).filter(u => !_workerScriptCache.has(u));
+    if (imports.length) _workerFetchScripts(imports).then(() => this._autoRun());
+    else this._autoRun();
+  }
+  _deliver(evt) {
+    if (typeof this.onmessage === 'function') this.onmessage.call(this, evt);
+    for (const h of (this._listeners['message'] || []).slice()) {
+      if (typeof h === 'function') h.call(this, evt);
+      else if (h && typeof h.handleEvent === 'function') h.handleEvent(evt);
+    }
+  }
+  _fireError(e) {
+    if (this._terminated) return;
+    const message = (e && e.message) || String(e);
+    const evt = new ErrorEvent('error', { message, error: e, cancelable: true });
+    try { Object.defineProperty(evt, 'filename', { value: this._url, configurable: true }); } catch (_) {}
+    let prevented = false;
+    try {
+      if (typeof this.onerror === 'function' && this.onerror.call(this, evt) === true) prevented = true;
+      for (const h of (this._listeners['error'] || []).slice()) {
+        if (typeof h === 'function') h.call(this, evt);
+        else if (h && typeof h.handleEvent === 'function') h.handleEvent(evt);
+      }
+    } catch (handlerError) {
+      console.error(handlerError);
+    }
+    if (!prevented && !evt.defaultPrevented) console.error('Worker error:', message);
   }
   _makeScope() {
     const worker = this;
+    const listeners = {};
     const scope = {
       onmessage: null,
+      onmessageerror: null,
+      onerror: null,
+      name: worker._name,
       WorkerGlobalScope: function WorkerGlobalScope() {},
       DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() {},
+      // A worker has no window or document; libraries test for them to pick
+      // the worker code path (importScripts instead of <script> tags).
+      window: undefined,
+      document: undefined,
       postMessage: (msg) => {
         if (worker._terminated) return;
-        const evt = { data: msg };
-        if (worker.onmessage) worker.onmessage(evt);
-        const ls = worker._listeners['message'] || [];
-        for (const h of ls) h(evt);
+        const evt = new MessageEvent('message', { data: msg });
+        if (scope._outbox) { scope._outbox.push(evt); return; }
+        setTimeout(() => { if (!worker._terminated) worker._deliver(evt); }, 0);
       },
       addEventListener: (type, fn) => {
-        if (!scope._ev) scope._ev = {};
-        if (!scope._ev[type]) scope._ev[type] = [];
-        scope._ev[type].push(fn);
+        if (fn == null) return;
+        type = String(type);
+        if (!listeners[type]) listeners[type] = [];
+        if (!listeners[type].includes(fn)) listeners[type].push(fn);
+      },
+      removeEventListener: (type, fn) => {
+        type = String(type);
+        if (listeners[type]) listeners[type] = listeners[type].filter(h => h !== fn);
+      },
+      dispatchEvent: (evt) => {
+        const handler = scope['on' + evt.type];
+        if (typeof handler === 'function') handler.call(scope, evt);
+        for (const h of (listeners[evt.type] || []).slice()) {
+          if (typeof h === 'function') h.call(scope, evt);
+          else if (h && typeof h.handleEvent === 'function') h.handleEvent(evt);
+        }
+        return !evt.defaultPrevented;
+      },
+      importScripts: (...urls) => {
+        const resolved = urls.map(u => new URL(String(u), worker._url).href);
+        const missing = resolved.filter(u => !_workerScriptCache.has(u));
+        if (missing.length) throw new _WorkerImportPending(missing);
+        for (const u of resolved) {
+          const entry = _workerScriptCache.get(u);
+          if (entry.error !== undefined) {
+            throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '" + u + "' failed to load.", 'NetworkError');
+          }
+          _runInWorkerScope.call(scope, scope, entry.source);
+        }
       },
       close: () => { worker.terminate(); },
       crypto: globalThis.crypto,
@@ -17778,32 +18095,67 @@ globalThis.Worker = class Worker {
       setInterval: globalThis.setInterval,
       clearTimeout: globalThis.clearTimeout,
       clearInterval: globalThis.clearInterval,
+      queueMicrotask: globalThis.queueMicrotask,
       scheduler: globalThis.scheduler,
       Scheduler: globalThis.Scheduler,
       fetch: globalThis.fetch,
       console: globalThis.console,
       performance: globalThis.performance,
-      location: globalThis.location,
+      navigator: globalThis.navigator,
+      indexedDB: globalThis.indexedDB,
+      location: _workerLocation(worker._url),
+      origin: globalThis.location?.origin,
+      isSecureContext: globalThis.isSecureContext,
     };
+    // No own `globalThis` here: shadowing that name in the `with` object
+    // makes V8 abort on the direct eval (eval_scope_info check).
     scope.self = scope;
+    // Everything else a worker global has (Promise, Uint8Array, Blob, URL,
+    // MessageChannel...) is read through to the page's realm for `self.X`.
+    Object.setPrototypeOf(scope, globalThis);
     return scope;
+  }
+  // Wait for the scripts an aborted run asked for, then run `again`. Gives
+  // up (as a NetworkError from importScripts) after too many reruns.
+  _retryAfterImport(pending, again) {
+    if (++this._reruns > _WORKER_MAX_IMPORT_RERUNS) {
+      for (const u of pending.urls) if (!_workerScriptCache.has(u)) _workerScriptCache.set(u, { error: 'too many imports' });
+    }
+    _workerFetchScripts(pending.urls).then(() => { if (!this._terminated) again(); });
   }
   _autoRun() {
     if (this._terminated || this._scope || this._code === undefined) return;
     const scope = this._makeScope();
+    scope._outbox = [];
+    let pending = null;
     try {
       // Direct eval preserves script directives and resolves bare handler names
       // against the worker scope. Run once so message closures retain their state.
-      const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
-      fn.call(scope, scope, this._code);
+      _runInWorkerScope.call(scope, scope, this._code);
     } catch(e) {
-      console.error('Worker error:', e.message);
-      if (this.onerror) this.onerror(e);
-    } finally {
-      if (!this._terminated) {
-        this._scope = scope;
-        for (const data of this._pendingMessages.splice(0)) this.postMessage(data);
-      }
+      if (e instanceof _WorkerImportPending) pending = e;
+      else this._fireError(e);
+    }
+    const outbox = scope._outbox;
+    scope._outbox = null;
+    if (pending) {
+      this._retryAfterImport(pending, () => this._autoRun());
+      return;
+    }
+    if (!this._terminated) {
+      this._scope = scope;
+      for (const evt of outbox) setTimeout(() => { if (!this._terminated) this._deliver(evt); }, 0);
+      for (const data of this._pendingMessages.splice(0)) this.postMessage(data);
+    }
+  }
+  _dispatchToScope(data) {
+    if (this._terminated || !this._scope) return;
+    const scope = this._scope;
+    try {
+      scope.dispatchEvent(new MessageEvent('message', { data }));
+    } catch(e) {
+      if (e instanceof _WorkerImportPending) this._retryAfterImport(e, () => this._dispatchToScope(data));
+      else this._fireError(e);
     }
   }
   postMessage(data) {
@@ -17812,20 +18164,7 @@ globalThis.Worker = class Worker {
       this._pendingMessages.push(data);
       return;
     }
-    const worker = this;
-    setTimeout(() => {
-      if (worker._terminated || !worker._scope) return;
-      const scope = worker._scope;
-      try {
-        const event = { data };
-        if (typeof scope.onmessage === 'function') scope.onmessage.call(scope, event);
-        const evs = (scope._ev && scope._ev['message']) || [];
-        for (const handler of evs.slice()) handler.call(scope, event);
-      } catch(e) {
-        console.error('Worker error:', e.message);
-        if (worker.onerror) worker.onerror(e);
-      }
-    }, 0);
+    setTimeout(() => this._dispatchToScope(data), 0);
   }
   terminate() {
     this._terminated = true;
@@ -17833,11 +18172,23 @@ globalThis.Worker = class Worker {
     this._scope = null;
   }
   addEventListener(type, fn) {
+    if (fn == null) return;
+    type = String(type);
     if (!this._listeners[type]) this._listeners[type] = [];
-    this._listeners[type].push(fn);
+    if (!this._listeners[type].includes(fn)) this._listeners[type].push(fn);
   }
   removeEventListener(type, fn) {
+    type = String(type);
     if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(h => h !== fn);
+  }
+  dispatchEvent(evt) {
+    if (evt && evt.type === 'message') this._deliver(evt);
+    else if (evt) {
+      const handler = this['on' + evt.type];
+      if (typeof handler === 'function') handler.call(this, evt);
+      for (const h of (this._listeners[evt.type] || []).slice()) if (typeof h === 'function') h.call(this, evt);
+    }
+    return !(evt && evt.defaultPrevented);
   }
 };
 
@@ -17973,8 +18324,8 @@ globalThis.stop = function() {}; _markNative(globalThis.stop);
 // that posted to itself and waited for the `message` event waited forever.
 // Same realm, so this needs no host round trip; it is queued as a task because
 // postMessage never delivers synchronously.
-globalThis.postMessage = function(data, targetOrigin, _transfer) {
-  _sendRealmMessage(_realmFrameId, data, targetOrigin);
+globalThis.postMessage = function(data, targetOrigin, transfer) {
+  _sendRealmMessage(_realmFrameId, data, targetOrigin, transfer);
 };
 _markNative(globalThis.postMessage);
 globalThis.requestIdleCallback = globalThis.requestIdleCallback || function(cb) { return setTimeout(cb, 0); };
