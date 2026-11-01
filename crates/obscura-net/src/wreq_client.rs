@@ -71,6 +71,50 @@ pub const STEALTH_UA_PLATFORM: &str = "Windows";
 #[cfg(feature = "stealth")]
 pub const STEALTH_UA_PLATFORM_VERSION: &str = "15.0.0";
 
+/// The order Chrome writes request headers in, on HTTP/1.1 and HTTP/2 alike.
+///
+/// The wreq Chrome profile only fixes the header *values*; the request then
+/// goes out in the order the headers were added, which no Chrome produces
+/// (`sec-fetch-dest` before `accept`, `upgrade-insecure-requests` last).
+/// Cloudflare reads the order on the very first request and answered it with
+/// its stricter interactive challenge, where Chrome on the same host gets the
+/// passive one. Headers not named here keep their place after these.
+#[cfg(feature = "stealth")]
+fn chrome_header_order() -> wreq::header::OrigHeaderMap {
+    let mut order = wreq::header::OrigHeaderMap::new();
+    for name in [
+        "host",
+        "connection",
+        "content-length",
+        "pragma",
+        "cache-control",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "origin",
+        "content-type",
+        "upgrade-insecure-requests",
+        "user-agent",
+        "accept",
+        "sec-fetch-site",
+        "sec-fetch-mode",
+        "sec-fetch-user",
+        "sec-fetch-dest",
+        "sec-fetch-storage-access",
+        "referer",
+        "accept-encoding",
+        "accept-language",
+        "cookie",
+        "range",
+        "if-none-match",
+        "if-modified-since",
+        "priority",
+    ] {
+        order.insert(name);
+    }
+    order
+}
+
 #[cfg(feature = "stealth")]
 fn tracker_blocking_enabled(value: Option<&str>) -> bool {
     !matches!(
@@ -234,6 +278,7 @@ impl StealthHttpClient {
 
         let mut builder = wreq::Client::builder()
             .emulation(emulation_opts)
+            .orig_headers(chrome_header_order())
             // Read a folded header line (obs-fold) as Chrome does instead of
             // failing the response. Set after `emulation()`, which overwrites
             // `http1_options`; the Chrome profile leaves them unset.

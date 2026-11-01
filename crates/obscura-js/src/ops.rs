@@ -1178,6 +1178,40 @@ fn op_run_classic_script<'s, 'i>(
     wrapper.into()
 }
 
+/// `performance.now()` for the realm's document: monotonic milliseconds since
+/// its time origin, coarsened to Chrome's 100 microseconds. A millisecond
+/// clock (the old `Date.now()` difference) is itself a tell: challenge scripts
+/// measure the smallest step between two readings.
+#[op2(fast)]
+fn op_performance_now(state: &OpState, frame_id: u32) -> f64 {
+    let shared = frame_state(state, frame_id);
+    let micros = shared.borrow().navigation_timing.origin.elapsed().as_micros();
+    (micros / 100) as f64 / 10.0
+}
+
+/// What kind of value console formatting is looking at, answered by V8
+/// without running page code: `"proxy"`, `"error"`, `"array"` or `""`.
+///
+/// Chrome builds console messages without calling getters, `toString` or
+/// proxy traps, and pages detect a console that does (a `stack` getter on an
+/// Error passed to `console.debug` fires only under an inspecting client).
+/// `instanceof` and `Array.isArray` consult the prototype chain, which a
+/// proxy can trap, so the question goes to V8.
+#[op2]
+#[string]
+fn op_console_value_kind(value: v8::Local<v8::Value>) -> String {
+    if value.is_proxy() {
+        "proxy"
+    } else if value.is_native_error() {
+        "error"
+    } else if value.is_array() {
+        "array"
+    } else {
+        ""
+    }
+    .to_string()
+}
+
 // Private signal state survives realm crossings without public prototype
 // forgeries or a native Global handle that would keep dead signals alive.
 #[op2]
@@ -8432,6 +8466,8 @@ pub fn build_extension() -> Extension {
         op_fetch_cancel_handle(),
         op_abort_signal_state(),
         op_run_classic_script(),
+        op_console_value_kind(),
+        op_performance_now(),
         op_fetch_script_sync(),
         op_fetch_body(),
         op_get_cookies(),

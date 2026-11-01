@@ -882,6 +882,64 @@ const _consoleObjectId = (value) => {
   store[objectId] = value;
   return objectId;
 };
+// Console formatting must not run page code. Chrome only describes console
+// arguments for an attached inspector, and does it from V8's own view of the
+// value: no getters, no toString/toJSON, no proxy traps. Pages test exactly
+// that (an Error whose `stack` getter fires, a `%d` argument whose valueOf
+// fires) to tell an automated or inspected browser from a plain one.
+const _consoleKind = (value) => __obscuraCore.ops.op_console_value_kind(value);
+// The value `key` has as an own or inherited data property; undefined for an
+// accessor, a proxy anywhere on the chain, or a missing key.
+function _consoleData(obj, key) {
+  let o = obj;
+  for (let i = 0; o !== null && o !== undefined && i < 64; i++) {
+    if (_consoleKind(o) === 'proxy') return undefined;
+    const d = Reflect.getOwnPropertyDescriptor(o, key);
+    if (d) return 'value' in d ? d.value : undefined;
+    o = Reflect.getPrototypeOf(o);
+  }
+  return undefined;
+}
+function _consoleClassName(value) {
+  if (_consoleKind(value) === 'proxy') return typeof value === 'function' ? 'Function' : 'Object';
+  const ctor = _consoleData(value, 'constructor');
+  const name = typeof ctor === 'function' ? _consoleData(ctor, 'name') : undefined;
+  return typeof name === 'string' && name ? name : 'Object';
+}
+function _consoleErrorText(value) {
+  const stack = _consoleData(value, 'stack');
+  if (typeof stack === 'string' && stack) return stack;
+  const message = _consoleData(value, 'message');
+  const name = _consoleData(value, 'name');
+  return (typeof name === 'string' ? name : 'Error') + (typeof message === 'string' && message ? ': ' + message : '');
+}
+// A JSON-like preview built from own enumerable data properties only.
+function _consolePreview(value, depth) {
+  if (value === null) return 'null';
+  const type = typeof value;
+  if (type === 'string') return depth ? JSON.stringify(value) : value;
+  if (type === 'bigint') return String(value) + 'n';
+  if (type === 'symbol') return String(value);
+  if (type !== 'object' && type !== 'function') return String(value);
+  const kind = _consoleKind(value);
+  if (kind === 'proxy') return type === 'function' ? 'function' : 'Proxy(Object)';
+  if (type === 'function') return _origToString.call(value);
+  if (kind === 'error') return _consoleErrorText(value);
+  if (typeof _consoleData(value, '_nid') === 'number') {
+    const tag = _consoleData(value, '_tagName');
+    return typeof tag === 'string' ? tag.toLowerCase() : _consoleClassName(value);
+  }
+  if (depth >= 2) return kind === 'array' ? '[...]' : '{...}';
+  const keys = Reflect.ownKeys(value).filter((k) => {
+    if (typeof k !== 'string') return false;
+    const d = Reflect.getOwnPropertyDescriptor(value, k);
+    return d && d.enumerable && 'value' in d;
+  }).slice(0, 100);
+  if (kind === 'array') {
+    return '[' + keys.filter((k) => k !== 'length').map((k) => _consolePreview(Reflect.getOwnPropertyDescriptor(value, k).value, depth + 1)).join(',') + ']';
+  }
+  return '{' + keys.map((k) => JSON.stringify(k) + ':' + _consolePreview(Reflect.getOwnPropertyDescriptor(value, k).value, depth + 1)).join(',') + '}';
+}
 const _consoleRemoteObject = (value) => {
   const type = typeof value;
   if (value === null) return { type: "object", subtype: "null", value: null, description: "null" };
@@ -898,52 +956,34 @@ const _consoleRemoteObject = (value) => {
     const description = String(value) + "n";
     return { type, unserializableValue: description, description };
   }
-  if (type === "symbol") return { type, description: String(value) };
-  if (value instanceof Error) {
-    const _pst = Error.prepareStackTrace;
-    if (_pst !== undefined) Error.prepareStackTrace = undefined;
-    const description = value.stack || value.message || String(value);
-    if (_pst !== undefined) Error.prepareStackTrace = _pst;
+  if (type === "symbol") return { type, description: _consolePreview(value, 0) };
+  const kind = _consoleKind(value);
+  if (kind === "error") {
     return {
       type: "object", subtype: "error",
-      className: (value.constructor && value.constructor.name) || "Error",
-      description, objectId: _consoleObjectId(value)
+      className: _consoleClassName(value),
+      description: _consoleErrorText(value), objectId: _consoleObjectId(value)
     };
   }
-  const className = type === "function"
-    ? "Function"
-    : ((value.constructor && value.constructor.name) || "Object");
-  const remote = { type, className, description: type === "function" ? String(value) : className };
-  if (Array.isArray(value)) {
+  const className = type === "function" ? "Function" : _consoleClassName(value);
+  const remote = { type, className, description: type === "function" ? _consolePreview(value, 0) : className };
+  if (kind === "proxy") {
+    remote.subtype = "proxy";
+    remote.description = "Proxy(" + (type === "function" ? "Function" : "Object") + ")";
+  } else if (kind === "array") {
+    const length = _consoleData(value, "length");
     remote.subtype = "array";
-    remote.description = "Array(" + value.length + ")";
-  } else if (type === "object" && typeof value._nid === "number") {
+    remote.description = "Array(" + (typeof length === "number" ? length : 0) + ")";
+  } else if (type === "object" && typeof _consoleData(value, "_nid") === "number") {
     remote.subtype = "node";
-    remote.description = value.tagName ? value.tagName.toLowerCase() : (value.nodeName || "node");
+    remote.description = _consolePreview(value, 0);
   }
   remote.objectId = _consoleObjectId(value);
   return remote;
 };
 const _consoleFn = (level, args) => {
   try {
-    const text = args.map(a => {
-      if (a === null) return "null";
-      if (a === undefined) return "undefined";
-      if (a instanceof Error) {
-        const _pst = Error.prepareStackTrace;
-        if (_pst !== undefined) Error.prepareStackTrace = undefined;
-        const _s = a.stack || a.message || String(a);
-        if (_pst !== undefined) Error.prepareStackTrace = _pst;
-        return _s;
-      }
-      if (typeof a === "object") {
-        try {
-          const s = JSON.stringify(a);
-          return s === "{}" && a.message ? a.message : s;
-        } catch { return String(a); }
-      }
-      return String(a);
-    }).join(" ");
+    const text = args.map((a) => a === undefined ? "undefined" : _consolePreview(a, 0)).join(" ");
     const eventArgs = __obscuraCore.ops.op_runtime_events_enabled()
       ? JSON.stringify(args.map(a => {
           try { return _consoleRemoteObject(a); }
@@ -954,15 +994,29 @@ const _consoleFn = (level, args) => {
   } catch {}
 };
 
-globalThis.console = {
-  log: (...a) => _consoleFn("log", a), warn: (...a) => _consoleFn("warning", a),
-  error: (...a) => _consoleFn("error", a), info: (...a) => _consoleFn("info", a),
-  debug: (...a) => _consoleFn("debug", a), dir: (...a) => _consoleFn("dir", a),
-  trace: (...a) => _consoleFn("trace", a), table: (...a) => _consoleFn("table", a), group: () => {},
-  groupEnd: () => {}, groupCollapsed: () => {}, time: () => {}, timeEnd: () => {},
-  timeLog: () => {}, count: () => {}, countReset: () => {}, clear: () => {},
-  assert: (c, ...a) => { if (!c) _consoleFn("error", ["Assertion failed:", ...a]); },
-};
+// Chrome's console methods are native functions named after themselves.
+globalThis.console = (() => {
+  const c = {};
+  const define = (name, fn) => {
+    Object.defineProperty(fn, 'name', { value: name, configurable: true });
+    _markNative(fn);
+    c[name] = fn;
+  };
+  for (const [name, level] of [['debug', 'debug'], ['error', 'error'], ['info', 'info'], ['log', 'log'],
+    ['warn', 'warning'], ['dir', 'dir'], ['dirxml', 'dirxml'], ['table', 'table'], ['trace', 'trace']]) {
+    define(name, function (...a) { _consoleFn(level, a); });
+  }
+  for (const name of ['group', 'groupCollapsed', 'groupEnd', 'clear', 'count', 'countReset',
+    'profile', 'profileEnd', 'time', 'timeLog', 'timeEnd', 'timeStamp', 'context']) {
+    define(name, function () {});
+  }
+  define('assert', function (condition, ...a) { if (!condition) _consoleFn("error", ["Assertion failed:", ...a]); });
+  define('createTask', function (name) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'createTask' on 'console': 1 argument required, but only 0 present.");
+    return { run(fn) { return fn(); } };
+  });
+  return c;
+})();
 
 let _tid = 0;
 const _intervals = new Set();
@@ -9093,6 +9147,53 @@ function _serializeBody(initBody, headers, synthesizeContentType = true) {
   return new TextEncoder().encode(typeof initBody === 'string' ? initBody : String(initBody));
 }
 
+// data: and blob: URLs never reach the network: the browser answers them
+// from the URL itself or from the blob the page registered. Challenge scripts
+// fetch both (`fetch("data:,")` as a capability probe, a worker's own blob URL)
+// and treat a failure as a non-browser.
+function _percentDecodeBytes(text) {
+  const out = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x25 && /^[0-9A-Fa-f]{2}$/.test(text.slice(i + 1, i + 3))) {
+      out.push(parseInt(text.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else if (c < 0x80) {
+      out.push(c);
+    } else {
+      for (const byte of new TextEncoder().encode(text[i])) out.push(byte);
+    }
+  }
+  return new Uint8Array(out);
+}
+function _fetchFailed() { return new TypeError("Failed to fetch"); }
+async function _fetchLocalScheme(url, method) {
+  if (url.startsWith("blob:")) {
+    const blob = _blobObjects.get(url.split("#")[0]);
+    if (method !== "GET" || !blob) throw _fetchFailed();
+    const bytes = blob._bytes ? new Uint8Array(blob._bytes) : new Uint8Array(await blob.arrayBuffer());
+    const headers = { "content-length": String(bytes.length) };
+    if (blob.type) headers["content-type"] = blob.type;
+    return _createInternalResponse(bytes, { status: 200, statusText: "OK", headers, type: "basic", url, redirected: false });
+  }
+  const withoutFragment = url.split("#")[0];
+  const comma = withoutFragment.indexOf(",");
+  if (comma < 0) throw _fetchFailed();
+  let meta = withoutFragment.slice(5, comma).trim();
+  let bytes = _percentDecodeBytes(withoutFragment.slice(comma + 1));
+  if (/;\s*base64$/i.test(meta)) {
+    meta = meta.replace(/;\s*base64$/i, "");
+    let binary;
+    try { binary = atob(new TextDecoder().decode(bytes).replace(/[\t\n\f\r ]/g, "")); }
+    catch (_e) { throw _fetchFailed(); }
+    bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  }
+  if (meta.startsWith(";")) meta = "text/plain" + meta;
+  const mime = meta && /^[^\/;\s]+\/[^\/;\s]+/.test(meta) ? meta : "text/plain;charset=US-ASCII";
+  return _createInternalResponse(bytes, {
+    status: 200, statusText: "OK", headers: { "content-type": mime }, type: "basic", url, redirected: false,
+  });
+}
 async function _fetch(input, init = {}, resourceType = "Fetch") {
   init = init || {};
   const request = input instanceof Request ? input : null;
@@ -9110,6 +9211,7 @@ async function _fetch(input, init = {}, resourceType = "Fetch") {
   // and lowercase standard methods are not rejected by the case-sensitive CORS
   // checks (#969).
   const method = String(init.method || (request ? request.method : "GET")).toUpperCase();
+  if (url.startsWith("data:") || url.startsWith("blob:")) return _fetchLocalScheme(url, method);
   const headers = init.headers !== undefined ? init.headers : (request ? request.headers : undefined);
   let _h = headers instanceof Headers ? Object.fromEntries(headers.entries()) : (headers || {});
   const inheritsRequestBody = init.body === undefined && request !== null;
@@ -9287,6 +9389,18 @@ globalThis.XMLHttpRequest = class XMLHttpRequest extends XMLHttpRequestEventTarg
   }
 
   open(method, url, async_) {
+    if (arguments.length < 2) {
+      throw new TypeError("Failed to execute 'open' on 'XMLHttpRequest': 2 arguments required, but only "
+        + arguments.length + " present.");
+    }
+    method = String(method);
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(method)) {
+      throw new DOMException("Failed to execute 'open' on 'XMLHttpRequest': '" + method + "' is not a valid HTTP method.", 'SyntaxError');
+    }
+    if (/^(connect|trace|track)$/i.test(method)) {
+      throw new DOMException("Failed to execute 'open' on 'XMLHttpRequest': '" + method + "' HTTP method is unsupported.", 'SecurityError');
+    }
+    if (/^(delete|get|head|options|post|put)$/i.test(method)) method = method.toUpperCase();
     this._method = method;
     this._url = url;
     this._headers = {};
@@ -13456,8 +13570,8 @@ globalThis.performance = globalThis.performance || {
     // synthetic per-call increment keeps tight loops from advancing the clock
     // faster than real elapsed time.
     var _last = -Infinity;
-    return function() {
-      var ms = Date.now() - (globalThis.performance.timeOrigin || 0);
+    return function now() {
+      var ms = __obscuraCore.ops.op_performance_now(_realmFrameId);
       if (ms < _last) return _last;
       _last = ms;
       return _last;
@@ -16646,7 +16760,10 @@ class _RemoteWindow {
   constructor(frameId) {
     Object.defineProperty(this, '_frameId', { value: frameId, enumerable: false });
   }
-  postMessage(data, targetOrigin, _transfer) { _sendRealmMessage(this._frameId, data, targetOrigin); }
+  postMessage(data, targetOrigin, _transfer) {
+    _checkWindowPostMessage(arguments.length, targetOrigin);
+    _sendRealmMessage(this._frameId, data, targetOrigin);
+  }
   get self() { return this; }
   get window() { return this; }
   get frames() { return this; }
@@ -16742,6 +16859,7 @@ class _IframeWindow {
   }
 
   postMessage(data, targetOrigin, _transfer) {
+    _checkWindowPostMessage(arguments.length, targetOrigin);
     // Into the frame's own realm, through the host. This used to dispatch the
     // event on the *parent's* window, so a page could never actually talk to
     // the document inside its iframe. A frame that has not loaded yet has no
@@ -17986,7 +18104,11 @@ function _makeWorkerScope(worker) {
   const location = new WorkerLocation(_workerConstructionKey);
   _workerLocationUrls.set(location, worker._url || '');
   let proxy = null;
-  const fire = (data) => (typeof MessageEvent === 'function' ? new MessageEvent('message', { data }) : { data });
+  // Messages between a worker and its owner are dispatched by the user agent,
+  // so they are trusted; challenge workers drop any message that is not.
+  const fire = (data) => (typeof MessageEvent === 'function'
+    ? globalThis.__obscura_markTrusted(new MessageEvent('message', { data }))
+    : { data });
   Object.defineProperty(own, Symbol.toStringTag, { value: 'DedicatedWorkerGlobalScope', configurable: true });
   Object.assign(own, {
     navigator,
@@ -18000,6 +18122,9 @@ function _makeWorkerScope(worker) {
     WorkerNavigator,
     WorkerLocation,
     postMessage: function postMessage(msg) {
+      if (arguments.length < 1) {
+        throw new TypeError("Failed to execute 'postMessage' on 'DedicatedWorkerGlobalScope': 1 argument required, but only 0 present.");
+      }
       if (worker._terminated) return;
       setTimeout(() => {
         if (worker._terminated) return;
@@ -18126,7 +18251,8 @@ globalThis.Worker = class Worker {
     console.error('Worker error:', e && e.message);
     const message = 'Uncaught ' + (e && e.name ? e.name + ': ' + e.message : String(e));
     const event = typeof ErrorEvent === 'function'
-      ? new ErrorEvent('error', { message, error: e, filename: this._url || '', lineno: 0, colno: 0 })
+      ? globalThis.__obscura_markTrusted(
+        new ErrorEvent('error', { message, error: e, filename: this._url || '', lineno: 0, colno: 0 }))
       : e;
     try {
       if (typeof this.onerror === 'function') this.onerror(event);
@@ -18134,6 +18260,9 @@ globalThis.Worker = class Worker {
     } catch (_ignored) {}
   }
   postMessage(data) {
+    if (arguments.length < 1) {
+      throw new TypeError("Failed to execute 'postMessage' on 'Worker': 1 argument required, but only 0 present.");
+    }
     if (this._terminated) return;
     if (!this._scope) {
       this._pendingMessages.push(data);
@@ -18144,7 +18273,9 @@ globalThis.Worker = class Worker {
       if (worker._terminated || !worker._scope) return;
       const scope = worker._scope;
       try {
-        const event = typeof MessageEvent === 'function' ? new MessageEvent('message', { data }) : { data };
+        const event = typeof MessageEvent === 'function'
+          ? globalThis.__obscura_markTrusted(new MessageEvent('message', { data }))
+          : { data };
         if (typeof scope.onmessage === 'function') scope.onmessage.call(scope, event);
         const evs = (scope._ev && scope._ev['message']) || [];
         for (const handler of evs.slice()) handler.call(scope, event);
@@ -18168,6 +18299,8 @@ globalThis.Worker = class Worker {
 };
 
 globalThis.__blobStore = globalThis.__blobStore || {};
+// The Blob behind each live blob: URL, for fetch() and XHR.
+const _blobObjects = new Map();
 URL.createObjectURL = function(blob) {
   // Chrome mints blob:<document-origin>/<v4-uuid> (blob:null/<uuid> on an opaque
   // origin) and throws a TypeError on missing/non-Blob input. The old code named
@@ -18199,6 +18332,7 @@ URL.createObjectURL = function(blob) {
           return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
         });
     const id = 'blob:' + origin + '/' + uuid;
+    _blobObjects.set(id, blob);
     // Store synchronously so a Worker built from the blob URL in the same
     // tick sees its source. Blob-URL Worker construction is synchronous in
     // real browsers; the previous async blob.text().then() store raced the
@@ -18220,6 +18354,7 @@ URL.createObjectURL = function(blob) {
 };
 URL.revokeObjectURL = function(url) {
   delete globalThis.__blobStore[url];
+  _blobObjects.delete(String(url));
 };
 /* MEDIA_EXTRAS */
 
@@ -18299,7 +18434,22 @@ globalThis.stop = function() {}; _markNative(globalThis.stop);
 // that posted to itself and waited for the `message` event waited forever.
 // Same realm, so this needs no host round trip; it is queued as a task because
 // postMessage never delivers synchronously.
-globalThis.postMessage = function(data, targetOrigin, _transfer) {
+// Window.postMessage argument checks, in Chrome's order and wording. Pages
+// call it with no arguments and expect the TypeError a browser throws.
+function _checkWindowPostMessage(count, targetOrigin) {
+  if (count < 1) {
+    throw new TypeError("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+  }
+  if (typeof targetOrigin !== 'string' || targetOrigin === '*' || targetOrigin === '/') return;
+  let valid = false;
+  try { valid = new URL(targetOrigin).origin !== 'null'; } catch (_e) {}
+  if (!valid) {
+    throw new DOMException("Failed to execute 'postMessage' on 'Window': Invalid target origin '"
+      + targetOrigin + "' in a call to 'postMessage'.", 'SyntaxError');
+  }
+}
+globalThis.postMessage = function postMessage(data, targetOrigin, _transfer) {
+  _checkWindowPostMessage(arguments.length, targetOrigin);
   _sendRealmMessage(_realmFrameId, data, targetOrigin);
 };
 _markNative(globalThis.postMessage);
