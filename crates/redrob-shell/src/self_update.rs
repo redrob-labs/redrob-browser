@@ -537,7 +537,6 @@ fn make_executable(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-
 /// A `chrome-sandbox` someone made the set-user-ID root helper (only root can)
 /// stays one across an update that ships the same helper: the old file moves
 /// into the new bundle instead of the unprivileged copy from the archive.
