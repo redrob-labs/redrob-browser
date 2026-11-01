@@ -10389,10 +10389,26 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
           return r.width != null ? `${r.width}px` : null;
         case 'height': case 'block-size':
           return r.height != null ? `${r.height}px` : null;
-        case 'left': return r.left != null ? `${r.left}px` : null;
-        case 'top': return r.top != null ? `${r.top}px` : null;
-        case 'right': return r.right != null ? `${r.right}px` : null;
-        case 'bottom': return r.bottom != null ? `${r.bottom}px` : null;
+        case 'left': case 'top': case 'right': case 'bottom': {
+          // Only an absolutely positioned or fixed box with an `auto` inset
+          // reaches here: report its used offset from the containing block
+          // (the offset parent's padding box; the viewport when fixed).
+          const offsetParent = el.offsetParent;
+          let cb;
+          if (offsetParent && typeof offsetParent.getBoundingClientRect === 'function') {
+            const p = offsetParent.getBoundingClientRect();
+            const left = p.left + (offsetParent.clientLeft || 0), top = p.top + (offsetParent.clientTop || 0);
+            cb = { left, top, right: left + (offsetParent.clientWidth || 0), bottom: top + (offsetParent.clientHeight || 0) };
+          } else {
+            cb = { left: 0, top: 0, right: globalThis.innerWidth, bottom: globalThis.innerHeight };
+          }
+          const margin = (side) => parseFloat(lookup('margin-' + side)) || 0;
+          const used = name === 'left' ? r.left - cb.left - margin('left')
+            : name === 'top' ? r.top - cb.top - margin('top')
+            : name === 'right' ? cb.right - r.right - margin('right')
+            : cb.bottom - r.bottom - margin('bottom');
+          return Number.isFinite(used) ? `${used}px` : null;
+        }
         case 'client-width': case 'offset-width':
           return r.width != null ? `${r.width}px` : null;
         case 'client-height': case 'offset-height':
@@ -10450,6 +10466,10 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
         const m = /^(-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(px|%)?$/i.exec(raw);
         if (m) return m[2] === '%' ? `${+m[1]}%` : `${+m[1]}px`;
       }
+      // `min-width/min-height: auto` resolves to 0px except on flex and grid
+      // items, which keep `auto` (their automatic minimum size).
+      if (value === 'auto' && (kebab === 'min-width' || kebab === 'min-height')
+          && !_computedStyleIsFlexOrGridItem(el)) return '0px';
       return value;
     }
     // Non-render builds and properties outside the renderer snapshot retain
@@ -10509,6 +10529,24 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
 // Chrome parity: only elements whose shadow-including root is not a document
 // lose their style. Iframe shim documents count as documents, and shadow
 // content of a connected host keeps its style even when it is not slotted.
+// Whether `el` is an in-flow child of a flex or grid container in the flat
+// tree (display:contents parents pass their children through).
+function _computedStyleIsFlexOrGridItem(el) {
+  try {
+    const own = globalThis.getComputedStyle(el);
+    const position = own.position;
+    if (position === 'absolute' || position === 'fixed' || own.display === 'none') return false;
+    let parent = el.assignedSlot || el.parentNode;
+    for (let i = 0; parent && i < 64; i++) {
+      if (parent.nodeType === 11) { parent = parent.host; continue; }
+      if (parent.nodeType !== 1) return false;
+      const display = globalThis.getComputedStyle(parent).display;
+      if (display !== 'contents') return /(^|-)(flex|grid)$/.test(display);
+      parent = parent.assignedSlot || parent.parentNode;
+    }
+  } catch (_e) {}
+  return false;
+}
 const _iframeDocumentRoots = new WeakSet();
 function _computedStyleHasNoDocument(el) {
   if (!(el instanceof Node) || el.isConnected) return false;

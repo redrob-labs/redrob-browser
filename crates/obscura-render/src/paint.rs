@@ -2347,7 +2347,25 @@ impl PreparedRender {
         );
         out.insert("flex-shrink", css_number(style.flex_shrink.unwrap_or(1.0)));
         out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
+        out.insert(
+            "flex",
+            format!(
+                "{} {} {}",
+                out["flex-grow"], out["flex-shrink"], out["flex-basis"]
+            ),
+        );
         out.insert("order", style.order.to_string());
+        out.insert(
+            "object-fit",
+            match style.object_fit {
+                crate::ObjectFit::Fill => "fill",
+                crate::ObjectFit::Contain => "contain",
+                crate::ObjectFit::Cover => "cover",
+                crate::ObjectFit::ScaleDown => "scale-down",
+                crate::ObjectFit::None => "none",
+            }
+            .to_string(),
+        );
 
         let used_auto = id
             .and_then(|id| self.layout.used_auto_margins.get(&id))
@@ -2378,6 +2396,31 @@ impl PreparedRender {
                     _ => css_px(value),
                 },
             );
+        }
+        // Insets (CSSOM resolved values): a non-positioned box reports its
+        // computed value; a relatively positioned or sticky box its used
+        // offset, `auto` being the negated opposite side or 0. A box whose
+        // used offset depends on its containing block (absolute/fixed with
+        // `auto`) is left to script, which measures it.
+        for (index, name) in ["top", "right", "bottom", "left"].into_iter().enumerate() {
+            let value = style.inset[index];
+            let opposite = style.inset[(index + 2) % 4];
+            let reported = match style.position {
+                None => {
+                    Some(value.map_or_else(|| "auto".to_string(), |v| dimension_css(v, "auto")))
+                }
+                Some(taffy::Position::Relative) => Some(match (value, opposite) {
+                    (Some(value), _) => dimension_css(value, "0px"),
+                    (None, Some(crate::Dimension::Px(px))) => css_px(-px),
+                    (None, _) => "0px".to_string(),
+                }),
+                Some(taffy::Position::Absolute) => value
+                    .filter(|value| matches!(value, crate::Dimension::Px(_)))
+                    .map(|value| dimension_css(value, "auto")),
+            };
+            if let Some(reported) = reported {
+                out.insert(name, reported);
+            }
         }
         for (name, value) in [
             ("padding-top", style.padding.top),
