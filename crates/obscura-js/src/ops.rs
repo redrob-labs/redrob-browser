@@ -1120,6 +1120,64 @@ fn op_fetch_cancel_handle(state: &mut OpState) -> u32 {
         .add(FetchCancelResource(CancelHandle::new_rc()))
 }
 
+/// Runs a classic script the way a `<script>` element does: compiled as its
+/// own script whose origin is `name` (the script URL, or empty for inline
+/// code), in the realm whose code is calling.
+///
+/// Indirect `eval` would run the same code, but every stack trace taken
+/// inside it then reads `eval at execute (<obscura:bootstrap>...)`, which
+/// names the engine to any page that inspects `Error.stack`.
+///
+/// Returns `undefined` on success. A thrown value comes back wrapped as
+/// `{ error }` so the caller can rethrow it from its own `catch` path.
+#[op2]
+fn op_run_classic_script<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    #[string] source: &str,
+    #[string] name: &str,
+) -> v8::Local<'s, v8::Value> {
+    let entered = v8::Global::new(scope, scope.get_entered_or_microtask_context());
+    let context = v8::Local::new(scope, &entered);
+    let scope = &mut v8::ContextScope::new(scope, context);
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    let (Some(code), Some(resource)) = (
+        v8::String::new(scope, source),
+        v8::String::new(scope, name),
+    ) else {
+        return undefined;
+    };
+    let origin = v8::ScriptOrigin::new(
+        scope,
+        resource.into(),
+        0,
+        0,
+        false,
+        0,
+        None,
+        false,
+        false,
+        false,
+        None,
+    );
+    v8::tc_scope!(let tc, scope);
+    let ran = v8::Script::compile(tc, code, Some(&origin)).and_then(|script| script.run(tc));
+    if ran.is_some() {
+        return undefined;
+    }
+    if tc.has_terminated() || tc.is_execution_terminating() {
+        tc.rethrow();
+        return undefined;
+    }
+    let Some(exception) = tc.exception() else {
+        return undefined;
+    };
+    let wrapper = v8::Object::new(tc);
+    if let Some(key) = v8::String::new(tc, "error") {
+        wrapper.set(tc, key.into(), exception);
+    }
+    wrapper.into()
+}
+
 // Private signal state survives realm crossings without public prototype
 // forgeries or a native Global handle that would keep dead signals alive.
 #[op2]
@@ -2103,8 +2161,8 @@ fn fragment_context_and_html(arg: &str) -> (html5ever::QualName, &str) {
 }
 
 #[op2(fast)]
-fn op_script_mark_started(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_script_mark_started(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return false;
@@ -2120,8 +2178,8 @@ fn op_script_mark_started(state: &OpState, nid: u32) -> bool {
 /// Atomically claim an executable script.  A false result means the node was
 /// created inert by an HTML-string API or has already been prepared once.
 #[op2(fast)]
-fn op_script_try_start(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_script_try_start(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return false;
@@ -2138,13 +2196,18 @@ fn op_script_try_start(state: &OpState, nid: u32) -> bool {
 /// tree. Layout intentionally remains unaware of the detached root until
 /// scoped style, slot assignment, and composed-tree paint are implemented.
 #[op2(fast)]
-fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String) -> i32 {
+fn op_shadow_attach(
+    state: &OpState,
+    host_nid: u32,
+    #[string] mode: String,
+    frame_id: u32,
+) -> i32 {
     let mode = match mode.as_str() {
         "open" => ShadowRootMode::Open,
         "closed" => ShadowRootMode::Closed,
         _ => return -1,
     };
-    let shared = state.borrow::<SharedState>().clone();
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return -1;
@@ -2161,8 +2224,8 @@ fn op_shadow_attach(state: &OpState, host_nid: u32, #[string] mode: String) -> i
 /// visibility in bootstrap.js.
 #[op2]
 #[string]
-fn op_shadow_root_info(state: &OpState, host_nid: u32) -> String {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_shadow_root_info(state: &OpState, host_nid: u32, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
     let state = shared.borrow();
     let Some(dom) = state.dom.as_ref() else {
         return String::new();
@@ -6733,6 +6796,67 @@ mod tests {
     }
 }
 
+/// Fetches a worker's `importScripts()` dependency and blocks until it lands.
+///
+/// `importScripts` is synchronous by definition: the next statement of the
+/// worker may use what the imported script defined. Workers run on the page's
+/// own thread here, so the request runs on a short-lived thread with its own
+/// reactor while this one waits, the way a real worker thread blocks.
+///
+/// Returns `{"ok":true,"url":..,"body":..}` or `{"ok":false,"error":..}`.
+#[op2]
+#[string]
+fn op_fetch_script_sync(state: &OpState, #[string] url: String, frame_id: u32) -> String {
+    let fail = |error: String| serde_json::json!({ "ok": false, "error": error }).to_string();
+    let shared = frame_state(state, frame_id);
+    let (client, initiator) = {
+        let gs = shared.borrow();
+        (gs.http_client.clone(), gs.url.clone())
+    };
+    let Some(client) = client else {
+        return fail("no network".to_string());
+    };
+    let parsed = match url::Url::parse(&url) {
+        Ok(parsed) => parsed,
+        Err(error) => return fail(error.to_string()),
+    };
+    if let Err(reason) = validate_fetch_url(&parsed, client.allow_private_network) {
+        return fail(reason);
+    }
+    let initiator = url::Url::parse(&initiator).unwrap_or_else(|_| parsed.clone());
+    let request = obscura_net::ResourceRequest::subresource(obscura_net::ResourceType::Script, &initiator);
+    let fetched = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|error| error.to_string())?;
+                runtime.block_on(async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(30),
+                        client.fetch_resource_with_callbacks(&parsed, request, None),
+                    )
+                    .await
+                    .map_err(|_| "timed out".to_string())?
+                    .map_err(|error| error.to_string())
+                })
+            })
+            .join()
+            .unwrap_or_else(|_| Err("fetch thread panicked".to_string()))
+    });
+    match fetched {
+        Ok(response) if (200..300).contains(&response.status) => serde_json::json!({
+            "ok": true,
+            "url": response.url.to_string(),
+            "body": response.text(),
+        })
+        .to_string(),
+        Ok(response) => fail(format!("HTTP {}", response.status)),
+        Err(error) => fail(error),
+    }
+}
+
 fn validate_fetch_url(url: &url::Url, allow_private_network: bool) -> Result<(), String> {
     let scheme = url.scheme();
     // file:// is denied by default here, matching Page.navigate /
@@ -8204,6 +8328,7 @@ fn op_canvas_register_surface(
     width: u32,
     height: u32,
     #[buffer] pixels: JsBuffer,
+    frame_id: u32,
 ) -> bool {
     const MAX_CANVAS_DIMENSION: u32 = 32_767;
     const MAX_CANVAS_PIXELS: usize = 67_108_864;
@@ -8222,7 +8347,7 @@ fn op_canvas_register_surface(
         return false;
     }
 
-    let shared = state.borrow::<SharedState>().clone();
+    let shared = frame_state(state, frame_id);
     let mut state = shared.borrow_mut();
     let node = NodeId::new(nid);
     let is_canvas = state
@@ -8267,8 +8392,8 @@ fn op_canvas_register_surface(
 /// screencast/readiness without throwing away otherwise-valid layout.
 #[cfg(feature = "render")]
 #[op2(fast)]
-fn op_canvas_paint_damage(state: &OpState, nid: u32) -> bool {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_canvas_paint_damage(state: &OpState, nid: u32, frame_id: u32) -> bool {
+    let shared = frame_state(state, frame_id);
     let mut state = shared.borrow_mut();
     let node = NodeId::new(nid);
     if !state.canvas_surfaces.contains_key(&node) {
@@ -8306,6 +8431,8 @@ pub fn build_extension() -> Extension {
         op_fetch_url(),
         op_fetch_cancel_handle(),
         op_abort_signal_state(),
+        op_run_classic_script(),
+        op_fetch_script_sync(),
         op_fetch_body(),
         op_get_cookies(),
         op_set_cookie(),
@@ -9103,8 +9230,8 @@ fn cached_image_metadata_for_node(gs: &ObscuraState, node_id: NodeId) -> String 
 #[cfg(feature = "render")]
 #[op2]
 #[string]
-fn op_image_metadata(state: &OpState, nid: u32, _cached_only: bool) -> String {
-    let shared = state.borrow::<SharedState>().clone();
+fn op_image_metadata(state: &OpState, nid: u32, _cached_only: bool, frame_id: u32) -> String {
+    let shared = frame_state(state, frame_id);
     let gs = shared.borrow();
     let node_id = NodeId::new(nid);
     let is_image = gs.dom.as_ref().is_some_and(|dom| {
@@ -9189,11 +9316,12 @@ fn finish_async_image_metadata(
 #[cfg(feature = "render")]
 #[op2]
 #[string]
-async fn op_load_image_metadata(state: Rc<RefCell<OpState>>, nid: u32) -> String {
-    let shared = {
-        let state = state.borrow();
-        state.borrow::<SharedState>().clone()
-    };
+async fn op_load_image_metadata(
+    state: Rc<RefCell<OpState>>,
+    nid: u32,
+    frame_id: u32,
+) -> String {
+    let shared = frame_state(&state.borrow(), frame_id);
     let node_id = NodeId::new(nid);
     let (
         document_generation,

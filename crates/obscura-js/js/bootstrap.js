@@ -168,6 +168,14 @@ const _DOM_TREE_MUTATION_COMMANDS = new Set([
 // the caller's. Set by __obscura_init; 0 is the page.
 let _realmFrameId = 0;
 
+// Runs classic script source as its own script named `name`, like a
+// <script> element. Indirect eval would leave `eval at ...` frames naming the
+// engine in every stack trace the script takes.
+function _runClassicScript(code, name) {
+  const result = __obscuraCore.ops.op_run_classic_script(String(code), String(name || ''));
+  if (result !== undefined) throw result.error;
+}
+
 const _dom = (cmd, a1, a2) => {
   let result = __obscuraCore.ops.op_dom(cmd, String(a1 ?? ""), String(a2 ?? ""), _realmFrameId);
   if (result.startsWith('{"__obscuraFrameRetirements":')) {
@@ -387,7 +395,7 @@ function _decodeDataScriptUrl(url) {
 // native per-document state so it survives wrapper churn, fragment parsing,
 // moves, and cloneNode().
 globalThis.__markParserScripts = function(nids) {
-  for (const nid of nids || []) __obscuraCore.ops.op_script_mark_started(+nid);
+  for (const nid of nids || []) __obscuraCore.ops.op_script_mark_started(+nid, _realmFrameId);
 };
 async function __fetchDynClassicScript(task) {
   let body;
@@ -439,7 +447,7 @@ async function __runDynScriptTask(task) {
         await new Promise(resolve => {
           const execute = () => {
             globalThis.__currentScriptNid = task.nid;
-            try { (0, eval)(body); }
+            try { _runClassicScript(body, task.url); }
             catch(e) { console.error('Dynamic script error (' + task.url + '):', e.message); }
             finally { globalThis.__currentScriptNid = task.prevNid || 0; }
             resolve();
@@ -1066,7 +1074,7 @@ const _coerceTimerFn = (fn) => {
     // instead of swallowing it eagerly at scheduling. The dynamic-script path
     // uses the same indirect eval for the same reason.
     const src = fn;
-    return () => { (0, eval)(src); };
+    return () => { _runClassicScript(src, ''); };
   }
   return typeof fn === "function" ? fn : null;
 };
@@ -2257,7 +2265,7 @@ let _scriptingEnabled = true;
 let _sandboxOpaqueOrigin = false;
 function __prepareInsertedScript(script) {
   if (!_scriptingEnabled) return;
-  if (!__obscuraCore.ops.op_script_try_start(script._nid)) return;
+  if (!__obscuraCore.ops.op_script_try_start(script._nid, _realmFrameId)) return;
   const scriptType = (script.getAttribute('type') || '').trim().toLowerCase();
   const isModule = scriptType === 'module';
   const isImportMap = scriptType === 'importmap';
@@ -2388,7 +2396,7 @@ function __prepareInsertedScript(script) {
     __processParserBlockingScriptQueue();
   } else {
     globalThis.__currentScriptNid = script._nid;
-    try { (0, eval)(code); }
+    try { _runClassicScript(code, ''); }
     catch(e) { console.error('Dynamic inline script error:', e.message); }
     finally { globalThis.__currentScriptNid = prevNid || 0; }
   }
@@ -7290,7 +7298,7 @@ function _runWrittenParserScript(nid) {
   if (!script) return;
   var prev = globalThis.__currentScriptNid;
   globalThis.__currentScriptNid = nid;
-  try { (0, eval)(script.textContent); }
+  try { _runClassicScript(script.textContent, String(globalThis.location && globalThis.location.href || '')); }
   catch (e) { console.error('Inline script error:', e && e.message); }
   finally { globalThis.__currentScriptNid = prev || 0; }
 }
@@ -7758,7 +7766,7 @@ class HTMLImageElement extends HTMLElement {
     try {
       const op = __obscuraCore.ops.op_load_image_metadata;
       if (typeof op === "function") {
-        Promise.resolve(op(this._nid >>> 0)).then(
+        Promise.resolve(op(this._nid >>> 0, _realmFrameId)).then(
           raw => {
             let metadata = null;
             try { metadata = JSON.parse(raw); }
@@ -7782,7 +7790,7 @@ class HTMLImageElement extends HTMLElement {
     try {
       const op = __obscuraCore.ops.op_image_metadata;
       if (typeof op !== "function") return;
-      const metadata = JSON.parse(op(this._nid >>> 0, true));
+      const metadata = JSON.parse(op(this._nid >>> 0, true, _realmFrameId));
       if (!metadata) return;
       const selected = metadata.currentSrc ? String(metadata.currentSrc) : "";
       if (selected !== this._imageCurrentSrc) {
@@ -8266,22 +8274,129 @@ globalThis.__virtualUrl = null;
 function __currentUrl() {
   return globalThis.__virtualUrl || _domParse("document_url") || "about:blank";
 }
-globalThis.location = {
-  get href() { return __currentUrl(); },
-  set href(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  get origin() { try { return new URL(this.href).origin; } catch { return ""; } },
-  get protocol() { try { return new URL(this.href).protocol; } catch { return ""; } },
-  get host() { try { return new URL(this.href).host; } catch { return ""; } },
-  get hostname() { try { return new URL(this.href).hostname; } catch { return ""; } },
-  get pathname() { try { return new URL(this.href).pathname; } catch { return "/"; } },
-  get search() { try { return new URL(this.href).search; } catch { return ""; } },
-  get hash() { try { return new URL(this.href).hash; } catch { return ""; } },
-  get port() { try { return new URL(this.href).port; } catch { return ""; } },
-  toString() { return this.href; },
-  assign(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  reload() { var r = _resolveUrl(this.href); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-  replace(url) { var r = _resolveUrl(url); globalThis.__virtualUrl = r; __obscuraCore.ops.op_navigate(r, 'GET', ''); },
-};
+// Location navigation. A target that differs from the current URL only in
+// its fragment is a same-document navigation, as in Chrome: it updates the URL
+// and fires hashchange instead of fetching the document again.
+function _navigateLocation(url, replace) {
+  var target = _resolveUrl(url);
+  var current = __currentUrl();
+  try {
+    var a = new URL(current), b = new URL(target);
+    if (b.hash !== '' && a.origin === b.origin && a.pathname === b.pathname
+        && a.search === b.search && globalThis.history) {
+      if (a.hash !== b.hash) {
+        if (replace) globalThis.history.replaceState(globalThis.history.state, '', b.href);
+        else globalThis.history.pushState(null, '', b.href);
+        var hashEvent = typeof HashChangeEvent === 'function'
+          ? new HashChangeEvent('hashchange', { oldURL: current, newURL: b.href })
+          : new Event('hashchange');
+        setTimeout(function () { try { globalThis.dispatchEvent(hashEvent); } catch (e) {} }, 0);
+      }
+      return;
+    }
+  } catch (e) {}
+  globalThis.__virtualUrl = target;
+  __obscuraCore.ops.op_navigate(target, 'GET', '');
+}
+function _setLocationPart(part, value) {
+  var u;
+  try { u = new URL(__currentUrl()); } catch (e) { return; }
+  value = String(value);
+  if (part === 'hash') {
+    value = value.replace(/^#/, '');
+    u.hash = value;
+    var href = u.href;
+    // `location.hash = ''` still navigates to the URL with an empty fragment.
+    if (value === '' && href.indexOf('#') === -1) href += '#';
+    _navigateLocation(href, false);
+    return;
+  }
+  u[part] = value;
+  _navigateLocation(u.href, false);
+}
+// DOMStringList, as `location.ancestorOrigins` returns it.
+const _domStringListItems = new WeakMap();
+function DOMStringList() { throw new TypeError("Illegal constructor"); }
+Object.defineProperty(DOMStringList.prototype, Symbol.toStringTag, { value: 'DOMStringList', configurable: true });
+(function () {
+  var length = function () { return (_domStringListItems.get(this) || []).length; };
+  _markNativeAs(length, 'function get length() { [native code] }');
+  Object.defineProperty(DOMStringList.prototype, 'length', { get: length, enumerable: true, configurable: true });
+  var item = function item(index) { var items = _domStringListItems.get(this) || []; index = index >>> 0; return index < items.length ? items[index] : null; };
+  var contains = function contains(value) { return (_domStringListItems.get(this) || []).indexOf(String(value)) !== -1; };
+  [item, contains].forEach(function (fn) {
+    _markNative(fn);
+    Object.defineProperty(DOMStringList.prototype, fn.name, { value: fn, writable: true, enumerable: true, configurable: true });
+  });
+  Object.defineProperty(DOMStringList.prototype, Symbol.iterator, { value: Array.prototype.values, writable: true, configurable: true });
+  _markNative(DOMStringList);
+})();
+function _makeDOMStringList(items) {
+  var list = Object.create(DOMStringList.prototype);
+  items = Array.from(items, String);
+  _domStringListItems.set(list, items);
+  items.forEach(function (value, index) {
+    Object.defineProperty(list, index, { value: value, enumerable: true, writable: false, configurable: false });
+  });
+  return Object.preventExtensions(list);
+}
+globalThis.DOMStringList = DOMStringList;
+// Origins of the documents embedding this one, nearest first. Frame setup
+// fills it in before the frame's scripts run; the page itself has none.
+globalThis.__obscura_ancestorOrigins = [];
+// Location is an interface in Chrome; its members are unforgeable, so they live
+// on the instance and the prototype only carries the brand.
+function Location() { throw new TypeError("Illegal constructor"); }
+Object.defineProperty(Location.prototype, Symbol.toStringTag, { value: 'Location', configurable: true });
+globalThis.location = Object.create(Location.prototype);
+(function _defineLocationMembers(loc) {
+  var parts = ['protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
+  Object.defineProperty(loc, 'valueOf', { value: Object.prototype.valueOf, writable: false, enumerable: false, configurable: false });
+  var accessors = {
+    ancestorOrigins: null,
+    href: {
+      get: function () { return __currentUrl(); },
+      set: function (url) { _navigateLocation(url, false); },
+    },
+    origin: { get: function () { try { return new URL(__currentUrl()).origin; } catch (e) { return ""; } } },
+  };
+  parts.forEach(function (part) {
+    accessors[part] = {
+      get: function () { try { return new URL(__currentUrl())[part]; } catch (e) { return part === 'pathname' ? '/' : ''; } },
+      set: function (value) { _setLocationPart(part, value); },
+    };
+  });
+  var ancestorOrigins = null;
+  accessors.ancestorOrigins = {
+    get: function () {
+      if (!ancestorOrigins) ancestorOrigins = _makeDOMStringList(globalThis.__obscura_ancestorOrigins || []);
+      return ancestorOrigins;
+    },
+  };
+  Object.keys(accessors).forEach(function (name) {
+    var d = accessors[name];
+    var desc = { enumerable: true, configurable: false };
+    if (d.get) { desc.get = d.get; _markNativeAs(d.get, 'function get ' + name + '() { [native code] }'); }
+    if (d.set) { desc.set = d.set; _markNativeAs(d.set, 'function set ' + name + '() { [native code] }'); }
+    Object.defineProperty(loc, name, desc);
+  });
+  var methods = {
+    assign: function assign(url) { _navigateLocation(url, false); },
+    reload: function reload() {
+      var r = __currentUrl();
+      globalThis.__virtualUrl = r;
+      __obscuraCore.ops.op_navigate(r, 'GET', '');
+    },
+    replace: function replace(url) { _navigateLocation(url, true); },
+    toString: function toString() { return __currentUrl(); },
+  };
+  Object.keys(methods).forEach(function (name) {
+    _markNative(methods[name]);
+    Object.defineProperty(loc, name, { value: methods[name], writable: false, enumerable: true, configurable: false });
+  });
+  _markNative(Location);
+  globalThis.Location = Location;
+})(globalThis.location);
 const _locationObj = globalThis.location;
 Object.defineProperty(globalThis, 'location', {
   get() { return _locationObj; },
@@ -12349,7 +12464,7 @@ globalThis.__obscura_fireBeforeUnload = function() {
 };
 _markNative(BeforeUnloadEvent);
 _markNative(Event);
-globalThis.CustomEvent = class extends Event {
+globalThis.CustomEvent = class CustomEvent extends Event {
   constructor(t,o={}) { if (arguments.length < 1) throw new TypeError("Failed to construct 'CustomEvent': 1 argument required, but only 0 present."); super(t,o);this.detail=o.detail!==undefined?o.detail:null; }
   // Legacy DOM Level 2 init; some libraries (Starbucks China bundle, older
   // analytics shims) still call createEvent('CustomEvent') + initCustomEvent
@@ -12361,7 +12476,7 @@ globalThis.CustomEvent = class extends Event {
     this.detail = detail;
   }
 };
-globalThis.MouseEvent = class extends Event {
+globalThis.MouseEvent = class MouseEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.screenX=o.screenX||0;this.screenY=o.screenY||0;this.clientX=o.clientX||0;this.clientY=o.clientY||0;this.ctrlKey=!!o.ctrlKey;this.altKey=!!o.altKey;this.shiftKey=!!o.shiftKey;this.metaKey=!!o.metaKey;this.button=o.button||0;this.buttons=o.buttons||0;this.relatedTarget=o.relatedTarget||null;this.movementX=o.movementX||0;this.movementY=o.movementY||0; }
   get pageX() { return this.clientX + (globalThis.scrollX || 0); }
   get pageY() { return this.clientY + (globalThis.scrollY || 0); }
@@ -12403,7 +12518,7 @@ globalThis.MouseEvent = class extends Event {
     this.relatedTarget=relatedTarget===undefined?null:relatedTarget;
   }
 };
-globalThis.KeyboardEvent = class extends Event {
+globalThis.KeyboardEvent = class KeyboardEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.key=o.key||"";this.code=o.code||"";this.location=o.location||0;this.ctrlKey=!!o.ctrlKey;this.altKey=!!o.altKey;this.shiftKey=!!o.shiftKey;this.metaKey=!!o.metaKey;this.repeat=!!o.repeat;this.keyCode=o.keyCode||0;this.charCode=o.charCode||0;this.which=o.which||0; }
   getModifierState(key) {
     switch (String(key)) {
@@ -12427,9 +12542,9 @@ globalThis.KeyboardEvent = class extends Event {
     this.metaKey=!!metaKey;
   }
 };
-globalThis.FocusEvent = class extends Event { constructor(t,o={}) { super(t,o);this.relatedTarget=o.relatedTarget||null; } };
-globalThis.InputEvent = class extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
-globalThis.ErrorEvent = class extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
+globalThis.FocusEvent = class FocusEvent extends Event { constructor(t,o={}) { super(t,o);this.relatedTarget=o.relatedTarget||null; } };
+globalThis.InputEvent = class InputEvent extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
+globalThis.ErrorEvent = class ErrorEvent extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
 const _browserErrorEvent = globalThis.ErrorEvent;
 __obscuraCore.setReportExceptionCallback(error => {
   // deno_core's default reporter terminates execution, discarding the rest of
@@ -12443,7 +12558,7 @@ __obscuraCore.setReportExceptionCallback(error => {
     _consoleFn("error", [error]);
   }
 });
-globalThis.PointerEvent = class extends MouseEvent {
+globalThis.PointerEvent = class PointerEvent extends MouseEvent {
   constructor(t,o={}) {
     super(t,o);
     this.pointerId=o.pointerId===undefined?0:o.pointerId;
@@ -12464,8 +12579,8 @@ globalThis.AnimationEvent = class AnimationEvent extends Event {
     this.pseudoElement = String(init.pseudoElement ?? '');
   }
 };
-globalThis.TransitionEvent = class extends Event {};
-globalThis.UIEvent = class extends Event {
+globalThis.TransitionEvent = class TransitionEvent extends Event {};
+globalThis.UIEvent = class UIEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0; }
   // Legacy DOM Level 2 initializer. Positional signature per UI Events spec.
   initUIEvent(type,canBubble,cancelable,view,detail) {
@@ -12478,11 +12593,11 @@ globalThis.UIEvent = class extends Event {
 // WheelEvent inherits all MouseEvent coordinates and modifier state. CDP
 // Input.dispatchMouseEvent supplies those fields and automation libraries use
 // them to distinguish wheel gestures over nested panes.
-globalThis.WheelEvent = class extends MouseEvent {
+globalThis.WheelEvent = class WheelEvent extends MouseEvent {
   constructor(t,o={}) { super(t,o);this.deltaX=o.deltaX||0;this.deltaY=o.deltaY||0;this.deltaZ=o.deltaZ||0;this.deltaMode=o.deltaMode||0; }
 };
 
-globalThis.CompositionEvent = class extends Event {
+globalThis.CompositionEvent = class CompositionEvent extends Event {
   constructor(t,o={}) { super(t,o);this.view=o.view||null;this.detail=o.detail||0;this.data=o.data||""; }
   // Legacy DOM Level 3 initializer. Positional signature per UI Events spec.
   initCompositionEvent(type,canBubble,cancelable,view,data) {
@@ -12492,7 +12607,7 @@ globalThis.CompositionEvent = class extends Event {
     this.data=data===undefined?"":String(data);
   }
 };
-globalThis.PopStateEvent = class extends Event {
+globalThis.PopStateEvent = class PopStateEvent extends Event {
   constructor(type, init) {
     super(type, init || {});
     // Real PopStateEvent exposes `state` from the entry being navigated to.
@@ -12502,8 +12617,8 @@ globalThis.PopStateEvent = class extends Event {
     this.state = init && 'state' in init ? init.state : null;
   }
 };
-globalThis.HashChangeEvent = class extends Event {};
-globalThis.MessageEvent = class extends Event {
+globalThis.HashChangeEvent = class HashChangeEvent extends Event {};
+globalThis.MessageEvent = class MessageEvent extends Event {
   constructor(t,o={}) {
     super(t,o);
     this.data = Object.prototype.hasOwnProperty.call(o, "data") ? o.data : null;
@@ -12522,8 +12637,8 @@ globalThis.ProgressEvent = class ProgressEvent extends Event {
     this.total = i.total != null ? Number(i.total) : 0;
   }
 };
-globalThis.ClipboardEvent = class extends Event {};
-globalThis.SubmitEvent = class extends Event {};
+globalThis.ClipboardEvent = class ClipboardEvent extends Event {};
+globalThis.SubmitEvent = class SubmitEvent extends Event {};
 
 // ToggleEvent backs the popover beforetoggle/toggle events. oldState and
 // newState are "open"/"closed". These events do not bubble; beforetoggle is
@@ -16740,7 +16855,7 @@ class _Canvas2D {
         this._buf.byteOffset,
         this._buf.byteLength,
       );
-      if (!register(this.canvas._nid, this._w, this._h, bytes)) {
+      if (!register(this.canvas._nid, this._w, this._h, bytes, _realmFrameId)) {
         throw new RangeError('Canvas backing store allocation failed');
       }
     }
@@ -16751,7 +16866,7 @@ class _Canvas2D {
     queueMicrotask(() => {
       this._damageQueued = false;
       const damage = __obscuraCore.ops.op_canvas_paint_damage;
-      if (typeof damage === 'function') damage(this.canvas._nid);
+      if (typeof damage === 'function') damage(this.canvas._nid, _realmFrameId);
     });
   }
   _parseColor(css) {
@@ -17496,10 +17611,10 @@ Element.prototype.attachShadow = function attachShadow(opts) {
   if (!globalThis.__obscura_shadowHostNames.has(_ln) && _ln.indexOf('-') === -1) {
     throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
   }
-  if (__obscuraCore.ops.op_shadow_root_info(this._nid)) {
+  if (__obscuraCore.ops.op_shadow_root_info(this._nid, _realmFrameId)) {
     throw new DOMException('Failed to execute attachShadow on Element: the element already hosts a shadow tree.', 'NotSupportedError');
   }
-  const rootNid = __obscuraCore.ops.op_shadow_attach(this._nid, _mode);
+  const rootNid = __obscuraCore.ops.op_shadow_attach(this._nid, _mode, _realmFrameId);
   if (rootNid < 0) {
     throw new DOMException('Failed to execute attachShadow on Element: this element does not support attachShadow', 'NotSupportedError');
   }
@@ -17519,7 +17634,7 @@ _markNative(Element.prototype.attachShadow);
 
 function _shadowRootForHost(host, includeClosed) {
   if (!host) return null;
-  const info = __obscuraCore.ops.op_shadow_root_info(host._nid);
+  const info = __obscuraCore.ops.op_shadow_root_info(host._nid, _realmFrameId);
   if (!info) return null;
   const parts = info.split('\0');
   if (!includeClosed && parts[1] !== 'open') return null;
@@ -17717,8 +17832,199 @@ navigator.wakeLock = { request() { return Promise.reject(new DOMException('Not a
 
 globalThis.opener = null;
 
+
+// A dedicated worker runs on the page's thread here, against a global scope
+// object that looks like DedicatedWorkerGlobalScope: `self.navigator` is a
+// WorkerNavigator carrying the page's identity, `self.location` is the
+// worker's own URL, `importScripts` loads synchronously, and window-only
+// members (`document`, `window`, `localStorage`, ...) are absent. Anything
+// else falls through to the page's globals, which hold the same builtins a
+// worker realm has.
+const _workerHiddenGlobals = new Set([
+  'window', 'document', 'parent', 'top', 'frames', 'opener', 'frameElement',
+  'localStorage', 'sessionStorage', 'alert', 'confirm', 'prompt', 'print',
+  'open', 'close', 'stop', 'focus', 'blur', 'history', 'screen', 'visualViewport',
+  'customElements', 'getComputedStyle', 'getSelection', 'matchMedia',
+  'innerWidth', 'innerHeight', 'outerWidth', 'outerHeight', 'screenX', 'screenY',
+  'screenLeft', 'screenTop', 'scrollX', 'scrollY', 'pageXOffset', 'pageYOffset',
+  'devicePixelRatio', 'external', 'clientInformation', 'styleMedia', 'menubar',
+  'toolbar', 'locationbar', 'personalbar', 'scrollbars', 'statusbar', 'speechSynthesis',
+  'chrome', 'event', 'length', 'name', 'status', 'closed', 'originAgentCluster',
+  'Window', 'Document', 'HTMLDocument', 'Element', 'Node', 'Text', 'Comment',
+  'DocumentFragment', 'ShadowRoot', 'Attr', 'CharacterData', 'Range', 'Selection',
+  'MutationObserver', 'IntersectionObserver', 'ResizeObserver', 'DOMParser',
+  'XMLSerializer', 'Location', 'History', 'Screen', 'Storage', 'Image', 'Audio', 'Option',
+  'Navigator', 'Worker', 'SharedWorker', 'localName',
+]);
+function _isWindowOnlyGlobal(name) {
+  return typeof name === 'string' && (_workerHiddenGlobals.has(name)
+    || /^(HTML|SVG|CSS(?!S)|on)/.test(name) || name.startsWith('__obscura') || name.startsWith('_'));
+}
+class WorkerNavigator {
+  constructor(key) { if (key !== _workerConstructionKey) throw new TypeError('Illegal constructor'); }
+}
+class WorkerLocation {
+  constructor(key) { if (key !== _workerConstructionKey) throw new TypeError('Illegal constructor'); }
+}
+const _workerConstructionKey = {};
+const _workerLocationUrls = new WeakMap();
+(function _defineWorkerInterfaces() {
+  const navProps = ['appCodeName', 'appName', 'appVersion', 'platform', 'product',
+    'userAgent', 'language', 'languages', 'onLine', 'hardwareConcurrency', 'deviceMemory',
+    'userAgentData', 'connection', 'storage', 'locks', 'permissions',
+    'mediaCapabilities', 'gpu', 'serviceWorker', 'serial', 'hid', 'usb', 'ml'];
+  for (const prop of navProps) {
+    const get = function () {
+      const nav = globalThis.navigator;
+      return nav ? nav[prop] : undefined;
+    };
+    _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
+    Object.defineProperty(WorkerNavigator.prototype, prop, { get, enumerable: true, configurable: true });
+  }
+  Object.defineProperty(WorkerNavigator.prototype, Symbol.toStringTag, { value: 'WorkerNavigator', configurable: true });
+  const locProps = ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
+  for (const prop of locProps) {
+    const get = function () {
+      const href = _workerLocationUrls.get(this) || '';
+      if (prop === 'href') return href;
+      try {
+        const url = new URL(href);
+        if (prop === 'origin' && url.protocol === 'blob:') {
+          try { return new URL(url.pathname).origin; } catch (_e) { return 'null'; }
+        }
+        return url[prop];
+      } catch (_e) { return ''; }
+    };
+    _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
+    Object.defineProperty(WorkerLocation.prototype, prop, { get, enumerable: true, configurable: true });
+  }
+  const toString = function toString() { return _workerLocationUrls.get(this) || ''; };
+  _markNative(toString);
+  Object.defineProperty(WorkerLocation.prototype, 'toString', { value: toString, writable: true, enumerable: true, configurable: true });
+  Object.defineProperty(WorkerLocation.prototype, Symbol.toStringTag, { value: 'WorkerLocation', configurable: true });
+  _markNative(WorkerNavigator);
+  _markNative(WorkerLocation);
+})();
+function _workerScriptSource(url) {
+  if (globalThis.__blobStore && Object.prototype.hasOwnProperty.call(globalThis.__blobStore, url)) {
+    return globalThis.__blobStore[url];
+  }
+  if (url.startsWith('data:')) {
+    const comma = url.indexOf(',');
+    const meta = url.slice(5, comma);
+    const payload = url.slice(comma + 1);
+    if (/;base64$/i.test(meta)) {
+      const bytes = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    }
+    return decodeURIComponent(payload);
+  }
+  const raw = __obscuraCore.ops.op_fetch_script_sync(url, _realmFrameId);
+  let result = null;
+  try { result = JSON.parse(raw); } catch (_e) {}
+  if (!result || !result.ok) return null;
+  return result.body;
+}
+function _runInWorkerScope(scope, code, url) {
+  // Direct eval inside `with` resolves free names against the worker scope;
+  // the code runs as its own script so stack traces name its URL.
+  const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
+  const named = String(code) + (url && !/\n\/\/# sourceURL=/.test(code) ? '\n//# sourceURL=' + url : '');
+  fn.call(scope, scope, named);
+}
+function _makeWorkerScope(worker) {
+  const own = {
+    onmessage: null,
+    onmessageerror: null,
+    onerror: null,
+    _ev: null,
+  };
+  const navigator = new WorkerNavigator(_workerConstructionKey);
+  const location = new WorkerLocation(_workerConstructionKey);
+  _workerLocationUrls.set(location, worker._url || '');
+  let proxy = null;
+  const fire = (data) => (typeof MessageEvent === 'function' ? new MessageEvent('message', { data }) : { data });
+  Object.defineProperty(own, Symbol.toStringTag, { value: 'DedicatedWorkerGlobalScope', configurable: true });
+  Object.assign(own, {
+    navigator,
+    location,
+    name: worker._name || '',
+    origin: location.origin,
+    isSecureContext: globalThis.isSecureContext,
+    crossOriginIsolated: !!globalThis.crossOriginIsolated,
+    WorkerGlobalScope: function WorkerGlobalScope() { throw new TypeError('Illegal constructor'); },
+    DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() { throw new TypeError('Illegal constructor'); },
+    WorkerNavigator,
+    WorkerLocation,
+    postMessage: function postMessage(msg) {
+      if (worker._terminated) return;
+      setTimeout(() => {
+        if (worker._terminated) return;
+        const evt = fire(msg);
+        try {
+          if (typeof worker.onmessage === 'function') worker.onmessage(evt);
+          for (const h of (worker._listeners['message'] || []).slice()) h.call(worker, evt);
+        } catch (e) {
+          if (typeof reportError === 'function') reportError(e);
+        }
+      }, 0);
+    },
+    addEventListener: function addEventListener(type, fn) {
+      if (!own._ev) own._ev = {};
+      if (!own._ev[type]) own._ev[type] = [];
+      if (fn && !own._ev[type].includes(fn)) own._ev[type].push(fn);
+    },
+    removeEventListener: function removeEventListener(type, fn) {
+      if (own._ev && own._ev[type]) own._ev[type] = own._ev[type].filter((h) => h !== fn);
+    },
+    dispatchEvent: function dispatchEvent(event) {
+      const list = (own._ev && own._ev[event && event.type]) || [];
+      for (const h of list.slice()) h.call(proxy, event);
+      return true;
+    },
+    close: function close() { worker.terminate(); },
+    importScripts: function importScripts(...urls) {
+      const base = worker._url || globalThis.location.href;
+      for (const raw of urls) {
+        let url;
+        try { url = new URL(String(raw), base).href; }
+        catch (_e) { throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The URL '" + raw + "' is invalid.", 'SyntaxError'); }
+        const source = _workerScriptSource(url);
+        if (source === null || source === undefined) {
+          throw new DOMException("Failed to execute 'importScripts' on 'WorkerGlobalScope': The script at '" + url + "' failed to load.", 'NetworkError');
+        }
+        _runInWorkerScope(proxy, source, url);
+      }
+    },
+  });
+  for (const name of ['postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent', 'close', 'importScripts']) {
+    _markNative(own[name]);
+  }
+  proxy = new Proxy(own, {
+    has(target, key) {
+      if (key === Symbol.unscopables) return false;
+      if (key === 'self' || key === 'globalThis' || key in target) return true;
+      // Window-only names must resolve to nothing, not fall through `with` to
+      // the page's own globals.
+      if (_isWindowOnlyGlobal(key)) return key in globalThis;
+      return false;
+    },
+    get(target, key) {
+      if (key === Symbol.unscopables) return undefined;
+      if (key === 'self' || key === 'globalThis') return proxy;
+      if (key in target) return target[key];
+      if (_isWindowOnlyGlobal(key)) return undefined;
+      return globalThis[key];
+    },
+    set(target, key, value) { target[key] = value; return true; },
+    getPrototypeOf() { return Object.prototype; },
+  });
+  return proxy;
+}
 globalThis.Worker = class Worker {
-  constructor(url) {
+  constructor(url, options) {
+    this._url = String(url);
+    this._name = options && options.name !== undefined ? String(options.name) : '';
     this.onmessage = null;
     this.onerror = null;
     this._terminated = false;
@@ -17740,6 +18046,7 @@ globalThis.Worker = class Worker {
       if (!url.startsWith('http') && !url.startsWith('blob:') && !url.startsWith('data:')) {
         try { resolvedUrl = new URL(url, globalThis.location?.href || '').href; } catch(e) {}
       }
+      worker._url = resolvedUrl;
       (async () => {
         try {
           const resp = await fetch(resolvedUrl);
@@ -17751,41 +18058,7 @@ globalThis.Worker = class Worker {
   }
   _makeScope() {
     const worker = this;
-    const scope = {
-      onmessage: null,
-      WorkerGlobalScope: function WorkerGlobalScope() {},
-      DedicatedWorkerGlobalScope: function DedicatedWorkerGlobalScope() {},
-      postMessage: (msg) => {
-        if (worker._terminated) return;
-        const evt = { data: msg };
-        if (worker.onmessage) worker.onmessage(evt);
-        const ls = worker._listeners['message'] || [];
-        for (const h of ls) h(evt);
-      },
-      addEventListener: (type, fn) => {
-        if (!scope._ev) scope._ev = {};
-        if (!scope._ev[type]) scope._ev[type] = [];
-        scope._ev[type].push(fn);
-      },
-      close: () => { worker.terminate(); },
-      crypto: globalThis.crypto,
-      Crypto: globalThis.Crypto,
-      TextEncoder: globalThis.TextEncoder,
-      TextDecoder: globalThis.TextDecoder,
-      atob: globalThis.atob,
-      btoa: globalThis.btoa,
-      setTimeout: globalThis.setTimeout,
-      setInterval: globalThis.setInterval,
-      clearTimeout: globalThis.clearTimeout,
-      clearInterval: globalThis.clearInterval,
-      scheduler: globalThis.scheduler,
-      Scheduler: globalThis.Scheduler,
-      fetch: globalThis.fetch,
-      console: globalThis.console,
-      performance: globalThis.performance,
-      location: globalThis.location,
-    };
-    scope.self = scope;
+    const scope = _makeWorkerScope(worker);
     return scope;
   }
   _autoRun() {
@@ -17794,17 +18067,28 @@ globalThis.Worker = class Worker {
     try {
       // Direct eval preserves script directives and resolves bare handler names
       // against the worker scope. Run once so message closures retain their state.
-      const fn = new Function('scope', 'source', 'with (scope) { eval(source); }');
-      fn.call(scope, scope, this._code);
+      _runInWorkerScope(scope, this._code, this._url);
     } catch(e) {
-      console.error('Worker error:', e.message);
-      if (this.onerror) this.onerror(e);
+      this._reportError(e);
     } finally {
       if (!this._terminated) {
         this._scope = scope;
         for (const data of this._pendingMessages.splice(0)) this.postMessage(data);
       }
     }
+  }
+  // An exception the worker did not handle reaches the Worker object as an
+  // ErrorEvent, as it does in Chrome.
+  _reportError(e) {
+    console.error('Worker error:', e && e.message);
+    const message = 'Uncaught ' + (e && e.name ? e.name + ': ' + e.message : String(e));
+    const event = typeof ErrorEvent === 'function'
+      ? new ErrorEvent('error', { message, error: e, filename: this._url || '', lineno: 0, colno: 0 })
+      : e;
+    try {
+      if (typeof this.onerror === 'function') this.onerror(event);
+      for (const handler of (this._listeners['error'] || []).slice()) handler.call(this, event);
+    } catch (_ignored) {}
   }
   postMessage(data) {
     if (this._terminated) return;
@@ -17817,13 +18101,12 @@ globalThis.Worker = class Worker {
       if (worker._terminated || !worker._scope) return;
       const scope = worker._scope;
       try {
-        const event = { data };
+        const event = typeof MessageEvent === 'function' ? new MessageEvent('message', { data }) : { data };
         if (typeof scope.onmessage === 'function') scope.onmessage.call(scope, event);
         const evs = (scope._ev && scope._ev['message']) || [];
         for (const handler of evs.slice()) handler.call(scope, event);
       } catch(e) {
-        console.error('Worker error:', e.message);
-        if (worker.onerror) worker.onerror(e);
+        worker._reportError(e);
       }
     }, 0);
   }
@@ -19397,7 +19680,7 @@ if (typeof SharedWorker === 'undefined') {
   };
 }
 if (typeof ServiceWorkerContainer === 'undefined') {
-  globalThis.ServiceWorkerContainer = class { register(){return Promise.resolve();} getRegistrations(){return Promise.resolve([]);} };
+  globalThis.ServiceWorkerContainer = class ServiceWorkerContainer { register(){return Promise.resolve();} getRegistrations(){return Promise.resolve([]);} };
 }
 
 if (typeof URLPattern === 'undefined') {

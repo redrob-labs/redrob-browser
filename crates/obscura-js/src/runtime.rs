@@ -708,6 +708,12 @@ impl ObscuraJsRuntime {
                 op_state.put(Rc::new(RefCell::new(crate::ops::RealmStates::default())));
             }
 
+            // Replaces deno_core's callback, which ours delegates to after
+            // dropping engine frames from the stack.
+            runtime
+                .v8_isolate()
+                .set_prepare_stack_trace_callback(crate::stack::prepare_stack_trace_callback);
+
             let isolate_handle = runtime.v8_isolate().thread_safe_handle();
             let heap_limit_state = std::sync::Arc::new(HeapLimitState::default());
             install_heap_limit_guard(
