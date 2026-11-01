@@ -883,7 +883,10 @@ fn inset_absolute_fills_positioned_inline_flex_ancestor() {
     let overlay = layout.rects[&tree.get_element_by_id("overlay").unwrap()];
 
     assert_eq!((button.width, button.height), (115.0, 40.0));
-    assert_eq!(overlay.width, 91.0);
+    // An absolute box's percentages are of the positioned ancestor's padding
+    // box (115px here, padding included), as in Chrome 145; 91px was the
+    // content box the style pass used to substitute.
+    assert_eq!(overlay.width, 115.0);
     assert_eq!(
         overlay.height, 48.0,
         "functional percentage height must use the 40px containing block"

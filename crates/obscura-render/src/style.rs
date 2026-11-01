@@ -21,6 +21,161 @@ pub fn compute_style(tag: &str, inline_css: Option<&str>) -> LayoutStyle {
     style
 }
 
+/// Whether `tag` names an element the HTML parser maps to a specific
+/// interface (current and obsolete HTML elements). Every other name in the
+/// HTML namespace is an HTMLUnknownElement or an autonomous custom element,
+/// which the UA sheet leaves at the initial `display: inline`.
+pub fn is_known_html_element(tag: &str) -> bool {
+    !tag.contains('-')
+        && matches!(
+            tag,
+            "a" | "abbr"
+                | "acronym"
+                | "address"
+                | "applet"
+                | "area"
+                | "article"
+                | "aside"
+                | "audio"
+                | "b"
+                | "base"
+                | "basefont"
+                | "bdi"
+                | "bdo"
+                | "bgsound"
+                | "big"
+                | "blink"
+                | "blockquote"
+                | "body"
+                | "br"
+                | "button"
+                | "canvas"
+                | "caption"
+                | "center"
+                | "cite"
+                | "code"
+                | "col"
+                | "colgroup"
+                | "data"
+                | "datalist"
+                | "dd"
+                | "del"
+                | "details"
+                | "dfn"
+                | "dialog"
+                | "dir"
+                | "div"
+                | "dl"
+                | "dt"
+                | "em"
+                | "embed"
+                | "fieldset"
+                | "figcaption"
+                | "figure"
+                | "font"
+                | "footer"
+                | "form"
+                | "frame"
+                | "frameset"
+                | "h1"
+                | "h2"
+                | "h3"
+                | "h4"
+                | "h5"
+                | "h6"
+                | "head"
+                | "header"
+                | "hgroup"
+                | "hr"
+                | "html"
+                | "i"
+                | "iframe"
+                | "image"
+                | "img"
+                | "input"
+                | "ins"
+                | "isindex"
+                | "kbd"
+                | "keygen"
+                | "label"
+                | "legend"
+                | "li"
+                | "link"
+                | "listing"
+                | "main"
+                | "map"
+                | "mark"
+                | "marquee"
+                | "menu"
+                | "menuitem"
+                | "meta"
+                | "meter"
+                | "multicol"
+                | "nav"
+                | "nextid"
+                | "nobr"
+                | "noembed"
+                | "noframes"
+                | "noscript"
+                | "object"
+                | "ol"
+                | "optgroup"
+                | "option"
+                | "output"
+                | "p"
+                | "param"
+                | "picture"
+                | "plaintext"
+                | "pre"
+                | "progress"
+                | "q"
+                | "rb"
+                | "rp"
+                | "rt"
+                | "rtc"
+                | "ruby"
+                | "s"
+                | "samp"
+                | "script"
+                | "search"
+                | "section"
+                | "select"
+                | "selectedcontent"
+                | "slot"
+                | "small"
+                | "source"
+                | "spacer"
+                | "span"
+                | "strike"
+                | "strong"
+                | "style"
+                | "sub"
+                | "summary"
+                | "sup"
+                | "svg"
+                | "math"
+                | "table"
+                | "tbody"
+                | "td"
+                | "template"
+                | "textarea"
+                | "tfoot"
+                | "th"
+                | "thead"
+                | "time"
+                | "title"
+                | "tr"
+                | "track"
+                | "tt"
+                | "u"
+                | "ul"
+                | "var"
+                | "video"
+                | "wbr"
+                | "xmp"
+        )
+}
+
 /// Built-in UA defaults. Inline elements currently map to block layout; real
 /// inline/text layout arrives with the text/paint phase.
 pub fn ua_style(tag: &str) -> LayoutStyle {
@@ -5022,6 +5177,16 @@ impl GridCalcExpression {
         Some(calc)
     }
 
+    /// A calc() padding or size with a percentage: Taffy resolves it
+    /// against the containing block's final size (a flex item's used width,
+    /// an absolute box's positioned ancestor), not the style pass's estimate.
+    pub(crate) fn parse_padding(value: &str) -> Option<Self> {
+        if !value.contains('%') {
+            return None;
+        }
+        Self::parse(value)
+    }
+
     fn set_context(&self, em_px: f32, rem_px: f32, vw: f32, vh: f32) {
         use std::sync::atomic::Ordering;
         // Viewport units are used values and must follow every new layout
@@ -5052,6 +5217,8 @@ pub(crate) fn set_grid_calc_context(
         .iter()
         .flatten()
         .chain(style.inset_calc.iter().flatten())
+        .chain(style.padding_calc.iter().flatten())
+        .chain(style.size_calc.iter().flatten())
     {
         expression.set_context(em_px, rem_px, vw, vh);
     }
@@ -8625,7 +8792,10 @@ fn set_margin_px(margin: &mut Edges, idx: usize, px: f32) {
 /// width during the top-down pass; a length is stored directly.
 fn set_padding_side(style: &mut LayoutStyle, idx: usize, value: &str) {
     let value = value.trim();
+    style.padding_calc[idx] = None;
     if let Some(expression) = deferred_length_expression(value) {
+        style.padding_calc[idx] =
+            GridCalcExpression::parse_padding(&expression).map(std::sync::Arc::new);
         style.padding_expressions[idx] = Some(expression);
         style.padding_percent[idx] = None;
         style.padding_relative[idx] = None;
