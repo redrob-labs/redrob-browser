@@ -4203,6 +4203,11 @@ const _innerTextBlockDisplays = new Set([
 ]);
 
 const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
+// Forced line feeds (<br>, table rows) and tabs (table cells) are emitted as
+// these tokens so they stay distinct from a text node whose data happens to
+// be a lone "\n" or "\t": such whitespace collapses like any other.
+const _innerTextLF = { forced: '\n' };
+const _innerTextTab = { forced: '\t' };
 
 function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   if (node.nodeType === 3) {
@@ -4221,7 +4226,7 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
       && _innerTextUnrenderedTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
-    items.push('\n');
+    items.push(_innerTextLF);
     return;
   }
   const breaks = visibility === 'visible'
@@ -4232,8 +4237,8 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
     _collectInnerText(child, items, visibility);
   }
   if (visibility !== 'visible') return;
-  if (display === 'table-cell') items.push('\t');
-  if (display === 'table-row') items.push('\n');
+  if (display === 'table-cell') items.push(_innerTextTab);
+  if (display === 'table-row') items.push(_innerTextLF);
   if (breaks) items.push(breaks);
 }
 
@@ -4249,8 +4254,8 @@ function _renderedInnerText(element) {
       pendingBreaks = Math.max(pendingBreaks, item);
       continue;
     }
-    const text = item === '\n' || item === '\t'
-      ? item
+    const text = typeof item === 'object'
+      ? item.forced
       : String(item).replace(/[\t\n\f\r ]+/g, ' ');
     if (!text || (pendingBreaks && text === ' ')) continue;
     if (pendingBreaks && result) result += '\n'.repeat(pendingBreaks);
