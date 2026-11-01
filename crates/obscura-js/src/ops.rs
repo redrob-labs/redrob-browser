@@ -1067,20 +1067,22 @@ fn fetch_max_body_bytes() -> usize {
         .unwrap_or(100 * 1024 * 1024)
 }
 
-/// Read a response body into memory, refusing bodies larger than `max` bytes —
-/// both when the server advertises an oversized `Content-Length` and when the
-/// streamed chunks exceed the cap (a lying or chunked server). Streaming keeps
-/// a multi-GB response from ever being fully allocated.
+/// `read_body_capped_here` on the transport runtime, as op_fetch_url runs it.
+#[cfg(test)]
 async fn read_body_capped(
     response: reqwest::Response,
     max: usize,
 ) -> Result<Vec<u8>, deno_error::JsErrorBox> {
-    // Body chunks arrive on the transport runtime, not between page tasks.
     obscura_net::on_transport(read_body_capped_here(response, max))
         .await
         .map_err(deno_error::JsErrorBox::generic)
 }
 
+/// Read a response body into memory, refusing bodies larger than `max` bytes —
+/// both when the server advertises an oversized `Content-Length` and when the
+/// streamed chunks exceed the cap (a lying or chunked server). Streaming keeps
+/// a multi-GB response from ever being fully allocated. op_fetch_url runs it
+/// on the transport runtime, so chunks arrive without waiting on page tasks.
 async fn read_body_capped_here(
     mut response: reqwest::Response,
     max: usize,
@@ -5095,12 +5097,27 @@ async fn fetch_url_inner(
         "opaque": opaque,
         "headers": script_headers,
     });
+    // The body streams in on the transport runtime from here on. A small body
+    // is usually already in the connection's buffer with its headers; give it
+    // a moment so it completes with them, as when it was read on this thread.
+    let mut body_read = obscura_net::spawn_on_transport(read_body_capped_here(
+        response,
+        fetch_max_body_bytes(),
+    ));
+    let early_body =
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut body_read)
+            .await
+            .ok();
     // A resource must not form an ownership cycle with its OpState table.
     let body_state = Rc::downgrade(&state);
     let body = Box::pin(async move {
         let _page_in_flight = _page_in_flight;
         let mut network_guard = network_guard;
-        let resp_bytes = read_body_capped(response, fetch_max_body_bytes()).await?;
+        let resp_bytes = match early_body {
+            Some(result) => result,
+            None => body_read.await,
+        }
+        .map_err(deno_error::JsErrorBox::generic)?;
         if let Some(ref cbs) = callbacks {
             if cbs.has_response_callbacks().await {
                 let resp = fetch_response(

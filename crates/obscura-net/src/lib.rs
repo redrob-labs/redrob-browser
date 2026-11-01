@@ -27,7 +27,7 @@ pub use encoding::{
     url_encode_query,
 };
 pub use robots::RobotsCache;
-pub use transport::on_transport;
+pub use transport::{on_transport, spawn_on_transport, TransportTask};
 #[cfg(feature = "stealth")]
 pub use wreq_client::{
     StealthHttpClient, STEALTH_NAVIGATOR_PLATFORM, STEALTH_UA_PLATFORM,

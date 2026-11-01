@@ -13647,6 +13647,15 @@ where
             if !style.width_fit_content || style.ignores_used_box_sizes() {
                 return None;
             }
+            // An auto-width float or absolutely positioned box already
+            // shrinks to fit, which is its max-content size whenever that
+            // fits; the taffy pass sizes it without a measured override.
+            if style.width_intrinsic == crate::IntrinsicWidth::MaxContent
+                && (style.float.is_some()
+                    || matches!(style.position, Some(taffy::Position::Absolute)))
+            {
+                return None;
+            }
             let layout = taffy_tree.layout(node).ok()?;
             let margin = layout.margin.left + layout.margin.right;
             let inline_edges = layout.padding.left
