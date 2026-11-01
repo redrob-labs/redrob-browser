@@ -26,7 +26,10 @@ pub struct Sink {
 
 impl Sink {
     pub fn new(tx: Sender<Update>) -> Self {
-        Sink { tx, tabs: Arc::default() }
+        Sink {
+            tx,
+            tabs: Arc::default(),
+        }
     }
 
     pub fn bind(&self, browser_id: i32, tab: TabId) {
