@@ -552,8 +552,10 @@ pub async fn run(
     });
 
     // Agents and `redrob-browser tab` reach the person's tabs through this relay.
-    let relay_url =
-        crate::relay::start(out_tx.clone(), pending.clone(), broadcast_tx, window).await?;
+    // C2 (feat/cef-agent): the relay now proxies a Chromium DevTools
+    // endpoint; C1 passes `crate::cef::devtools_port()` here.
+    let devtools_port = url::Url::parse(&ws_url)?.port().unwrap_or(9222);
+    let relay_url = crate::relay::start(devtools_port, window).await?;
     crate::write_private(&endpoint_file, &relay_url);
 
     let mut st = State {

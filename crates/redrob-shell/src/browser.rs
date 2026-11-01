@@ -182,6 +182,9 @@ impl Browser {
         let relay_window = relay::Window {
             login: login_tx,
             open_window: open_tx,
+            // The Obscura window learns of agent tabs from Target.targetCreated;
+            // the CEF window opens them itself (C1).
+            open_tab: None,
             places: places.clone(),
             wake: Arc::new(move || wake_ctx.request_repaint_of(ViewportId::ROOT)),
         };
