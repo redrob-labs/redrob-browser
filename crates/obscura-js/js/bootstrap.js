@@ -227,14 +227,31 @@ const _functionToString = {
     if (_nativeFns.has(this)) {
       return `function ${this.name || ''}() { [native code] }`;
     }
+    // A function another realm (a frame, the parent page) marked: its
+    // text is recorded on the function under a private key.
+    if (typeof this === 'function') {
+      const recorded = __obscuraCore.ops.op_native_source(this);
+      if (recorded !== undefined) {
+        return recorded || `function ${this.name || ''}() { [native code] }`;
+      }
+    }
     return _origToString.call(this);
   },
 }.toString;
 Function.prototype.toString = _functionToString;
-function _markNative(fn) { if (typeof fn === 'function') _nativeFns.add(fn); return fn; }
+function _recordNativeSource(fn, text) {
+  try { __obscuraCore.ops.op_mark_native(fn, text); } catch (_e) {}
+}
+function _markNative(fn) {
+  if (typeof fn === 'function') { _nativeFns.add(fn); _recordNativeSource(fn, ''); }
+  return fn;
+}
 // Mark a function with an exact native-code toString (used for accessors).
-function _markNativeAs(fn, str) { if (typeof fn === 'function') _nativeStr.set(fn, str); return fn; }
-_nativeFns.add(_functionToString);
+function _markNativeAs(fn, str) {
+  if (typeof fn === 'function') { _nativeStr.set(fn, str); _recordNativeSource(fn, str); }
+  return fn;
+}
+_markNative(_functionToString);
 
 // unusualWindowProperties: obscura's internal globals are made non-enumerable
 // (see _preHideInternals and __obscura_init), which hides them from
@@ -895,7 +912,14 @@ function _consoleData(obj, key) {
   for (let i = 0; o !== null && o !== undefined && i < 64; i++) {
     if (_consoleKind(o) === 'proxy') return undefined;
     const d = Reflect.getOwnPropertyDescriptor(o, key);
-    if (d) return 'value' in d ? d.value : undefined;
+    if (d) {
+      if ('value' in d) return d.value;
+      // A V8 builtin accessor (Error's `stack`) runs no page code.
+      if (typeof d.get === 'function' && /\{\s*\[native code\]\s*\}$/.test(_origToString.call(d.get))) {
+        try { return Reflect.apply(d.get, obj, []); } catch (_e) { return undefined; }
+      }
+      return undefined;
+    }
     o = Reflect.getPrototypeOf(o);
   }
   return undefined;
@@ -1861,6 +1885,8 @@ function _serializeCss(props) {
   return e.length ? e.map(([k, v]) => `${k}: ${v}`).join("; ") + ";" : "";
 }
 
+// Internal members are symbol-keyed so the prototype lists only what Chrome's does.
+const _cssPull = Symbol("pull"), _cssPush = Symbol("push"), _cssReplaceFromAttribute = Symbol("replaceFromAttribute");
 class CSSStyleDeclaration {
   constructor(owner, onChange) {
     // Non-enumerable so they never leak through the proxy's own-key traps.
@@ -1878,19 +1904,19 @@ class CSSStyleDeclaration {
   // Pull the initial `style` attribute once. Later attribute mutations update
   // the declaration directly from Element.setAttribute/removeAttribute, so
   // repeated style reads do not cross the JS/Rust op boundary.
-  _pull() {
+  [_cssPull]() {
     if (this._loaded) return;
     _parseCssInto(this._props, this._owner.getAttribute("style"));
     this._loaded = true;
   }
-  _replaceFromAttribute(text) {
+  [_cssReplaceFromAttribute](text) {
     _parseCssInto(this._props, text);
     this._loaded = true;
   }
   // Serialize `_props` back onto the owner's `style` attribute after a mutation,
   // so el.style.x = … and cssText reflect into getAttribute('style') and
   // serialization. No-op when owner-less.
-  _push() {
+  [_cssPush]() {
     const o = this._owner;
     if (o) {
       const text = _serializeCss(this._props);
@@ -1908,7 +1934,7 @@ class CSSStyleDeclaration {
   // MutationObserver that re-applies the same style re-triggered itself
   // forever (a page pinning body `top: 0` spun at 100% CPU).
   setProperty(name, value) {
-    this._pull();
+    this[_cssPull]();
     const k = _cssCamelToKebab(String(name));
     const old = this._props[k];
     if (value === "" || value == null) {
@@ -1919,26 +1945,26 @@ class CSSStyleDeclaration {
       if (old === value) return;
       this._props[k] = value;
     }
-    this._push();
+    this[_cssPush]();
   }
   removeProperty(name) {
-    this._pull();
+    this[_cssPull]();
     const k = _cssCamelToKebab(String(name));
     const old = this._props[k];
     if (old === undefined) return "";
     delete this._props[k];
-    this._push();
+    this[_cssPush]();
     return old;
   }
-  getPropertyValue(name) { this._pull(); return this._props[_cssCamelToKebab(String(name))] || ""; }
+  getPropertyValue(name) { this[_cssPull](); return this._props[_cssCamelToKebab(String(name))] || ""; }
   getPropertyPriority() { return ""; }
-  get cssText() { this._pull(); return _serializeCss(this._props); }
+  get cssText() { this[_cssPull](); return _serializeCss(this._props); }
   set cssText(v) {
     _parseCssInto(this._props, v);
-    this._push();
+    this[_cssPush]();
   }
-  get length() { this._pull(); return Object.keys(this._props).length; }
-  item(i) { this._pull(); return Object.keys(this._props)[i] || ""; }
+  get length() { this[_cssPull](); return Object.keys(this._props).length; }
+  item(i) { this[_cssPull](); return Object.keys(this._props)[i] || ""; }
 }
 
 const _styleProxy = (decl) => new Proxy(decl, {
@@ -1959,13 +1985,13 @@ const _styleProxy = (decl) => new Proxy(decl, {
   has(t, p) {
     if (typeof p !== "string") return Reflect.has(t, p);
     if (p in Object.getPrototypeOf(t)) return true;
-    t._pull();
+    t[_cssPull]();
     if (_cssCamelToKebab(p) in t._props) return true;
     if (_CSS_PROP_SET.has(p) || _CSS_PROP_SET.has(_cssKebabToCamel(p))) return true;
     return /^\d+$/.test(p) && +p < t.length;
   },
   ownKeys(t) {
-    t._pull();
+    t[_cssPull]();
     const keys = [];
     const n = t.length;
     for (let i = 0; i < n; i++) keys.push(String(i));
@@ -1976,7 +2002,7 @@ const _styleProxy = (decl) => new Proxy(decl, {
   },
   getOwnPropertyDescriptor(t, p) {
     if (typeof p !== "string") return Reflect.getOwnPropertyDescriptor(t, p);
-    t._pull();
+    t[_cssPull]();
     if (/^\d+$/.test(p) && +p < t.length) return { value: t.item(+p), writable: false, enumerable: true, configurable: true };
     if (_cssCamelToKebab(p) in t._props || _CSS_PROP_SET.has(p) || _CSS_PROP_SET.has(_cssKebabToCamel(p))) {
       return { value: t.getPropertyValue(p), writable: true, enumerable: true, configurable: true };
@@ -4582,7 +4608,7 @@ class Element extends Node {
         _reconcileWindowNamedProperty(previousWindowName);
       }
     }
-    if (n === "style") this._style._replaceFromAttribute(value);
+    if (n === "style") this._style[_cssReplaceFromAttribute](value);
     if (n === "onload" && _isWindowReflectingBodyElement(this)) {
       _windowOnloadOverrideSet = false;
       _windowOnloadOverride = null;
@@ -4618,7 +4644,7 @@ class Element extends Node {
     // instead of maintaining a second, subtly different key space here.
     this._nullNamespaceAttrs = null;
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe') this._loadIframeSrcdoc(true);
-    if (ns === "" && n === "style") this._style._replaceFromAttribute(value);
+    if (ns === "" && n === "style") this._style[_cssReplaceFromAttribute](value);
   }
   removeAttribute(n) {
     n = _htmlAttrName(this, n);
@@ -4641,7 +4667,7 @@ class Element extends Node {
         && (n === "id" || (n === "name" && _windowNameEligibleElement(this)))) {
       _reconcileWindowNamedProperty(previousWindowName);
     }
-    if (n === "style") this._style._replaceFromAttribute("");
+    if (n === "style") this._style[_cssReplaceFromAttribute]("");
     if (n === "onload" && _isWindowReflectingBodyElement(this)) {
       _windowOnloadOverrideSet = false;
       _windowOnloadOverride = null;
@@ -4670,7 +4696,7 @@ class Element extends Node {
     if (ceOldValue !== null) _ceAttributeChanged(this, n, ceOldValue, null, ns || null);
     this._nullNamespaceAttrs = null;
     if (ns === '' && n === 'srcdoc' && this.localName === 'iframe') this._loadIframeSrc(this.getAttribute('src') || 'about:blank');
-    if (ns === "" && n === "style") this._style._replaceFromAttribute("");
+    if (ns === "" && n === "style") this._style[_cssReplaceFromAttribute]("");
   }
   hasAttribute(n) { return this.getAttribute(n) !== null; }
   hasAttributes() { return this.attributes.length > 0; }
@@ -10811,21 +10837,24 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
   // An element outside any document has no computed style: every property
   // reads "" and length is 0. Checked per read, as the declaration is live.
   const detachedLookup = (name) => (_computedStyleHasNoDocument(el) ? '' : lookup(name));
+  // An element's computed style lists every longhand, as Chrome's does;
+  // a pseudo-element's lists what the renderer resolved.
+  const listedNames = () => {
+    if (_computedStyleHasNoDocument(el)) return [];
+    refreshRendered();
+    if (pseudo) return snapshot.names;
+    return _CHROME_COMPUTED_NAMES;
+  };
+  const indexOf = (prop) => (typeof prop === 'string' && /^(0|[1-9]\d*)$/.test(prop) ? +prop : -1);
   return new Proxy(style, {
     get(_, prop) {
       if (prop === Symbol.toPrimitive || prop === Symbol.toStringTag) return undefined;
       if (prop === 'getPropertyValue') return (name) => detachedLookup(name);
       if (prop === 'getPropertyPriority') return () => '';
-      if (prop === 'item') return (i) => {
-        if (_computedStyleHasNoDocument(el)) return '';
-        refreshRendered();
-        return snapshot.names[i | 0] || '';
-      };
-      if (prop === 'length') {
-        if (_computedStyleHasNoDocument(el)) return 0;
-        refreshRendered();
-        return snapshot.names.length;
-      }
+      if (prop === 'item') return (i) => listedNames()[i | 0] || '';
+      if (prop === 'length') return listedNames().length;
+      const index = indexOf(prop);
+      if (index >= 0) return listedNames()[index];
       if (prop === 'cssText') return '';
       if (prop === 'parentRule') return null;
       // CSSStyleDeclaration's `has` trap intentionally reports every known
@@ -10842,8 +10871,147 @@ globalThis.getComputedStyle = (el, pseudo = '') => {
       if (typeof prop === 'string') return detachedLookup(prop);
       return undefined;
     },
+    has(t, prop) {
+      const index = indexOf(prop);
+      if (index >= 0) return index < listedNames().length;
+      if (_isChromeCssName(prop)) return true;
+      if (typeof prop === 'string' && prop.includes('-') && !prop.startsWith('--')) return false;
+      return Reflect.has(t, prop);
+    },
+    // Chrome's computed declaration owns its indexed longhands and one
+    // camelCase property per CSS property name.
+    ownKeys(t) {
+      const indices = listedNames().map((_, i) => String(i));
+      const own = Reflect.ownKeys(t).filter((key) => indexOf(key) < 0 && !_CHROME_STYLE_NAMES.has(key));
+      return indices.concat(_CHROME_STYLE_OWN_NAMES, own);
+    },
+    getOwnPropertyDescriptor(t, prop) {
+      const index = indexOf(prop);
+      if (index >= 0) {
+        const names = listedNames();
+        return index < names.length
+          ? { value: names[index], writable: false, enumerable: true, configurable: true }
+          : undefined;
+      }
+      if (typeof prop === 'string' && prop !== 'cssFloat' && _CHROME_STYLE_NAMES.has(prop)) {
+        return { value: detachedLookup(prop), writable: true, enumerable: true, configurable: true };
+      }
+      return Reflect.getOwnPropertyDescriptor(t, prop);
+    },
   });
 };
+// The longhands a computed style lists, in Chrome 153's order: what
+// `getComputedStyle(el).length` and its indexed entries enumerate.
+const _CHROME_COMPUTED_NAMES = Object.freeze([
+  'accent-color', 'align-content', 'align-items', 'align-self', 'alignment-baseline', 'anchor-name',
+  'anchor-scope', 'animation-composition', 'animation-delay', 'animation-direction',
+  'animation-duration', 'animation-fill-mode', 'animation-iteration-count', 'animation-name',
+  'animation-play-state', 'animation-range-end', 'animation-range-start', 'animation-timeline',
+  'animation-timing-function', 'animation-trigger', 'app-region', 'appearance', 'aspect-ratio',
+  'backdrop-filter', 'backface-visibility', 'background-attachment', 'background-blend-mode',
+  'background-clip', 'background-color', 'background-image', 'background-origin',
+  'background-position', 'background-repeat', 'background-size', 'baseline-shift',
+  'baseline-source', 'block-size', 'border-block-end-color', 'border-block-end-style',
+  'border-block-end-width', 'border-block-start-color', 'border-block-start-style',
+  'border-block-start-width', 'border-bottom-color', 'border-bottom-left-radius',
+  'border-bottom-right-radius', 'border-bottom-style', 'border-bottom-width', 'border-collapse',
+  'border-end-end-radius', 'border-end-start-radius', 'border-image-outset', 'border-image-repeat',
+  'border-image-slice', 'border-image-source', 'border-image-width', 'border-inline-end-color',
+  'border-inline-end-style', 'border-inline-end-width', 'border-inline-start-color',
+  'border-inline-start-style', 'border-inline-start-width', 'border-left-color',
+  'border-left-style', 'border-left-width', 'border-right-color', 'border-right-style',
+  'border-right-width', 'border-shape', 'border-start-end-radius', 'border-start-start-radius',
+  'border-top-color', 'border-top-left-radius', 'border-top-right-radius', 'border-top-style',
+  'border-top-width', 'bottom', 'box-decoration-break', 'box-shadow', 'box-sizing', 'break-after',
+  'break-before', 'break-inside', 'buffered-rendering', 'caption-side', 'caret-animation',
+  'caret-color', 'caret-shape', 'clear', 'clip', 'clip-path', 'clip-rule', 'color',
+  'color-interpolation', 'color-interpolation-filters', 'color-rendering', 'color-scheme',
+  'column-count', 'column-fill', 'column-gap', 'column-height', 'column-rule-break',
+  'column-rule-color', 'column-rule-inset-cap-end', 'column-rule-inset-cap-start',
+  'column-rule-inset-junction-end', 'column-rule-inset-junction-start', 'column-rule-style',
+  'column-rule-visibility-items', 'column-rule-width', 'column-span', 'column-width', 'column-wrap',
+  'contain', 'contain-intrinsic-block-size', 'contain-intrinsic-height',
+  'contain-intrinsic-inline-size', 'contain-intrinsic-size', 'contain-intrinsic-width',
+  'container-name', 'container-type', 'content', 'content-visibility', 'corner-bottom-left-shape',
+  'corner-bottom-right-shape', 'corner-end-end-shape', 'corner-end-start-shape',
+  'corner-start-end-shape', 'corner-start-start-shape', 'corner-top-left-shape',
+  'corner-top-right-shape', 'counter-increment', 'counter-reset', 'counter-set', 'cursor', 'cx',
+  'cy', 'd', 'direction', 'display', 'dominant-baseline', 'dynamic-range-limit', 'empty-cells',
+  'field-sizing', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'flex-basis', 'flex-direction',
+  'flex-grow', 'flex-line-count', 'flex-shrink', 'flex-wrap', 'float', 'flood-color',
+  'flood-opacity', 'font-family', 'font-feature-settings', 'font-kerning', 'font-language-override',
+  'font-optical-sizing', 'font-palette', 'font-size', 'font-size-adjust', 'font-stretch',
+  'font-style', 'font-synthesis-small-caps', 'font-synthesis-style', 'font-synthesis-weight',
+  'font-variant', 'font-variant-alternates', 'font-variant-caps', 'font-variant-east-asian',
+  'font-variant-emoji', 'font-variant-ligatures', 'font-variant-numeric', 'font-variant-position',
+  'font-variation-settings', 'font-weight', 'forced-color-adjust', 'grid-auto-columns',
+  'grid-auto-flow', 'grid-auto-rows', 'grid-column-end', 'grid-column-start', 'grid-row-end',
+  'grid-row-start', 'grid-template-areas', 'grid-template-columns', 'grid-template-rows', 'height',
+  'hyphenate-character', 'hyphenate-limit-chars', 'hyphens', 'image-orientation', 'image-rendering',
+  'initial-letter', 'inline-size', 'inset-block-end', 'inset-block-start', 'inset-inline-end',
+  'inset-inline-start', 'interactivity', 'interest-delay-end', 'interest-delay-start',
+  'interpolate-size', 'isolation', 'justify-content', 'justify-items', 'justify-self', 'left',
+  'letter-spacing', 'lighting-color', 'line-break', 'line-height', 'list-style-image',
+  'list-style-position', 'list-style-type', 'margin-block-end', 'margin-block-start',
+  'margin-bottom', 'margin-inline-end', 'margin-inline-start', 'margin-left', 'margin-right',
+  'margin-top', 'marker-end', 'marker-mid', 'marker-start', 'mask-clip', 'mask-composite',
+  'mask-image', 'mask-mode', 'mask-origin', 'mask-position', 'mask-repeat', 'mask-size',
+  'mask-type', 'math-depth', 'math-shift', 'math-style', 'max-block-size', 'max-height',
+  'max-inline-size', 'max-width', 'min-block-size', 'min-height', 'min-inline-size', 'min-width',
+  'mix-blend-mode', 'object-fit', 'object-position', 'object-view-box', 'offset-anchor',
+  'offset-distance', 'offset-path', 'offset-position', 'offset-rotate', 'opacity', 'order',
+  'orphans', 'outline-color', 'outline-offset', 'outline-style', 'outline-width', 'overflow-anchor',
+  'overflow-block', 'overflow-clip-margin', 'overflow-inline', 'overflow-wrap', 'overflow-x',
+  'overflow-y', 'overlay', 'overscroll-behavior-block', 'overscroll-behavior-inline',
+  'overscroll-behavior-x', 'overscroll-behavior-y', 'padding-block-end', 'padding-block-start',
+  'padding-bottom', 'padding-inline-end', 'padding-inline-start', 'padding-left', 'padding-right',
+  'padding-top', 'paint-order', 'perspective', 'perspective-origin', 'pointer-events', 'position',
+  'position-anchor', 'position-area', 'position-try-fallbacks', 'position-try-order',
+  'position-visibility', 'print-color-adjust', 'quotes', 'r', 'reading-flow', 'reading-order',
+  'resize', 'right', 'rotate', 'row-gap', 'row-rule-break', 'row-rule-color',
+  'row-rule-inset-cap-end', 'row-rule-inset-cap-start', 'row-rule-inset-junction-end',
+  'row-rule-inset-junction-start', 'row-rule-style', 'row-rule-visibility-items', 'row-rule-width',
+  'ruby-align', 'ruby-overhang', 'ruby-position', 'rule-overlap', 'rx', 'ry', 'scale',
+  'scroll-axis-lock', 'scroll-behavior', 'scroll-initial-target', 'scroll-margin-block-end',
+  'scroll-margin-block-start', 'scroll-margin-bottom', 'scroll-margin-inline-end',
+  'scroll-margin-inline-start', 'scroll-margin-left', 'scroll-margin-right', 'scroll-margin-top',
+  'scroll-marker-group', 'scroll-padding-block-end', 'scroll-padding-block-start',
+  'scroll-padding-bottom', 'scroll-padding-inline-end', 'scroll-padding-inline-start',
+  'scroll-padding-left', 'scroll-padding-right', 'scroll-padding-top', 'scroll-snap-align',
+  'scroll-snap-stop', 'scroll-snap-type', 'scroll-target-group', 'scroll-timeline-axis',
+  'scroll-timeline-name', 'scrollbar-color', 'scrollbar-gutter', 'scrollbar-width',
+  'shape-image-threshold', 'shape-margin', 'shape-outside', 'shape-rendering', 'speak',
+  'stop-color', 'stop-opacity', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'tab-size',
+  'table-layout', 'text-align', 'text-align-last', 'text-anchor', 'text-autospace', 'text-box-edge',
+  'text-box-trim', 'text-combine-upright', 'text-decoration', 'text-decoration-color',
+  'text-decoration-line', 'text-decoration-skip-ink', 'text-decoration-style',
+  'text-decoration-thickness', 'text-emphasis-color', 'text-emphasis-position',
+  'text-emphasis-style', 'text-fit', 'text-indent', 'text-justify', 'text-orientation',
+  'text-overflow', 'text-rendering', 'text-shadow', 'text-size-adjust', 'text-spacing-trim',
+  'text-transform', 'text-underline-offset', 'text-underline-position', 'text-wrap-mode',
+  'text-wrap-style', 'timeline-scope', 'timeline-trigger-activation-range-end',
+  'timeline-trigger-activation-range-start', 'timeline-trigger-active-range-end',
+  'timeline-trigger-active-range-start', 'timeline-trigger-name', 'timeline-trigger-source', 'top',
+  'touch-action', 'transform', 'transform-box', 'transform-origin', 'transform-style',
+  'transition-behavior', 'transition-delay', 'transition-duration', 'transition-property',
+  'transition-timing-function', 'translate', 'trigger-scope', 'unicode-bidi', 'user-select',
+  'vector-effect', 'vertical-align', 'view-timeline-axis', 'view-timeline-inset',
+  'view-timeline-name', 'view-transition-class', 'view-transition-group', 'view-transition-name',
+  'view-transition-scope', 'visibility', 'white-space-collapse', 'widows', 'width', 'will-change',
+  'window-drag', 'word-break', 'word-spacing', 'writing-mode', 'x', 'y', 'z-index', 'zoom',
+  '-webkit-border-horizontal-spacing', '-webkit-border-image', '-webkit-border-vertical-spacing',
+  '-webkit-box-align', '-webkit-box-decoration-break', '-webkit-box-direction', '-webkit-box-flex',
+  '-webkit-box-ordinal-group', '-webkit-box-orient', '-webkit-box-pack', '-webkit-box-reflect',
+  '-webkit-font-smoothing', '-webkit-line-break', '-webkit-line-clamp', '-webkit-locale',
+  '-webkit-mask-box-image', '-webkit-mask-box-image-outset', '-webkit-mask-box-image-repeat',
+  '-webkit-mask-box-image-slice', '-webkit-mask-box-image-source', '-webkit-mask-box-image-width',
+  '-webkit-mask-position-x', '-webkit-mask-position-y', '-webkit-rtl-ordering',
+  '-webkit-ruby-position', '-webkit-tap-highlight-color', '-webkit-text-combine',
+  '-webkit-text-decorations-in-effect', '-webkit-text-fill-color', '-webkit-text-orientation',
+  '-webkit-text-security', '-webkit-text-stroke-color', '-webkit-text-stroke-width',
+  '-webkit-user-drag', '-webkit-user-modify', '-webkit-writing-mode',
+]);
 // Chrome parity: only elements whose shadow-including root is not a document
 // lose their style. Iframe shim documents count as documents, and shadow
 // content of a connected host keeps its style even when it is not slotted.
@@ -14636,12 +14804,365 @@ function _cssTopLevelComma(text) {
   return -1;
 }
 
+// Every property Chrome 153 accepts in CSS.supports(name, "initial"). A
+// property the renderer does not implement still exists in a browser, and
+// feature-detection scripts date the browser by which ones answer.
+const _CHROME_CSS_PROPERTIES = new Set([
+  '-webkit-align-content', '-webkit-align-items', '-webkit-align-self', '-webkit-animation',
+  '-webkit-animation-delay', '-webkit-animation-direction', '-webkit-animation-duration',
+  '-webkit-animation-fill-mode', '-webkit-animation-iteration-count', '-webkit-animation-name',
+  '-webkit-animation-play-state', '-webkit-animation-timing-function', '-webkit-app-region',
+  '-webkit-appearance', '-webkit-backface-visibility', '-webkit-background-clip',
+  '-webkit-background-origin', '-webkit-background-size', '-webkit-border-after',
+  '-webkit-border-after-color', '-webkit-border-after-style', '-webkit-border-after-width',
+  '-webkit-border-before', '-webkit-border-before-color', '-webkit-border-before-style',
+  '-webkit-border-before-width', '-webkit-border-bottom-left-radius',
+  '-webkit-border-bottom-right-radius', '-webkit-border-end', '-webkit-border-end-color',
+  '-webkit-border-end-style', '-webkit-border-end-width', '-webkit-border-horizontal-spacing',
+  '-webkit-border-image', '-webkit-border-radius', '-webkit-border-start',
+  '-webkit-border-start-color', '-webkit-border-start-style', '-webkit-border-start-width',
+  '-webkit-border-top-left-radius', '-webkit-border-top-right-radius',
+  '-webkit-border-vertical-spacing', '-webkit-box-align', '-webkit-box-decoration-break',
+  '-webkit-box-direction', '-webkit-box-flex', '-webkit-box-ordinal-group', '-webkit-box-orient',
+  '-webkit-box-pack', '-webkit-box-reflect', '-webkit-box-shadow', '-webkit-box-sizing',
+  '-webkit-clip-path', '-webkit-column-break-after', '-webkit-column-break-before',
+  '-webkit-column-break-inside', '-webkit-column-count', '-webkit-column-gap',
+  '-webkit-column-rule', '-webkit-column-rule-color', '-webkit-column-rule-style',
+  '-webkit-column-rule-width', '-webkit-column-span', '-webkit-column-width', '-webkit-columns',
+  '-webkit-filter', '-webkit-flex', '-webkit-flex-basis', '-webkit-flex-direction',
+  '-webkit-flex-flow', '-webkit-flex-grow', '-webkit-flex-shrink', '-webkit-flex-wrap',
+  '-webkit-font-feature-settings', '-webkit-font-smoothing', '-webkit-hyphenate-character',
+  '-webkit-justify-content', '-webkit-line-break', '-webkit-line-clamp', '-webkit-locale',
+  '-webkit-logical-height', '-webkit-logical-width', '-webkit-margin-after',
+  '-webkit-margin-before', '-webkit-margin-end', '-webkit-margin-start', '-webkit-mask',
+  '-webkit-mask-box-image', '-webkit-mask-box-image-outset', '-webkit-mask-box-image-repeat',
+  '-webkit-mask-box-image-slice', '-webkit-mask-box-image-source', '-webkit-mask-box-image-width',
+  '-webkit-mask-clip', '-webkit-mask-composite', '-webkit-mask-image', '-webkit-mask-origin',
+  '-webkit-mask-position', '-webkit-mask-position-x', '-webkit-mask-position-y',
+  '-webkit-mask-repeat', '-webkit-mask-size', '-webkit-max-logical-height',
+  '-webkit-max-logical-width', '-webkit-min-logical-height', '-webkit-min-logical-width',
+  '-webkit-opacity', '-webkit-order', '-webkit-padding-after', '-webkit-padding-before',
+  '-webkit-padding-end', '-webkit-padding-start', '-webkit-perspective',
+  '-webkit-perspective-origin', '-webkit-perspective-origin-x', '-webkit-perspective-origin-y',
+  '-webkit-print-color-adjust', '-webkit-rtl-ordering', '-webkit-ruby-position',
+  '-webkit-shape-image-threshold', '-webkit-shape-margin', '-webkit-shape-outside',
+  '-webkit-tap-highlight-color', '-webkit-text-combine', '-webkit-text-decorations-in-effect',
+  '-webkit-text-emphasis', '-webkit-text-emphasis-color', '-webkit-text-emphasis-position',
+  '-webkit-text-emphasis-style', '-webkit-text-fill-color', '-webkit-text-orientation',
+  '-webkit-text-security', '-webkit-text-size-adjust', '-webkit-text-stroke',
+  '-webkit-text-stroke-color', '-webkit-text-stroke-width', '-webkit-transform',
+  '-webkit-transform-origin', '-webkit-transform-origin-x', '-webkit-transform-origin-y',
+  '-webkit-transform-origin-z', '-webkit-transform-style', '-webkit-transition',
+  '-webkit-transition-delay', '-webkit-transition-duration', '-webkit-transition-property',
+  '-webkit-transition-timing-function', '-webkit-user-drag', '-webkit-user-modify',
+  '-webkit-user-select', '-webkit-writing-mode', 'accent-color', 'align-content', 'align-items',
+  'align-self', 'alignment-baseline', 'all', 'anchor-name', 'anchor-scope', 'animation',
+  'animation-composition', 'animation-delay', 'animation-direction', 'animation-duration',
+  'animation-fill-mode', 'animation-iteration-count', 'animation-name', 'animation-play-state',
+  'animation-range', 'animation-range-end', 'animation-range-start', 'animation-timeline',
+  'animation-timing-function', 'animation-trigger', 'app-region', 'appearance', 'aspect-ratio',
+  'backdrop-filter', 'backface-visibility', 'background', 'background-attachment',
+  'background-blend-mode', 'background-clip', 'background-color', 'background-image',
+  'background-origin', 'background-position', 'background-position-x', 'background-position-y',
+  'background-repeat', 'background-size', 'baseline-shift', 'baseline-source', 'block-size',
+  'border', 'border-block', 'border-block-color', 'border-block-end', 'border-block-end-color',
+  'border-block-end-style', 'border-block-end-width', 'border-block-start',
+  'border-block-start-color', 'border-block-start-style', 'border-block-start-width',
+  'border-block-style', 'border-block-width', 'border-bottom', 'border-bottom-color',
+  'border-bottom-left-radius', 'border-bottom-right-radius', 'border-bottom-style',
+  'border-bottom-width', 'border-collapse', 'border-color', 'border-end-end-radius',
+  'border-end-start-radius', 'border-image', 'border-image-outset', 'border-image-repeat',
+  'border-image-slice', 'border-image-source', 'border-image-width', 'border-inline',
+  'border-inline-color', 'border-inline-end', 'border-inline-end-color', 'border-inline-end-style',
+  'border-inline-end-width', 'border-inline-start', 'border-inline-start-color',
+  'border-inline-start-style', 'border-inline-start-width', 'border-inline-style',
+  'border-inline-width', 'border-left', 'border-left-color', 'border-left-style',
+  'border-left-width', 'border-radius', 'border-right', 'border-right-color', 'border-right-style',
+  'border-right-width', 'border-shape', 'border-spacing', 'border-start-end-radius',
+  'border-start-start-radius', 'border-style', 'border-top', 'border-top-color',
+  'border-top-left-radius', 'border-top-right-radius', 'border-top-style', 'border-top-width',
+  'border-width', 'bottom', 'box-decoration-break', 'box-shadow', 'box-sizing', 'break-after',
+  'break-before', 'break-inside', 'buffered-rendering', 'caption-side', 'caret-animation',
+  'caret-color', 'caret-shape', 'clear', 'clip', 'clip-path', 'clip-rule', 'color',
+  'color-interpolation', 'color-interpolation-filters', 'color-rendering', 'color-scheme',
+  'column-count', 'column-fill', 'column-gap', 'column-height', 'column-rule', 'column-rule-break',
+  'column-rule-color', 'column-rule-inset', 'column-rule-inset-cap', 'column-rule-inset-cap-end',
+  'column-rule-inset-cap-start', 'column-rule-inset-end', 'column-rule-inset-junction',
+  'column-rule-inset-junction-end', 'column-rule-inset-junction-start', 'column-rule-inset-start',
+  'column-rule-style', 'column-rule-visibility-items', 'column-rule-width', 'column-span',
+  'column-width', 'column-wrap', 'columns', 'contain', 'contain-intrinsic-block-size',
+  'contain-intrinsic-height', 'contain-intrinsic-inline-size', 'contain-intrinsic-size',
+  'contain-intrinsic-width', 'container', 'container-name', 'container-type', 'content',
+  'content-visibility', 'corner-block-end-shape', 'corner-block-start-shape',
+  'corner-bottom-left-shape', 'corner-bottom-right-shape', 'corner-bottom-shape',
+  'corner-end-end-shape', 'corner-end-start-shape', 'corner-inline-end-shape',
+  'corner-inline-start-shape', 'corner-left-shape', 'corner-right-shape', 'corner-shape',
+  'corner-start-end-shape', 'corner-start-start-shape', 'corner-top-left-shape',
+  'corner-top-right-shape', 'corner-top-shape', 'counter-increment', 'counter-reset', 'counter-set',
+  'cursor', 'cx', 'cy', 'd', 'direction', 'display', 'dominant-baseline', 'dynamic-range-limit',
+  'empty-cells', 'field-sizing', 'fill', 'fill-opacity', 'fill-rule', 'filter', 'flex',
+  'flex-basis', 'flex-direction', 'flex-flow', 'flex-grow', 'flex-line-count', 'flex-shrink',
+  'flex-wrap', 'float', 'flood-color', 'flood-opacity', 'font', 'font-family',
+  'font-feature-settings', 'font-kerning', 'font-language-override', 'font-optical-sizing',
+  'font-palette', 'font-size', 'font-size-adjust', 'font-stretch', 'font-style', 'font-synthesis',
+  'font-synthesis-small-caps', 'font-synthesis-style', 'font-synthesis-weight', 'font-variant',
+  'font-variant-alternates', 'font-variant-caps', 'font-variant-east-asian', 'font-variant-emoji',
+  'font-variant-ligatures', 'font-variant-numeric', 'font-variant-position',
+  'font-variation-settings', 'font-weight', 'forced-color-adjust', 'gap', 'grid', 'grid-area',
+  'grid-auto-columns', 'grid-auto-flow', 'grid-auto-rows', 'grid-column', 'grid-column-end',
+  'grid-column-gap', 'grid-column-start', 'grid-gap', 'grid-row', 'grid-row-end', 'grid-row-gap',
+  'grid-row-start', 'grid-template', 'grid-template-areas', 'grid-template-columns',
+  'grid-template-rows', 'height', 'hyphenate-character', 'hyphenate-limit-chars', 'hyphens',
+  'image-orientation', 'image-rendering', 'initial-letter', 'inline-size', 'inset', 'inset-block',
+  'inset-block-end', 'inset-block-start', 'inset-inline', 'inset-inline-end', 'inset-inline-start',
+  'interactivity', 'interest-delay', 'interest-delay-end', 'interest-delay-start',
+  'interpolate-size', 'isolation', 'justify-content', 'justify-items', 'justify-self', 'left',
+  'letter-spacing', 'lighting-color', 'line-break', 'line-height', 'list-style', 'list-style-image',
+  'list-style-position', 'list-style-type', 'margin', 'margin-block', 'margin-block-end',
+  'margin-block-start', 'margin-bottom', 'margin-inline', 'margin-inline-end',
+  'margin-inline-start', 'margin-left', 'margin-right', 'margin-top', 'marker', 'marker-end',
+  'marker-mid', 'marker-start', 'mask', 'mask-clip', 'mask-composite', 'mask-image', 'mask-mode',
+  'mask-origin', 'mask-position', 'mask-repeat', 'mask-size', 'mask-type', 'math-depth',
+  'math-shift', 'math-style', 'max-block-size', 'max-height', 'max-inline-size', 'max-width',
+  'min-block-size', 'min-height', 'min-inline-size', 'min-width', 'mix-blend-mode', 'object-fit',
+  'object-position', 'object-view-box', 'offset', 'offset-anchor', 'offset-distance', 'offset-path',
+  'offset-position', 'offset-rotate', 'opacity', 'order', 'orphans', 'outline', 'outline-color',
+  'outline-offset', 'outline-style', 'outline-width', 'overflow', 'overflow-anchor',
+  'overflow-block', 'overflow-clip-margin', 'overflow-inline', 'overflow-wrap', 'overflow-x',
+  'overflow-y', 'overlay', 'overscroll-behavior', 'overscroll-behavior-block',
+  'overscroll-behavior-inline', 'overscroll-behavior-x', 'overscroll-behavior-y', 'padding',
+  'padding-block', 'padding-block-end', 'padding-block-start', 'padding-bottom', 'padding-inline',
+  'padding-inline-end', 'padding-inline-start', 'padding-left', 'padding-right', 'padding-top',
+  'page', 'page-break-after', 'page-break-before', 'page-break-inside', 'page-margin-safety',
+  'page-orientation', 'paint-order', 'perspective', 'perspective-origin', 'place-content',
+  'place-items', 'place-self', 'pointer-events', 'position', 'position-anchor', 'position-area',
+  'position-try', 'position-try-fallbacks', 'position-try-order', 'position-visibility',
+  'print-color-adjust', 'quotes', 'r', 'reading-flow', 'reading-order', 'resize', 'right', 'rotate',
+  'row-gap', 'row-rule', 'row-rule-break', 'row-rule-color', 'row-rule-inset', 'row-rule-inset-cap',
+  'row-rule-inset-cap-end', 'row-rule-inset-cap-start', 'row-rule-inset-end',
+  'row-rule-inset-junction', 'row-rule-inset-junction-end', 'row-rule-inset-junction-start',
+  'row-rule-inset-start', 'row-rule-style', 'row-rule-visibility-items', 'row-rule-width',
+  'ruby-align', 'ruby-overhang', 'ruby-position', 'rule', 'rule-break', 'rule-color', 'rule-inset',
+  'rule-inset-cap', 'rule-inset-end', 'rule-inset-junction', 'rule-inset-start', 'rule-overlap',
+  'rule-style', 'rule-visibility-items', 'rule-width', 'rx', 'ry', 'scale', 'scroll-axis-lock',
+  'scroll-behavior', 'scroll-initial-target', 'scroll-margin', 'scroll-margin-block',
+  'scroll-margin-block-end', 'scroll-margin-block-start', 'scroll-margin-bottom',
+  'scroll-margin-inline', 'scroll-margin-inline-end', 'scroll-margin-inline-start',
+  'scroll-margin-left', 'scroll-margin-right', 'scroll-margin-top', 'scroll-marker-group',
+  'scroll-padding', 'scroll-padding-block', 'scroll-padding-block-end',
+  'scroll-padding-block-start', 'scroll-padding-bottom', 'scroll-padding-inline',
+  'scroll-padding-inline-end', 'scroll-padding-inline-start', 'scroll-padding-left',
+  'scroll-padding-right', 'scroll-padding-top', 'scroll-snap-align', 'scroll-snap-stop',
+  'scroll-snap-type', 'scroll-target-group', 'scroll-timeline', 'scroll-timeline-axis',
+  'scroll-timeline-name', 'scrollbar-color', 'scrollbar-gutter', 'scrollbar-width',
+  'shape-image-threshold', 'shape-margin', 'shape-outside', 'shape-rendering', 'size', 'speak',
+  'stop-color', 'stop-opacity', 'stroke', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-linecap',
+  'stroke-linejoin', 'stroke-miterlimit', 'stroke-opacity', 'stroke-width', 'tab-size',
+  'table-layout', 'text-align', 'text-align-last', 'text-anchor', 'text-autospace', 'text-box',
+  'text-box-edge', 'text-box-trim', 'text-combine-upright', 'text-decoration',
+  'text-decoration-color', 'text-decoration-line', 'text-decoration-skip-ink',
+  'text-decoration-style', 'text-decoration-thickness', 'text-emphasis', 'text-emphasis-color',
+  'text-emphasis-position', 'text-emphasis-style', 'text-fit', 'text-indent', 'text-justify',
+  'text-orientation', 'text-overflow', 'text-rendering', 'text-shadow', 'text-size-adjust',
+  'text-spacing-trim', 'text-transform', 'text-underline-offset', 'text-underline-position',
+  'text-wrap', 'text-wrap-mode', 'text-wrap-style', 'timeline-scope', 'timeline-trigger',
+  'timeline-trigger-activation-range', 'timeline-trigger-activation-range-end',
+  'timeline-trigger-activation-range-start', 'timeline-trigger-active-range',
+  'timeline-trigger-active-range-end', 'timeline-trigger-active-range-start',
+  'timeline-trigger-name', 'timeline-trigger-source', 'top', 'touch-action', 'transform',
+  'transform-box', 'transform-origin', 'transform-style', 'transition', 'transition-behavior',
+  'transition-delay', 'transition-duration', 'transition-property', 'transition-timing-function',
+  'translate', 'trigger-scope', 'unicode-bidi', 'user-select', 'vector-effect', 'vertical-align',
+  'view-timeline', 'view-timeline-axis', 'view-timeline-inset', 'view-timeline-name',
+  'view-transition-class', 'view-transition-group', 'view-transition-name', 'view-transition-scope',
+  'visibility', 'white-space', 'white-space-collapse', 'widows', 'width', 'will-change',
+  'window-drag', 'word-break', 'word-spacing', 'word-wrap', 'writing-mode', 'x', 'y', 'z-index',
+  'zoom',
+]);
+// The camelCase property names a Chrome 153 CSSStyleDeclaration answers
+// `in` for (properties and @-rule descriptors alike).
+const _CHROME_STYLE_NAMES = new Set([
+  'accentColor', 'additiveSymbols', 'alignContent', 'alignItems', 'alignSelf', 'alignmentBaseline',
+  'all', 'anchorName', 'anchorScope', 'animation', 'animationComposition', 'animationDelay',
+  'animationDirection', 'animationDuration', 'animationFillMode', 'animationIterationCount',
+  'animationName', 'animationPlayState', 'animationRange', 'animationRangeEnd',
+  'animationRangeStart', 'animationTimeline', 'animationTimingFunction', 'animationTrigger',
+  'appRegion', 'appearance', 'ascentOverride', 'aspectRatio', 'backdropFilter',
+  'backfaceVisibility', 'background', 'backgroundAttachment', 'backgroundBlendMode',
+  'backgroundClip', 'backgroundColor', 'backgroundImage', 'backgroundOrigin', 'backgroundPosition',
+  'backgroundPositionX', 'backgroundPositionY', 'backgroundRepeat', 'backgroundSize', 'basePalette',
+  'baselineShift', 'baselineSource', 'blockSize', 'border', 'borderBlock', 'borderBlockColor',
+  'borderBlockEnd', 'borderBlockEndColor', 'borderBlockEndStyle', 'borderBlockEndWidth',
+  'borderBlockStart', 'borderBlockStartColor', 'borderBlockStartStyle', 'borderBlockStartWidth',
+  'borderBlockStyle', 'borderBlockWidth', 'borderBottom', 'borderBottomColor',
+  'borderBottomLeftRadius', 'borderBottomRightRadius', 'borderBottomStyle', 'borderBottomWidth',
+  'borderCollapse', 'borderColor', 'borderEndEndRadius', 'borderEndStartRadius', 'borderImage',
+  'borderImageOutset', 'borderImageRepeat', 'borderImageSlice', 'borderImageSource',
+  'borderImageWidth', 'borderInline', 'borderInlineColor', 'borderInlineEnd',
+  'borderInlineEndColor', 'borderInlineEndStyle', 'borderInlineEndWidth', 'borderInlineStart',
+  'borderInlineStartColor', 'borderInlineStartStyle', 'borderInlineStartWidth', 'borderInlineStyle',
+  'borderInlineWidth', 'borderLeft', 'borderLeftColor', 'borderLeftStyle', 'borderLeftWidth',
+  'borderRadius', 'borderRight', 'borderRightColor', 'borderRightStyle', 'borderRightWidth',
+  'borderShape', 'borderSpacing', 'borderStartEndRadius', 'borderStartStartRadius', 'borderStyle',
+  'borderTop', 'borderTopColor', 'borderTopLeftRadius', 'borderTopRightRadius', 'borderTopStyle',
+  'borderTopWidth', 'borderWidth', 'bottom', 'boxDecorationBreak', 'boxShadow', 'boxSizing',
+  'breakAfter', 'breakBefore', 'breakInside', 'bufferedRendering', 'captionSide', 'caretAnimation',
+  'caretColor', 'caretShape', 'clear', 'clip', 'clipPath', 'clipRule', 'color',
+  'colorInterpolation', 'colorInterpolationFilters', 'colorRendering', 'colorScheme', 'columnCount',
+  'columnFill', 'columnGap', 'columnHeight', 'columnRule', 'columnRuleBreak', 'columnRuleColor',
+  'columnRuleInset', 'columnRuleInsetCap', 'columnRuleInsetCapEnd', 'columnRuleInsetCapStart',
+  'columnRuleInsetEnd', 'columnRuleInsetJunction', 'columnRuleInsetJunctionEnd',
+  'columnRuleInsetJunctionStart', 'columnRuleInsetStart', 'columnRuleStyle',
+  'columnRuleVisibilityItems', 'columnRuleWidth', 'columnSpan', 'columnWidth', 'columnWrap',
+  'columns', 'contain', 'containIntrinsicBlockSize', 'containIntrinsicHeight',
+  'containIntrinsicInlineSize', 'containIntrinsicSize', 'containIntrinsicWidth', 'container',
+  'containerName', 'containerType', 'content', 'contentVisibility', 'cornerBlockEndShape',
+  'cornerBlockStartShape', 'cornerBottomLeftShape', 'cornerBottomRightShape', 'cornerBottomShape',
+  'cornerEndEndShape', 'cornerEndStartShape', 'cornerInlineEndShape', 'cornerInlineStartShape',
+  'cornerLeftShape', 'cornerRightShape', 'cornerShape', 'cornerStartEndShape',
+  'cornerStartStartShape', 'cornerTopLeftShape', 'cornerTopRightShape', 'cornerTopShape',
+  'counterIncrement', 'counterReset', 'counterSet', 'cursor', 'cx', 'cy', 'd', 'descentOverride',
+  'direction', 'display', 'dominantBaseline', 'dynamicRangeLimit', 'emptyCells', 'fallback',
+  'fieldSizing', 'fill', 'fillOpacity', 'fillRule', 'filter', 'flex', 'flexBasis', 'flexDirection',
+  'flexFlow', 'flexGrow', 'flexLineCount', 'flexShrink', 'flexWrap', 'float', 'floodColor',
+  'floodOpacity', 'font', 'fontDisplay', 'fontFamily', 'fontFeatureSettings', 'fontKerning',
+  'fontLanguageOverride', 'fontOpticalSizing', 'fontPalette', 'fontSize', 'fontSizeAdjust',
+  'fontStretch', 'fontStyle', 'fontSynthesis', 'fontSynthesisSmallCaps', 'fontSynthesisStyle',
+  'fontSynthesisWeight', 'fontVariant', 'fontVariantAlternates', 'fontVariantCaps',
+  'fontVariantEastAsian', 'fontVariantEmoji', 'fontVariantLigatures', 'fontVariantNumeric',
+  'fontVariantPosition', 'fontVariationSettings', 'fontWeight', 'forcedColorAdjust', 'gap', 'grid',
+  'gridArea', 'gridAutoColumns', 'gridAutoFlow', 'gridAutoRows', 'gridColumn', 'gridColumnEnd',
+  'gridColumnGap', 'gridColumnStart', 'gridGap', 'gridRow', 'gridRowEnd', 'gridRowGap',
+  'gridRowStart', 'gridTemplate', 'gridTemplateAreas', 'gridTemplateColumns', 'gridTemplateRows',
+  'height', 'hyphenateCharacter', 'hyphenateLimitChars', 'hyphens', 'imageOrientation',
+  'imageRendering', 'inherits', 'initialLetter', 'initialValue', 'inlineSize', 'inset',
+  'insetBlock', 'insetBlockEnd', 'insetBlockStart', 'insetInline', 'insetInlineEnd',
+  'insetInlineStart', 'interactivity', 'interestDelay', 'interestDelayEnd', 'interestDelayStart',
+  'interpolateSize', 'isolation', 'justifyContent', 'justifyItems', 'justifySelf', 'left',
+  'letterSpacing', 'lightingColor', 'lineBreak', 'lineGapOverride', 'lineHeight', 'listStyle',
+  'listStyleImage', 'listStylePosition', 'listStyleType', 'margin', 'marginBlock', 'marginBlockEnd',
+  'marginBlockStart', 'marginBottom', 'marginInline', 'marginInlineEnd', 'marginInlineStart',
+  'marginLeft', 'marginRight', 'marginTop', 'marker', 'markerEnd', 'markerMid', 'markerStart',
+  'mask', 'maskClip', 'maskComposite', 'maskImage', 'maskMode', 'maskOrigin', 'maskPosition',
+  'maskRepeat', 'maskSize', 'maskType', 'mathDepth', 'mathShift', 'mathStyle', 'maxBlockSize',
+  'maxHeight', 'maxInlineSize', 'maxWidth', 'minBlockSize', 'minHeight', 'minInlineSize',
+  'minWidth', 'mixBlendMode', 'navigation', 'negative', 'objectFit', 'objectPosition',
+  'objectViewBox', 'offset', 'offsetAnchor', 'offsetDistance', 'offsetPath', 'offsetPosition',
+  'offsetRotate', 'opacity', 'order', 'orphans', 'outline', 'outlineColor', 'outlineOffset',
+  'outlineStyle', 'outlineWidth', 'overflow', 'overflowAnchor', 'overflowBlock',
+  'overflowClipMargin', 'overflowInline', 'overflowWrap', 'overflowX', 'overflowY', 'overlay',
+  'overrideColors', 'overscrollBehavior', 'overscrollBehaviorBlock', 'overscrollBehaviorInline',
+  'overscrollBehaviorX', 'overscrollBehaviorY', 'pad', 'padding', 'paddingBlock', 'paddingBlockEnd',
+  'paddingBlockStart', 'paddingBottom', 'paddingInline', 'paddingInlineEnd', 'paddingInlineStart',
+  'paddingLeft', 'paddingRight', 'paddingTop', 'page', 'pageBreakAfter', 'pageBreakBefore',
+  'pageBreakInside', 'pageMarginSafety', 'pageOrientation', 'paintOrder', 'perspective',
+  'perspectiveOrigin', 'placeContent', 'placeItems', 'placeSelf', 'pointerEvents', 'position',
+  'positionAnchor', 'positionArea', 'positionTry', 'positionTryFallbacks', 'positionTryOrder',
+  'positionVisibility', 'prefix', 'printColorAdjust', 'quotes', 'r', 'range', 'readingFlow',
+  'readingOrder', 'resize', 'result', 'right', 'rotate', 'rowGap', 'rowRule', 'rowRuleBreak',
+  'rowRuleColor', 'rowRuleInset', 'rowRuleInsetCap', 'rowRuleInsetCapEnd', 'rowRuleInsetCapStart',
+  'rowRuleInsetEnd', 'rowRuleInsetJunction', 'rowRuleInsetJunctionEnd', 'rowRuleInsetJunctionStart',
+  'rowRuleInsetStart', 'rowRuleStyle', 'rowRuleVisibilityItems', 'rowRuleWidth', 'rubyAlign',
+  'rubyOverhang', 'rubyPosition', 'rule', 'ruleBreak', 'ruleColor', 'ruleInset', 'ruleInsetCap',
+  'ruleInsetEnd', 'ruleInsetJunction', 'ruleInsetStart', 'ruleOverlap', 'ruleStyle',
+  'ruleVisibilityItems', 'ruleWidth', 'rx', 'ry', 'scale', 'scrollAxisLock', 'scrollBehavior',
+  'scrollInitialTarget', 'scrollMargin', 'scrollMarginBlock', 'scrollMarginBlockEnd',
+  'scrollMarginBlockStart', 'scrollMarginBottom', 'scrollMarginInline', 'scrollMarginInlineEnd',
+  'scrollMarginInlineStart', 'scrollMarginLeft', 'scrollMarginRight', 'scrollMarginTop',
+  'scrollMarkerGroup', 'scrollPadding', 'scrollPaddingBlock', 'scrollPaddingBlockEnd',
+  'scrollPaddingBlockStart', 'scrollPaddingBottom', 'scrollPaddingInline', 'scrollPaddingInlineEnd',
+  'scrollPaddingInlineStart', 'scrollPaddingLeft', 'scrollPaddingRight', 'scrollPaddingTop',
+  'scrollSnapAlign', 'scrollSnapStop', 'scrollSnapType', 'scrollTargetGroup', 'scrollTimeline',
+  'scrollTimelineAxis', 'scrollTimelineName', 'scrollbarColor', 'scrollbarGutter', 'scrollbarWidth',
+  'shapeImageThreshold', 'shapeMargin', 'shapeOutside', 'shapeRendering', 'size', 'sizeAdjust',
+  'speak', 'speakAs', 'src', 'stopColor', 'stopOpacity', 'stroke', 'strokeDasharray',
+  'strokeDashoffset', 'strokeLinecap', 'strokeLinejoin', 'strokeMiterlimit', 'strokeOpacity',
+  'strokeWidth', 'suffix', 'symbols', 'syntax', 'system', 'tabSize', 'tableLayout', 'textAlign',
+  'textAlignLast', 'textAnchor', 'textAutospace', 'textBox', 'textBoxEdge', 'textBoxTrim',
+  'textCombineUpright', 'textDecoration', 'textDecorationColor', 'textDecorationLine',
+  'textDecorationSkipInk', 'textDecorationStyle', 'textDecorationThickness', 'textEmphasis',
+  'textEmphasisColor', 'textEmphasisPosition', 'textEmphasisStyle', 'textFit', 'textIndent',
+  'textJustify', 'textOrientation', 'textOverflow', 'textRendering', 'textShadow', 'textSizeAdjust',
+  'textSpacingTrim', 'textTransform', 'textUnderlineOffset', 'textUnderlinePosition', 'textWrap',
+  'textWrapMode', 'textWrapStyle', 'timelineScope', 'timelineTrigger',
+  'timelineTriggerActivationRange', 'timelineTriggerActivationRangeEnd',
+  'timelineTriggerActivationRangeStart', 'timelineTriggerActiveRange',
+  'timelineTriggerActiveRangeEnd', 'timelineTriggerActiveRangeStart', 'timelineTriggerName',
+  'timelineTriggerSource', 'top', 'touchAction', 'transform', 'transformBox', 'transformOrigin',
+  'transformStyle', 'transition', 'transitionBehavior', 'transitionDelay', 'transitionDuration',
+  'transitionProperty', 'transitionTimingFunction', 'translate', 'triggerScope', 'types',
+  'unicodeBidi', 'unicodeRange', 'userSelect', 'vectorEffect', 'verticalAlign', 'viewTimeline',
+  'viewTimelineAxis', 'viewTimelineInset', 'viewTimelineName', 'viewTransitionClass',
+  'viewTransitionGroup', 'viewTransitionName', 'viewTransitionScope', 'visibility',
+  'webkitAlignContent', 'webkitAlignItems', 'webkitAlignSelf', 'webkitAnimation',
+  'webkitAnimationDelay', 'webkitAnimationDirection', 'webkitAnimationDuration',
+  'webkitAnimationFillMode', 'webkitAnimationIterationCount', 'webkitAnimationName',
+  'webkitAnimationPlayState', 'webkitAnimationTimingFunction', 'webkitAppRegion',
+  'webkitAppearance', 'webkitBackfaceVisibility', 'webkitBackgroundClip', 'webkitBackgroundOrigin',
+  'webkitBackgroundSize', 'webkitBorderAfter', 'webkitBorderAfterColor', 'webkitBorderAfterStyle',
+  'webkitBorderAfterWidth', 'webkitBorderBefore', 'webkitBorderBeforeColor',
+  'webkitBorderBeforeStyle', 'webkitBorderBeforeWidth', 'webkitBorderBottomLeftRadius',
+  'webkitBorderBottomRightRadius', 'webkitBorderEnd', 'webkitBorderEndColor',
+  'webkitBorderEndStyle', 'webkitBorderEndWidth', 'webkitBorderHorizontalSpacing',
+  'webkitBorderImage', 'webkitBorderRadius', 'webkitBorderStart', 'webkitBorderStartColor',
+  'webkitBorderStartStyle', 'webkitBorderStartWidth', 'webkitBorderTopLeftRadius',
+  'webkitBorderTopRightRadius', 'webkitBorderVerticalSpacing', 'webkitBoxAlign',
+  'webkitBoxDecorationBreak', 'webkitBoxDirection', 'webkitBoxFlex', 'webkitBoxOrdinalGroup',
+  'webkitBoxOrient', 'webkitBoxPack', 'webkitBoxReflect', 'webkitBoxShadow', 'webkitBoxSizing',
+  'webkitClipPath', 'webkitColumnBreakAfter', 'webkitColumnBreakBefore', 'webkitColumnBreakInside',
+  'webkitColumnCount', 'webkitColumnGap', 'webkitColumnRule', 'webkitColumnRuleColor',
+  'webkitColumnRuleStyle', 'webkitColumnRuleWidth', 'webkitColumnSpan', 'webkitColumnWidth',
+  'webkitColumns', 'webkitFilter', 'webkitFlex', 'webkitFlexBasis', 'webkitFlexDirection',
+  'webkitFlexFlow', 'webkitFlexGrow', 'webkitFlexShrink', 'webkitFlexWrap',
+  'webkitFontFeatureSettings', 'webkitFontSmoothing', 'webkitHyphenateCharacter',
+  'webkitJustifyContent', 'webkitLineBreak', 'webkitLineClamp', 'webkitLocale',
+  'webkitLogicalHeight', 'webkitLogicalWidth', 'webkitMarginAfter', 'webkitMarginBefore',
+  'webkitMarginEnd', 'webkitMarginStart', 'webkitMask', 'webkitMaskBoxImage',
+  'webkitMaskBoxImageOutset', 'webkitMaskBoxImageRepeat', 'webkitMaskBoxImageSlice',
+  'webkitMaskBoxImageSource', 'webkitMaskBoxImageWidth', 'webkitMaskClip', 'webkitMaskComposite',
+  'webkitMaskImage', 'webkitMaskOrigin', 'webkitMaskPosition', 'webkitMaskPositionX',
+  'webkitMaskPositionY', 'webkitMaskRepeat', 'webkitMaskSize', 'webkitMaxLogicalHeight',
+  'webkitMaxLogicalWidth', 'webkitMinLogicalHeight', 'webkitMinLogicalWidth', 'webkitOpacity',
+  'webkitOrder', 'webkitPaddingAfter', 'webkitPaddingBefore', 'webkitPaddingEnd',
+  'webkitPaddingStart', 'webkitPerspective', 'webkitPerspectiveOrigin', 'webkitPerspectiveOriginX',
+  'webkitPerspectiveOriginY', 'webkitPrintColorAdjust', 'webkitRtlOrdering', 'webkitRubyPosition',
+  'webkitShapeImageThreshold', 'webkitShapeMargin', 'webkitShapeOutside', 'webkitTapHighlightColor',
+  'webkitTextCombine', 'webkitTextDecorationsInEffect', 'webkitTextEmphasis',
+  'webkitTextEmphasisColor', 'webkitTextEmphasisPosition', 'webkitTextEmphasisStyle',
+  'webkitTextFillColor', 'webkitTextOrientation', 'webkitTextSecurity', 'webkitTextSizeAdjust',
+  'webkitTextStroke', 'webkitTextStrokeColor', 'webkitTextStrokeWidth', 'webkitTransform',
+  'webkitTransformOrigin', 'webkitTransformOriginX', 'webkitTransformOriginY',
+  'webkitTransformOriginZ', 'webkitTransformStyle', 'webkitTransition', 'webkitTransitionDelay',
+  'webkitTransitionDuration', 'webkitTransitionProperty', 'webkitTransitionTimingFunction',
+  'webkitUserDrag', 'webkitUserModify', 'webkitUserSelect', 'webkitWritingMode', 'whiteSpace',
+  'whiteSpaceCollapse', 'widows', 'width', 'willChange', 'windowDrag', 'wordBreak', 'wordSpacing',
+  'wordWrap', 'writingMode', 'x', 'y', 'zIndex', 'zoom', 'cssFloat',
+]);
+const _CHROME_STYLE_OWN_NAMES = Object.freeze(Array.from(_CHROME_STYLE_NAMES).filter((n) => n !== 'cssFloat'));
+// Whether a CSSStyleDeclaration property name (dashed or camelCase, with
+// webkit/Webkit aliases) names a property Chrome has.
+function _isChromeCssName(prop) {
+  if (typeof prop !== 'string' || !prop) return false;
+  if (_CHROME_STYLE_NAMES.has(prop)) return true;
+  if (!prop.includes('-') || /[A-Z]/.test(prop)) return false;
+  const camel = prop.replace(/^-webkit-/, 'webkit-').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  return camel !== 'cssFloat' && _CHROME_STYLE_NAMES.has(camel);
+}
+const _CSS_WIDE_KEYWORDS = new Set(["initial", "inherit", "unset", "revert", "revert-layer"]);
 function _cssSupportsDeclaration(name, value) {
   name = name.trim().toLowerCase();
   value = value.trim();
   if (typeof __obscuraCore.ops.op_css_supports === "function") {
-    try { return !!__obscuraCore.ops.op_css_supports(name, value); }
+    let supported = false;
+    try { supported = !!__obscuraCore.ops.op_css_supports(name, value); }
     catch (_) { return false; }
+    if (supported || !_CHROME_CSS_PROPERTIES.has(name) || !value || _cssHasInvalidSupportsValueSyntax(value)) return supported;
+    if (_CSS_WIDE_KEYWORDS.has(value.toLowerCase())) return true;
+    // A property the renderer has no grammar for: accept the value, as
+    // the renderer cannot say it is wrong.
+    let known = false;
+    try { known = !!__obscuraCore.ops.op_css_supports(name, "initial"); } catch (_) {}
+    return !known;
   }
   if (!value || _cssHasInvalidSupportsValueSyntax(value)) return false;
   if (name.startsWith("--")) return name.length > 2;
@@ -15081,8 +15602,33 @@ globalThis.CSS = {
       return _cssSupportsCondition(String(prop));
     } catch (e) { return false; }
   },
-  escape(s){ return s; }
+  // CSSOM "serialize an identifier".
+  escape(value) {
+    if (arguments.length < 1) throw new TypeError("Failed to execute 'escape' on 'CSS': 1 argument required, but only 0 present.");
+    const s = String(value);
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 0) { out += '\uFFFD'; continue; }
+      if ((c >= 0x1 && c <= 0x1f) || c === 0x7f || (i === 0 && c >= 0x30 && c <= 0x39)
+          || (i === 1 && c >= 0x30 && c <= 0x39 && s.charCodeAt(0) === 0x2d)) {
+        out += '\\' + c.toString(16) + ' ';
+        continue;
+      }
+      if (i === 0 && c === 0x2d && s.length === 1) { out += '\\' + s[i]; continue; }
+      if (c >= 0x80 || c === 0x2d || c === 0x5f || (c >= 0x30 && c <= 0x39)
+          || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) {
+        out += s[i];
+        continue;
+      }
+      out += '\\' + s[i];
+    }
+    return out;
+  },
+  [Symbol.toStringTag]: 'CSS',
 };
+_markNative(globalThis.CSS.supports);
+_markNative(globalThis.CSS.escape);
 
 globalThis.HTMLElement = HTMLElement;
 globalThis.HTMLUnknownElement = HTMLUnknownElement;
@@ -17063,6 +17609,55 @@ globalThis.__ariaQuerySelector = function(root, selector) { return null; };
 globalThis.__ariaQuerySelectorAll = async function*(root, selector) { /* yields nothing */ };
 const _MAX_CANVAS_DIMENSION = 32767;
 const _MAX_CANVAS_PIXELS = 67108864;
+// TextMetrics with its attributes on the prototype, as in Chrome
+// (JSON.stringify of one is "{}").
+const _textMetricsData = new WeakMap();
+function TextMetrics() { throw new TypeError('Illegal constructor'); }
+for (const name of ['width', 'actualBoundingBoxLeft', 'actualBoundingBoxRight', 'fontBoundingBoxAscent',
+  'fontBoundingBoxDescent', 'actualBoundingBoxAscent', 'actualBoundingBoxDescent', 'emHeightAscent',
+  'emHeightDescent', 'hangingBaseline', 'alphabeticBaseline', 'ideographicBaseline']) {
+  Object.defineProperty(TextMetrics.prototype, name, {
+    get: _markNativeAs({ get [name]() {
+      const data = _textMetricsData.get(this);
+      if (!data) throw new TypeError('Illegal invocation');
+      return data[name];
+    } }.__lookupGetter__(name), 'function get ' + name + '() { [native code] }'),
+    enumerable: true, configurable: true,
+  });
+}
+Object.defineProperty(TextMetrics.prototype, Symbol.toStringTag, { value: 'TextMetrics', configurable: true });
+_markNative(TextMetrics);
+globalThis.TextMetrics = TextMetrics;
+function _makeTextMetrics(values) {
+  const metrics = Object.create(TextMetrics.prototype);
+  _textMetricsData.set(metrics, values);
+  return metrics;
+}
+// [r, g, b, a] for a CSS color string, or null.
+function _canvasParseColor(text) {
+  const value = String(text).trim();
+  if (/^transparent$/i.test(value)) return [0, 0, 0, 0];
+  if (typeof __obscuraCore.ops.op_parse_css_color === 'function') {
+    try {
+      const rgba = __obscuraCore.ops.op_parse_css_color(value);
+      if (rgba) return rgba;
+    } catch (_e) {}
+  }
+  const m = value.match(/^rgba?\(\s*(\d+(?:\.\d+)?%?)\s*[,\s]\s*(\d+(?:\.\d+)?%?)\s*[,\s]\s*(\d+(?:\.\d+)?%?)\s*(?:[,/]\s*(\d*\.?\d+%?))?\s*\)$/i);
+  if (!m) return null;
+  const channel = (v) => Math.max(0, Math.min(255, Math.round(v.endsWith('%') ? parseFloat(v) * 2.55 : parseFloat(v))));
+  const alpha = m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4]));
+  return [channel(m[1]), channel(m[2]), channel(m[3]), Math.round(Math.max(0, Math.min(1, alpha)) * 255)];
+}
+// The value a fill/stroke style assignment stores, or undefined to ignore it.
+function _canvasStyleValue(value) {
+  if (value !== null && typeof value === 'object') return value;
+  const rgba = _canvasParseColor(String(value));
+  if (!rgba) return undefined;
+  const [r, g, b, a] = rgba;
+  if (a === 255) return '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('');
+  return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + (a === 0 ? '0' : String(Math.round(a / 255 * 1000) / 1000)) + ')';
+}
 class _Canvas2D {
   constructor(canvas) {
     this.canvas = canvas;
@@ -17075,6 +17670,12 @@ class _Canvas2D {
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
   }
+  // Styles serialize as Chrome does ("#0c2238", or "rgba(r, g, b, a)" when
+  // translucent), and a string that is not a color leaves the style as is.
+  get fillStyle() { return this._fillStyle; }
+  set fillStyle(value) { const next = _canvasStyleValue(value); if (next !== undefined) this._fillStyle = next; }
+  get strokeStyle() { return this._strokeStyle; }
+  set strokeStyle(value) { const next = _canvasStyleValue(value); if (next !== undefined) this._strokeStyle = next; }
   _resetDrawingState() {
     this.fillStyle = '#000000';
     this.strokeStyle = '#000000';
@@ -17121,6 +17722,8 @@ class _Canvas2D {
   }
   _parseColor(css) {
     if (!css || typeof css !== 'string' || css === 'none') return [0,0,0,0];
+    const parsed = _canvasParseColor(css);
+    if (parsed) return parsed;
     if (css.startsWith('#')) {
       const hex = css.slice(1);
       if (hex.length === 3) return [parseInt(hex[0]+hex[0],16),parseInt(hex[1]+hex[1],16),parseInt(hex[2]+hex[2],16),255];
@@ -17220,7 +17823,24 @@ class _Canvas2D {
       try { width = __obscuraCore.ops.op_measure_text(String(t), String(this.font)); } catch (_e) {}
     }
     if (!(width >= 0)) width = String(t).length * fontSize * 0.55;
-    return { width, actualBoundingBoxAscent: fontSize * 0.72, actualBoundingBoxDescent: fontSize * 0.21 };
+    // Chrome's font box is whole pixels; the ink box of an empty string is
+    // empty. Fractional noise in either is a canvas-spoofing tell.
+    const empty = String(t).length === 0;
+    const ascent = Math.round(fontSize * 0.905), descent = Math.round(fontSize * 0.212);
+    return _makeTextMetrics({
+      width,
+      actualBoundingBoxLeft: 0,
+      actualBoundingBoxRight: empty ? 0 : width,
+      fontBoundingBoxAscent: ascent,
+      fontBoundingBoxDescent: descent,
+      actualBoundingBoxAscent: empty ? 0 : Math.round(fontSize * 0.716),
+      actualBoundingBoxDescent: empty ? 0 : Math.round(fontSize * 0.015),
+      emHeightAscent: ascent,
+      emHeightDescent: descent,
+      hangingBaseline: Math.round(fontSize * 0.724 * 1000) / 1000,
+      alphabeticBaseline: 0,
+      ideographicBaseline: -descent,
+    });
   }
   getImageData(x, y, w, h) {
     x=Math.round(x); y=Math.round(y); w=Math.round(w); h=Math.round(h);
@@ -17942,11 +18562,15 @@ globalThis.AudioContext = class AudioContext {
   removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type]=this._listeners[type].filter(h=>h!==fn); }
   _ap(v, min=-3.4028235e38, max=3.4028235e38) { return { value: v, defaultValue: v, minValue: min, maxValue: max, setValueAtTime(){} }; }
   createOscillator() { return {context:this,type:'sine',frequency:this._ap(440, -22050, 22050),detune:this._ap(0, -153600, 153600),connect(){},start(){},stop(){},disconnect(){},addEventListener(){},removeEventListener(){}}; }
-  createDynamicsCompressor() { return {context:this,threshold:this._ap(_fp('compThreshold'), -100, 0),knee:this._ap(_fp('compKnee'), 0, 40),ratio:this._ap(_fp('compRatio'), 1, 20),attack:this._ap(0.003, 0, 1),release:this._ap(0.25, 0, 1),reduction:0,connect(){},disconnect(){}}; }
+  // Chrome's defaults; `reduction` reads 0 until a render has run through it.
+  createDynamicsCompressor() { const node = {context:this,threshold:this._ap(-24, -100, 0),knee:this._ap(30, 0, 40),ratio:this._ap(12, 1, 20),attack:this._ap(0.003, 0, 1),release:this._ap(0.25, 0, 1),reduction:0,connect(){},disconnect(){}}; (this._compressors || (this._compressors = [])).push(node); return node; }
   createAnalyser() {
     return {context:this,fftSize:2048,frequencyBinCount:1024,channelCount:2,channelCountMode:'max',channelInterpretation:'speakers',maxDecibels:-30,minDecibels:-100,numberOfInputs:1,numberOfOutputs:1,smoothingTimeConstant:0.8,connect(){},disconnect(){},
-      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=Math.floor(_fpRand(600+i)*10);},
-      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-100+_fpRand(700+i)*5;}
+      // Nothing has played through the analyser: silence, as in Chrome.
+      getByteFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=0;},
+      getFloatFrequencyData(a){for(let i=0;i<a.length;i++)a[i]=-Infinity;},
+      getByteTimeDomainData(a){for(let i=0;i<a.length;i++)a[i]=128;},
+      getFloatTimeDomainData(a){for(let i=0;i<a.length;i++)a[i]=0;}
     };
   }
   createGain() { return {context:this,gain:this._ap(1),connect(){},disconnect(){}}; }
@@ -17987,6 +18611,9 @@ globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext 
     for (var i = 4500; i < 5000; i++) s += Math.abs(data[i]);
     var scale = s > 0 ? target / s : 0;
     for (var i = 0; i < self.length; i++) data[i] *= scale;
+    // The compressor's 6 ms look-ahead: Chrome's output starts with silence.
+    for (var i = 0; i < Math.min(self.length, 265); i++) data[i] = 0;
+    for (const node of self._compressors || []) node.reduction = -20.538288116455078;
     // Fire oncomplete + 'complete' listeners on next microtask so callers
     // can register handlers synchronously after startRendering().
     var p = Promise.resolve().then(function() {
@@ -18005,13 +18632,18 @@ globalThis.OfflineAudioContext = class OfflineAudioContext extends AudioContext 
 };
 globalThis.webkitAudioContext = globalThis.AudioContext;
 
+// Chrome on Linux without speech-dispatcher voices lists none; Google's
+// network voices only appear on Windows and macOS builds.
 globalThis.speechSynthesis = {
   speaking: false, pending: false, paused: false,
-  getVoices() { return [{ name:'Google US English', lang:'en-US', default:true, localService:true, voiceURI:'Google US English' }]; },
+  getVoices() { return []; },
   speak() {}, cancel() {}, pause() {}, resume() {},
   addEventListener() {}, removeEventListener() {},
   onvoiceschanged: null,
 };
+for (const name of ['getVoices', 'speak', 'cancel', 'pause', 'resume', 'addEventListener', 'removeEventListener']) {
+  _markNative(globalThis.speechSynthesis[name]);
+}
 globalThis.SpeechSynthesisUtterance = class SpeechSynthesisUtterance { constructor(t){this.text=t;this.lang='en-US';this.rate=1;this.pitch=1;this.volume=1;} };
 
 globalThis.MediaStream = class MediaStream { constructor(){this.id='';this.active=true;} getTracks(){return [];} getAudioTracks(){return [];} getVideoTracks(){return [];} addTrack(){} removeTrack(){} clone(){return new MediaStream();} };
@@ -18124,17 +18756,19 @@ const _workerLocationUrls = new WeakMap();
     'userAgentData', 'connection', 'storage', 'locks', 'permissions',
     'mediaCapabilities', 'gpu', 'serviceWorker', 'serial', 'hid', 'usb', 'ml'];
   for (const prop of navProps) {
-    const get = function () {
+    const get = ({ get [prop]() {
+      if (!(this instanceof WorkerNavigator) || this === WorkerNavigator.prototype) throw new TypeError('Illegal invocation');
       const nav = globalThis.navigator;
       return nav ? nav[prop] : undefined;
-    };
+    } }).__lookupGetter__(prop);
     _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
     Object.defineProperty(WorkerNavigator.prototype, prop, { get, enumerable: true, configurable: true });
   }
   Object.defineProperty(WorkerNavigator.prototype, Symbol.toStringTag, { value: 'WorkerNavigator', configurable: true });
   const locProps = ['href', 'origin', 'protocol', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'];
   for (const prop of locProps) {
-    const get = function () {
+    const get = ({ get [prop]() {
+      if (!_workerLocationUrls.has(this)) throw new TypeError('Illegal invocation');
       const href = _workerLocationUrls.get(this) || '';
       if (prop === 'href') return href;
       try {
@@ -18144,11 +18778,11 @@ const _workerLocationUrls = new WeakMap();
         }
         return url[prop];
       } catch (_e) { return ''; }
-    };
+    } }).__lookupGetter__(prop);
     _markNativeAs(get, 'function get ' + prop + '() { [native code] }');
     Object.defineProperty(WorkerLocation.prototype, prop, { get, enumerable: true, configurable: true });
   }
-  const toString = function toString() { return _workerLocationUrls.get(this) || ''; };
+  const toString = { toString() { return _workerLocationUrls.get(this) || ''; } }.toString;
   _markNative(toString);
   Object.defineProperty(WorkerLocation.prototype, 'toString', { value: toString, writable: true, enumerable: true, configurable: true });
   Object.defineProperty(WorkerLocation.prototype, Symbol.toStringTag, { value: 'WorkerLocation', configurable: true });
@@ -19744,8 +20378,20 @@ if (typeof FontFace === 'undefined') {
       this._status = 'loading';
       this._changed();
       const loaded = this.loaded;
+      // A source made only of local() faces loads when one of them is a
+      // font this engine has; otherwise it fails, as Chrome's does for a
+      // font the machine lacks. Resolving every local() name made each
+      // probed font "installed" (CreepJS: 51 of 51, "Like Windows 11").
+      const locals = _fontFaceLocalNames(this._source);
+      const missing = locals !== null && !locals.some((name) => _LOCAL_FONT_NAMES.has(name));
       Promise.resolve().then(() => {
         if (this._status !== 'loading') return;
+        if (missing) {
+          this._status = 'error';
+          this._rejectLoaded?.(new DOMException('A network error occurred.', 'NetworkError'));
+          this._changed();
+          return;
+        }
         this._status = 'loaded';
         this._scriptLoaded = true;
         this._resolveLoaded?.(this);
@@ -19753,6 +20399,27 @@ if (typeof FontFace === 'undefined') {
       });
       return loaded;
     }
+  };
+  // The faces local() can name: the engine's bundled fonts, by full and
+  // PostScript name.
+  const _LOCAL_FONT_NAMES = new Set([
+    'liberation sans', 'liberationsans', 'liberation sans bold', 'liberationsans-bold',
+    'liberation sans italic', 'liberationsans-italic', 'liberation sans bold italic', 'liberationsans-bolditalic',
+    'liberation serif', 'liberationserif', 'liberation serif bold', 'liberationserif-bold',
+    'liberation serif italic', 'liberationserif-italic', 'liberation serif bold italic', 'liberationserif-bolditalic',
+    'liberation mono', 'liberationmono', 'liberation mono bold', 'liberationmono-bold',
+    'liberation mono italic', 'liberationmono-italic', 'liberation mono bold italic', 'liberationmono-bolditalic',
+    'dejavu sans', 'dejavusans', 'dejavu sans bold', 'dejavusans-bold',
+    'noto color emoji', 'notocoloremoji',
+  ]);
+  // The local() names of a src list, or null when it has any url() source.
+  const _fontFaceLocalNames = (source) => {
+    if (typeof source !== 'string' || /url\s*\(/i.test(source)) return null;
+    const names = [];
+    const re = /local\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi;
+    let match;
+    while ((match = re.exec(source))) names.push((match[1] ?? match[2] ?? match[3] ?? '').trim().toLowerCase());
+    return names.length ? names : null;
   };
 
   const _fontFaceSelection = font => {
@@ -20295,9 +20962,17 @@ const _documentMembers = Object.freeze(Object.fromEntries([
   }],
 ]));
 
+let _nativeSourcesRecorded = false;
 globalThis.__obscura_init = function() {
   // The host sets __obscura_frameId on a frame realm before calling this.
   _realmFrameId = globalThis.__obscura_frameId >>> 0;
+  // Functions marked while the snapshot was built get their private
+  // toString record here, once per realm, in case the snapshot dropped it.
+  if (!_nativeSourcesRecorded) {
+    _nativeSourcesRecorded = true;
+    for (const fn of _nativeFns) _recordNativeSource(fn, '');
+    for (const [fn, text] of _nativeStr) _recordNativeSource(fn, text);
+  }
   _scriptingEnabled = _domParse('scripting_enabled') !== false;
   _sandboxOpaqueOrigin = _domParse('sandbox_opaque_origin') === true;
   globalThis.__obscura_update_media_preferences();
@@ -21556,6 +22231,25 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
   }
 })();
 
+// CSSStyleDeclaration members Chrome lists on its prototype.
+(function _completeStyleDeclaration() {
+  const proto = globalThis.CSSStyleDeclaration && globalThis.CSSStyleDeclaration.prototype;
+  if (!proto) return;
+  if (!Object.getOwnPropertyDescriptor(proto, 'parentRule')) {
+    Object.defineProperty(proto, 'parentRule', {
+      get: { get parentRule() { return this._parentRule || null; } }.__lookupGetter__('parentRule'),
+      enumerable: true, configurable: true,
+    });
+  }
+  if (!Object.getOwnPropertyDescriptor(proto, 'cssFloat')) {
+    Object.defineProperty(proto, 'cssFloat', {
+      get: { get cssFloat() { return this.getPropertyValue('float'); } }.__lookupGetter__('cssFloat'),
+      set: { set cssFloat(v) { this.setProperty('float', v); } }.__lookupSetter__('cssFloat'),
+      enumerable: true, configurable: true,
+    });
+  }
+})();
+
 // Navigator, shaped like Chrome's. Every member of `navigator` is an
 // accessor or operation on Navigator.prototype, in Chrome's order, and the
 // instance itself has no own properties: `Object.keys(navigator)` is [] and
@@ -21828,6 +22522,186 @@ if (typeof Response !== 'undefined' && Response.prototype && !Response.prototype
       }
     }
     Object.defineProperty(navProto, key, Object.assign({ enumerable: true, configurable: true }, d));
+  }
+})();
+
+
+// Interfaces Chrome 153 exposes on window that cannot be constructed there
+// either (`new X()` throws "Illegal constructor"), so a stub is exactly as
+// usable as the real one to page code that only detects or brand-checks
+// them. Feature-detection scripts date the browser by which of these exist;
+// without them it read as Chrome 95. Interfaces a page can construct are
+// not stubbed: a constructor that cannot do its job is worse than none.
+(function _exposeIllegalInterfaces() {
+  // Interfaces whose static operations pages call after detecting them
+  // (PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable,
+  // LanguageModel.availability, ...) stay absent: a stub without them throws.
+  const usable = new Set(['TaskSignal', 'RTCRtpSender', 'RTCRtpReceiver', 'CSSStyleValue', 'CSSNumericValue',
+    'Credential', 'PublicKeyCredential', 'DigitalCredential', 'IdentityCredential', 'IdentityProvider',
+    'LanguageDetector', 'LanguageModel', 'Summarizer', 'Translator', 'CropTarget', 'RestrictionTarget']);
+  const list = JSON.parse('[["FeaturePolicy","Object",{}],["XPathExpression","Object",{}],["XMLHttpRequestUpload","XMLHttpRequestEventTarget",{}],["WritableStreamDefaultController","Object",{}],["WebGLVertexArrayObject","WebGLObject",{}],["WebGLUniformLocation","Object",{}],["WebGLTransformFeedback","WebGLObject",{}],["WebGLTexture","WebGLObject",{}],["WebGLSync","WebGLObject",{}],["WebGLShaderPrecisionFormat","Object",{}],["WebGLShader","WebGLObject",{}],["WebGLSampler","WebGLObject",{}],["WebGLRenderbuffer","WebGLObject",{}],["WebGLQuery","WebGLObject",{}],["WebGLProgram","WebGLObject",{}],["WebGLObject","Object",{}],["WebGLFramebuffer","WebGLObject",{}],["WebGLBuffer","WebGLObject",{}],["WebGLActiveInfo","Object",{}],["VisualViewport","EventTarget",{}],["VisibilityStateEntry","PerformanceEntry",{}],["ViewTransitionTypeSet","Object",{}],["ViewTransition","Object",{}],["VideoPlaybackQuality","Object",{}],["TrustedTypePolicyFactory","Object",{}],["TrustedTypePolicy","Object",{}],["TrustedScriptURL","Object",{}],["TrustedScript","Object",{}],["TrustedHTML","Object",{}],["TransformStreamDefaultController","Object",{}],["TouchList","Object",{}],["TextEvent","UIEvent",{}],["TaskSignal","AbortSignal",{}],["TaskAttributionTiming","PerformanceEntry",{}],["SyncManager","Object",{}],["Subscriber","Object",{}],["StylePropertyMapReadOnly","Object",{}],["StylePropertyMap","StylePropertyMapReadOnly",{}],["ScriptProcessorNode","AudioNode",{}],["ScreenOrientation","EventTarget",{}],["SVGUnitTypes","Object",{"SVG_UNIT_TYPE_UNKNOWN":0,"SVG_UNIT_TYPE_USERSPACEONUSE":1,"SVG_UNIT_TYPE_OBJECTBOUNDINGBOX":2}],["SVGTransformList","Object",{}],["SVGTransform","Object",{"SVG_TRANSFORM_UNKNOWN":0,"SVG_TRANSFORM_MATRIX":1,"SVG_TRANSFORM_TRANSLATE":2,"SVG_TRANSFORM_SCALE":3,"SVG_TRANSFORM_ROTATE":4,"SVG_TRANSFORM_SKEWX":5,"SVG_TRANSFORM_SKEWY":6}],["SVGStringList","Object",{}],["SVGRect","Object",{}],["SVGPreserveAspectRatio","Object",{"SVG_PRESERVEASPECTRATIO_UNKNOWN":0,"SVG_PRESERVEASPECTRATIO_NONE":1,"SVG_PRESERVEASPECTRATIO_XMINYMIN":2,"SVG_PRESERVEASPECTRATIO_XMIDYMIN":3,"SVG_PRESERVEASPECTRATIO_XMAXYMIN":4,"SVG_PRESERVEASPECTRATIO_XMINYMID":5,"SVG_PRESERVEASPECTRATIO_XMIDYMID":6,"SVG_PRESERVEASPECTRATIO_XMAXYMID":7,"SVG_PRESERVEASPECTRATIO_XMINYMAX":8,"SVG_PRESERVEASPECTRATIO_XMIDYMAX":9,"SVG_PRESERVEASPECTRATIO_XMAXYMAX":10,"SVG_MEETORSLICE_UNKNOWN":0,"SVG_MEETORSLICE_MEET":1,"SVG_MEETORSLICE_SLICE":2}],["SVGPointList","Object",{}],["SVGPoint","Object",{}],["SVGNumberList","Object",{}],["SVGNumber","Object",{}],["SVGMatrix","Object",{}],["SVGMPathElement","SVGElement",{}],["SVGLengthList","Object",{}],["SVGLength","Object",{"SVG_LENGTHTYPE_UNKNOWN":0,"SVG_LENGTHTYPE_NUMBER":1,"SVG_LENGTHTYPE_PERCENTAGE":2,"SVG_LENGTHTYPE_EMS":3,"SVG_LENGTHTYPE_EXS":4,"SVG_LENGTHTYPE_PX":5,"SVG_LENGTHTYPE_CM":6,"SVG_LENGTHTYPE_MM":7,"SVG_LENGTHTYPE_IN":8,"SVG_LENGTHTYPE_PT":9,"SVG_LENGTHTYPE_PC":10}],["SVGAnimatedTransformList","Object",{}],["SVGAnimatedString","Object",{}],["SVGAnimatedRect","Object",{}],["SVGAnimatedPreserveAspectRatio","Object",{}],["SVGAnimatedNumberList","Object",{}],["SVGAnimatedNumber","Object",{}],["SVGAnimatedLengthList","Object",{}],["SVGAnimatedLength","Object",{}],["SVGAnimatedInteger","Object",{}],["SVGAnimatedEnumeration","Object",{}],["SVGAnimatedBoolean","Object",{}],["SVGAnimatedAngle","Object",{}],["SVGAngle","Object",{"SVG_ANGLETYPE_UNKNOWN":0,"SVG_ANGLETYPE_UNSPECIFIED":1,"SVG_ANGLETYPE_DEG":2,"SVG_ANGLETYPE_RAD":3,"SVG_ANGLETYPE_GRAD":4}],["ReportBody","Object",{}],["ReadableStreamDefaultController","Object",{}],["ReadableStreamBYOBRequest","Object",{}],["ReadableByteStreamController","Object",{}],["RadioNodeList","NodeList",{}],["RTCStatsReport","Object",{}],["RTCSctpTransport","EventTarget",{}],["RTCRtpTransceiver","Object",{}],["RTCRtpSender","Object",{}],["RTCRtpReceiver","Object",{}],["RTCIceTransport","EventTarget",{}],["RTCDtlsTransport","EventTarget",{}],["RTCDTMFSender","EventTarget",{}],["RTCCertificate","Object",{}],["PictureInPictureWindow","EventTarget",{}],["PermissionsPolicy","Object",{}],["PermissionStatus","EventTarget",{}],["PerformanceTimingConfidence","Object",{}],["PerformanceTiming","Object",{}],["PerformanceServerTiming","Object",{}],["PerformanceResourceTiming","PerformanceEntry",{}],["PerformancePaintTiming","PerformanceEntry",{}],["PerformanceNavigationTiming","PerformanceResourceTiming",{}],["PerformanceNavigation","Object",{"TYPE_NAVIGATE":0,"TYPE_RELOAD":1,"TYPE_BACK_FORWARD":2,"TYPE_RESERVED":255}],["PerformanceLongTaskTiming","PerformanceEntry",{}],["PerformanceEventTiming","PerformanceEntry",{}],["PerformanceElementTiming","PerformanceEntry",{}],["OffscreenCanvasRenderingContext2D","Object",{}],["NodeIterator","Object",{}],["NavigationTransition","Object",{}],["NavigationPrecommitController","Object",{}],["NavigationHistoryEntry","EventTarget",{}],["NavigationDestination","Object",{}],["NavigationActivation","Object",{}],["Navigation","EventTarget",{}],["MediaStreamTrackVideoStats","Object",{}],["MediaStreamTrackAudioStats","Object",{}],["MediaSourceHandle","Object",{}],["MediaList","Object",{}],["MediaError","Object",{"MEDIA_ERR_ABORTED":1,"MEDIA_ERR_NETWORK":2,"MEDIA_ERR_DECODE":3,"MEDIA_ERR_SRC_NOT_SUPPORTED":4}],["MathMLElement","Element",{}],["LayoutShiftAttribution","Object",{}],["LayoutShift","PerformanceEntry",{}],["LargestContentfulPaint","PerformanceEntry",{}],["InputDeviceInfo","MediaDeviceInfo",{}],["ImageBitmapRenderingContext","Object",{}],["IdleDeadline","Object",{}],["IDBRecord","Object",{}],["HighlightRegistry","Object",{}],["HTMLSelectedContentElement","HTMLElement",{}],["HTMLOptionsCollection","HTMLCollection",{}],["HTMLMarqueeElement","HTMLElement",{}],["HTMLFrameSetElement","HTMLElement",{}],["HTMLFrameElement","HTMLElement",{}],["HTMLFormControlsCollection","HTMLCollection",{}],["HTMLAllCollection","Object",{}],["GeolocationPositionError","Object",{"PERMISSION_DENIED":1,"POSITION_UNAVAILABLE":2,"TIMEOUT":3}],["GeolocationPosition","Object",{}],["GeolocationCoordinates","Object",{}],["GamepadHapticActuator","Object",{}],["GamepadButton","Object",{}],["Gamepad","Object",{}],["External","Object",{}],["EventCounts","Object",{}],["DelegatedInkTrailPresenter","Object",{}],["DataTransferItemList","Object",{}],["DataTransferItem","Object",{}],["DOMImplementation","Object",{}],["CustomStateSet","Object",{}],["CanvasPattern","Object",{}],["CanvasGradient","Object",{}],["CanvasCaptureMediaStreamTrack","MediaStreamTrack",{}],["CSSViewTransitionRule","CSSRule",{}],["CSSTransition","Animation",{}],["CSSTransformComponent","Object",{}],["CSSStyleValue","Object",{}],["CSSStartingStyleRule","CSSGroupingRule",{}],["CSSScopeRule","CSSGroupingRule",{}],["CSSPropertyRule","CSSRule",{}],["CSSPositionTryRule","CSSRule",{}],["CSSPositionTryDescriptors","CSSStyleDeclaration",{}],["CSSPageRule","CSSGroupingRule",{}],["CSSNumericValue","CSSStyleValue",{}],["CSSNumericArray","Object",{}],["CSSNestedDeclarations","CSSRule",{}],["CSSNamespaceRule","CSSRule",{}],["CSSMathValue","CSSNumericValue",{}],["CSSMarginRule","CSSRule",{}],["CSSLayerStatementRule","CSSRule",{}],["CSSLayerBlockRule","CSSGroupingRule",{}],["CSSKeyframesRule","CSSRule",{}],["CSSKeyframeRule","CSSRule",{}],["CSSImportRule","CSSRule",{}],["CSSImageValue","CSSStyleValue",{}],["CSSFontPaletteValuesRule","CSSRule",{}],["CSSFontFaceRule","CSSRule",{}],["CSSCounterStyleRule","CSSRule",{}],["CSSContainerRule","CSSConditionRule",{}],["CSPViolationReportBody","ReportBody",{}],["BrowserCaptureMediaStreamTrack","MediaStreamTrack",{}],["BaseAudioContext","EventTarget",{}],["BarProp","Object",{}],["AudioSinkInfo","Object",{}],["AudioScheduledSourceNode","AudioNode",{}],["AudioParamMap","Object",{}],["AudioParam","Object",{}],["AudioNode","EventTarget",{}],["AudioListener","Object",{}],["AudioDestinationNode","AudioNode",{}],["AnimationTimeline","Object",{}],["AnimationEffect","Object",{}],["AbstractRange","Object",{}],["AudioWorklet","Worklet",{}],["BatteryManager","EventTarget",{}],["Cache","Object",{}],["CacheStorage","Object",{}],["CookieStore","EventTarget",{}],["CookieStoreManager","Object",{}],["CreateMonitor","EventTarget",{}],["Credential","Object",{}],["DeviceMotionEventAcceleration","Object",{}],["DeviceMotionEventRotationRate","Object",{}],["GPUAdapter","Object",{}],["GPUAdapterInfo","Object",{}],["GPUBindGroup","Object",{}],["GPUBindGroupLayout","Object",{}],["GPUBuffer","Object",{}],["GPUCanvasContext","Object",{}],["GPUCommandBuffer","Object",{}],["GPUCommandEncoder","Object",{}],["GPUCompilationInfo","Object",{}],["GPUCompilationMessage","Object",{}],["GPUComputePassEncoder","Object",{}],["GPUComputePipeline","Object",{}],["GPUDevice","EventTarget",{}],["GPUDeviceLostInfo","Object",{}],["GPUError","Object",{}],["GPUExternalTexture","Object",{}],["GPUPipelineLayout","Object",{}],["GPUQuerySet","Object",{}],["GPUQueue","Object",{}],["GPURenderBundle","Object",{}],["GPURenderBundleEncoder","Object",{}],["GPURenderPassEncoder","Object",{}],["GPURenderPipeline","Object",{}],["GPUSampler","Object",{}],["GPUShaderModule","Object",{}],["GPUSupportedFeatures","Object",{}],["GPUSupportedLimits","Object",{}],["GPUTexture","Object",{}],["GPUTextureView","Object",{}],["ImageTrack","Object",{}],["ImageTrackList","Object",{}],["KeyboardLayoutMap","Object",{}],["MIDIAccess","EventTarget",{}],["MIDIInput","MIDIPort",{}],["MIDIInputMap","Object",{}],["MIDIOutput","MIDIPort",{}],["MIDIOutputMap","Object",{}],["MIDIPort","EventTarget",{}],["MediaDeviceInfo","Object",{}],["NavigationPreloadManager","Object",{}],["OrientationSensor","Sensor",{}],["ProtectedAudience","Object",{}],["ScreenDetailed","Screen",{}],["ScreenDetails","EventTarget",{}],["Sensor","EventTarget",{}],["ServiceWorkerRegistration","EventTarget",{}],["WGSLLanguageFeatures","Object",{}],["WebTransportBidirectionalStream","Object",{}],["WebTransportDatagramDuplexStream","Object",{}],["Worklet","Object",{}],["XRDOMOverlayState","Object",{}],["XRLayer","EventTarget",{}],["AudioPlaybackStats","Object",{}],["AuthenticatorAssertionResponse","AuthenticatorResponse",{}],["AuthenticatorAttestationResponse","AuthenticatorResponse",{}],["AuthenticatorResponse","Object",{}],["PublicKeyCredential","Credential",{}],["CrashReportContext","Object",{}],["DigitalCredential","Credential",{}],["DocumentPictureInPicture","EventTarget",{}],["FetchLaterResult","Object",{}],["FileSystemDirectoryHandle","FileSystemHandle",{}],["FileSystemFileHandle","FileSystemHandle",{}],["FileSystemHandle","Object",{}],["FileSystemWritableFileStream","WritableStream",{}],["FontData","Object",{}],["FragmentDirective","Object",{}],["HIDDevice","EventTarget",{}],["HIDInputReportEvent","Event",{}],["IdentityCredential","Credential",{}],["IdentityProvider","Object",{}],["LanguageDetector","Object",{}],["LanguageModel","EventTarget",{}],["Lock","Object",{}],["ServiceWorker","EventTarget",{}],["ModelContext","EventTarget",{}],["NotRestoredReasonDetails","Object",{}],["NotRestoredReasons","Object",{}],["OTPCredential","Credential",{}],["PaymentAddress","Object",{}],["PaymentResponse","EventTarget",{}],["PaymentManager","Object",{}],["PresentationAvailability","EventTarget",{}],["PresentationConnection","EventTarget",{}],["PresentationConnectionList","EventTarget",{}],["PresentationReceiver","Object",{}],["PressureRecord","Object",{}],["SerialPort","EventTarget",{}],["StorageBucket","Object",{}],["Summarizer","Object",{}],["Translator","Object",{}],["USBDevice","Object",{}],["WakeLockSentinel","EventTarget",{}],["XRAnchor","Object",{}],["XRAnchorSet","Object",{}],["XRBoundedReferenceSpace","XRReferenceSpace",{}],["XRCPUDepthInformation","XRDepthInformation",{}],["XRCamera","Object",{}],["XRDepthInformation","Object",{}],["XRFrame","Object",{}],["XRHand","Object",{}],["XRHitTestResult","Object",{}],["XRHitTestSource","Object",{}],["XRInputSource","Object",{}],["XRInputSourceArray","Object",{}],["XRJointPose","XRPose",{}],["XRJointSpace","XRSpace",{}],["XRLightEstimate","Object",{}],["XRLightProbe","EventTarget",{}],["XRPose","Object",{}],["XRReferenceSpace","XRSpace",{}],["XRRenderState","Object",{}],["XRSession","EventTarget",{}],["XRSpace","EventTarget",{}],["XRTransientInputHitTestResult","Object",{}],["XRTransientInputHitTestSource","Object",{}],["XRView","Object",{}],["XRViewerPose","XRPose",{}],["XRViewport","Object",{}],["XRWebGLDepthInformation","XRDepthInformation",{}],["XRCompositionLayer","XRLayer",{}],["XRProjectionLayer","XRCompositionLayer",{}],["XRCubeLayer","XRCompositionLayer",{}],["XRCylinderLayer","XRCompositionLayer",{}],["XREquirectLayer","XRCompositionLayer",{}],["XRQuadLayer","XRCompositionLayer",{}],["XRSubImage","Object",{}],["XRWebGLSubImage","XRSubImage",{}],["XRPlane","Object",{}],["XRPlaneSet","Object",{}],["AnimationTrigger","Object",{}],["BackgroundFetchManager","Object",{}],["BackgroundFetchRecord","Object",{}],["BackgroundFetchRegistration","EventTarget",{}],["CSSFontFeatureValuesRule","CSSRule",{}],["CSSFunctionDeclarations","CSSRule",{}],["CSSFunctionDescriptors","CSSStyleDeclaration",{}],["CSSFunctionRule","CSSGroupingRule",{}],["CSSPseudoElement","Object",{}],["ChapterInformation","Object",{}],["CropTarget","Object",{}],["Fence","Object",{}],["FencedFrameConfig","Object",{}],["HTMLFencedFrameElement","HTMLElement",{}],["HTMLCameraElement","HTMLElement",{}],["HTMLMicrophoneElement","HTMLElement",{}],["HTMLGeolocationElement","HTMLElement",{}],["HTMLUserMediaElement","HTMLElement",{}],["IntegrityViolationReportBody","ReportBody",{}],["InteractionContentfulPaint","PerformanceEntry",{}],["PerformanceSoftNavigation","PerformanceEntry",{}],["LaunchParams","Object",{}],["LaunchQueue","Object",{}],["NodeRange","AbstractRange",{}],["OpaqueRange","AbstractRange",{}],["PerformanceLongAnimationFrameTiming","PerformanceEntry",{}],["PerformanceScriptTiming","PerformanceEntry",{}],["RTCDataChannel","EventTarget",{}],["PeriodicSyncManager","Object",{}],["PushManager","Object",{}],["PushSubscription","Object",{}],["PushSubscriptionOptions","Object",{}],["RemotePlayback","EventTarget",{}],["RestrictionTarget","Object",{}],["SnapEvent","Event",{}],["SpeechSynthesis","EventTarget",{}],["SpeechSynthesisVoice","Object",{}],["TimelineTriggerRange","Object",{}],["TimelineTriggerRangeList","Object",{}],["Viewport","Object",{}]]');
+  const pending = new Map(list.filter((entry) => !usable.has(entry[0])).map((entry) => [entry[0], entry]));
+  const define = (name) => {
+    const entry = pending.get(name);
+    if (!entry) return;
+    pending.delete(name);
+    const [, parentName, consts] = entry;
+    if (Object.prototype.hasOwnProperty.call(globalThis, name)) return;
+    if (pending.has(parentName)) define(parentName);
+    const Parent = parentName && parentName !== 'Object' ? globalThis[parentName] : null;
+    const Ctor = { [name]: function () { throw new TypeError('Illegal constructor'); } }[name];
+    const proto = Object.create(Parent && Parent.prototype ? Parent.prototype : Object.prototype);
+    Object.defineProperty(proto, 'constructor', { value: Ctor, writable: true, enumerable: false, configurable: true });
+    Object.defineProperty(proto, Symbol.toStringTag, { value: name, configurable: true });
+    Object.defineProperty(Ctor, 'prototype', { value: proto, writable: false, enumerable: false, configurable: false });
+    if (Parent) Object.setPrototypeOf(Ctor, Parent);
+    for (const [key, value] of Object.entries(consts)) {
+      const d = { value, writable: false, enumerable: true, configurable: false };
+      Object.defineProperty(Ctor, key, d);
+      Object.defineProperty(proto, key, d);
+    }
+    _markNative(Ctor);
+    Object.defineProperty(globalThis, name, { value: Ctor, writable: true, enumerable: false, configurable: true });
+  };
+  for (const name of Array.from(pending.keys())) define(name);
+})();
+
+// Window members Chrome has as own properties of the global object.
+(function _windowMembers() {
+  const define = (name, desc) => {
+    if (Object.prototype.hasOwnProperty.call(globalThis, name)) return;
+    if (desc.get) _markNativeAs(desc.get, 'function get ' + name + '() { [native code] }');
+    if (desc.set) _markNativeAs(desc.set, 'function set ' + name + '() { [native code] }');
+    if (typeof desc.value === 'function') {
+      Object.defineProperty(desc.value, 'name', { value: name, configurable: true });
+      _markNative(desc.value);
+    }
+    Object.defineProperty(globalThis, name, Object.assign({ enumerable: true, configurable: true }, desc));
+  };
+  const slot = (initial) => {
+    let value = initial;
+    return { get() { return value; }, set(v) { value = v; } };
+  };
+  let windowName = '';
+  define('name', { get() { return windowName; }, set(v) { windowName = String(v); } });
+  define('status', slot(''));
+  define('closed', { get() { return false; } });
+  define('origin', { get() { try { return new URL(globalThis.location.href).origin; } catch (_e) { return 'null'; } } });
+  define('isSecureContext', { get() {
+    try {
+      const url = new URL(globalThis.location.href);
+      return url.protocol === 'https:' || url.protocol === 'file:' || url.protocol === 'wss:'
+        || /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(url.hostname)
+        || url.hostname.endsWith('.localhost')
+        || (url.protocol === 'about:' && !!(globalThis.parent && globalThis.parent !== globalThis));
+    } catch (_e) { return false; }
+  } });
+  define('crossOriginIsolated', { get() { return false; } });
+  define('originAgentCluster', { get() { return false; } });
+  define('credentialless', { get() { return false; } });
+  define('offscreenBuffering', { get() { return true; } });
+  define('event', { get() { return undefined; }, set() {} });
+  define('clientInformation', { get() { return globalThis.navigator; } });
+  const BarProp = globalThis.BarProp;
+  for (const bar of ['locationbar', 'menubar', 'personalbar', 'scrollbars', 'statusbar', 'toolbar']) {
+    const value = Object.create(BarProp ? BarProp.prototype : Object.prototype);
+    define(bar, { get() { return value; } });
+  }
+  if (BarProp && !Object.getOwnPropertyDescriptor(BarProp.prototype, 'visible')) {
+    Object.defineProperty(BarProp.prototype, 'visible', {
+      get: _markNativeAs({ get visible() { return true; } }.__lookupGetter__('visible'), 'function get visible() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+  }
+  const External = globalThis.External;
+  const external = Object.create(External ? External.prototype : Object.prototype);
+  if (External) {
+    for (const op of ['AddSearchProvider', 'IsSearchProviderInstalled']) {
+      Object.defineProperty(External.prototype, op, { value: _markNative({ [op]() { return undefined; } }[op]), writable: true, enumerable: true, configurable: true });
+    }
+  }
+  define('external', { get() { return external; }, set() {} });
+  const styleMedia = { type: 'screen', matchMedium(query) { return globalThis.matchMedia(String(query)).matches; } };
+  _markNative(styleMedia.matchMedium);
+  define('styleMedia', { get() { return styleMedia; } });
+  for (const name of ['captureEvents', 'releaseEvents']) define(name, { value: { [name]() {} }[name], writable: true });
+  define('find', { value: { find() { return false; } }.find, writable: true });
+  for (const name of ['moveBy', 'moveTo', 'resizeBy', 'resizeTo']) define(name, { value: { [name](x, y) {} }[name], writable: true });
+  define('webkitRequestAnimationFrame', { value: { webkitRequestAnimationFrame(cb) { return globalThis.requestAnimationFrame(cb); } }.webkitRequestAnimationFrame, writable: true });
+  define('webkitCancelAnimationFrame', { value: { webkitCancelAnimationFrame(id) { return globalThis.cancelAnimationFrame(id); } }.webkitCancelAnimationFrame, writable: true });
+  define('webkitURL', { value: globalThis.URL, writable: true, enumerable: false });
+  // File and font pickers need a user gesture, which script never has.
+  const gesture = (what) => () => Promise.reject(new DOMException('Must be handling a user gesture to ' + what + '.', 'SecurityError'));
+  define('showOpenFilePicker', { value: { showOpenFilePicker() { return gesture('show a file picker')(); } }.showOpenFilePicker, writable: true });
+  define('showSaveFilePicker', { value: { showSaveFilePicker() { return gesture('show a file picker')(); } }.showSaveFilePicker, writable: true });
+  define('showDirectoryPicker', { value: { showDirectoryPicker() { return gesture('show a file picker')(); } }.showDirectoryPicker, writable: true });
+  define('queryLocalFonts', { value: { queryLocalFonts() { return Promise.reject(new DOMException('User activation is required.', 'SecurityError')); } }.queryLocalFonts, writable: true });
+  define('getScreenDetails', { value: { getScreenDetails() { return Promise.reject(new DOMException('Permission denied.', 'NotAllowedError')); } }.getScreenDetails, writable: true });
+  // Trusted Types: policies pass their callbacks' results through, as a
+  // page with no enforced CSP sees.
+  const TrustedTypePolicyFactory = globalThis.TrustedTypePolicyFactory;
+  const TrustedTypePolicy = globalThis.TrustedTypePolicy;
+  if (TrustedTypePolicyFactory && TrustedTypePolicy) {
+    const policies = new WeakMap();
+    const factory = Object.create(TrustedTypePolicyFactory.prototype);
+    const op = (proto, name, fn) => Object.defineProperty(proto, name, { value: _markNative({ [name]: fn }[name]), writable: true, enumerable: true, configurable: true });
+    const make = (kind) => function (input, ...args) {
+      const rules = policies.get(this);
+      if (!rules) throw new TypeError('Illegal invocation');
+      const fn = rules[kind];
+      if (typeof fn !== 'function') throw new TypeError("Failed to execute '" + kind + "' on 'TrustedTypePolicy': Policy " + rules.name + "'s TrustedTypePolicyOptions did not specify a '" + kind + "' member.");
+      const out = fn(input, ...args);
+      return out === undefined || out === null ? '' : String(out);
+    };
+    op(TrustedTypePolicy.prototype, 'createHTML', make('createHTML'));
+    op(TrustedTypePolicy.prototype, 'createScript', make('createScript'));
+    op(TrustedTypePolicy.prototype, 'createScriptURL', make('createScriptURL'));
+    Object.defineProperty(TrustedTypePolicy.prototype, 'name', {
+      get: _markNativeAs({ get name() { const r = policies.get(this); if (!r) throw new TypeError('Illegal invocation'); return r.name; } }.__lookupGetter__('name'), 'function get name() { [native code] }'),
+      enumerable: true, configurable: true,
+    });
+    let defaultPolicy = null;
+    op(TrustedTypePolicyFactory.prototype, 'createPolicy', function (name, options) {
+      if (arguments.length < 1) throw new TypeError("Failed to execute 'createPolicy' on 'TrustedTypePolicyFactory': 1 argument required, but only 0 present.");
+      const policy = Object.create(TrustedTypePolicy.prototype);
+      const o = options || {};
+      policies.set(policy, { name: String(name), createHTML: o.createHTML, createScript: o.createScript, createScriptURL: o.createScriptURL });
+      if (String(name) === 'default') defaultPolicy = policy;
+      return policy;
+    });
+    op(TrustedTypePolicyFactory.prototype, 'isHTML', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'isScript', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'isScriptURL', () => false);
+    op(TrustedTypePolicyFactory.prototype, 'getAttributeType', () => null);
+    op(TrustedTypePolicyFactory.prototype, 'getPropertyType', () => null);
+    for (const [key, value] of [['emptyHTML', ''], ['emptyScript', ''], ['defaultPolicy', null]]) {
+      Object.defineProperty(TrustedTypePolicyFactory.prototype, key, {
+        get: _markNativeAs({ get [key]() { return key === 'defaultPolicy' ? defaultPolicy : value; } }.__lookupGetter__(key), 'function get ' + key + '() { [native code] }'),
+        enumerable: true, configurable: true,
+      });
+    }
+    define('trustedTypes', { get() { return factory; } });
+  }
+  // Event handler attributes of Window that had no slot here.
+  const handlers = ['search', 'appinstalled', 'beforeinstallprompt', 'beforeinput', 'beforematch', 'beforetoggle',
+    'command', 'contentvisibilityautostatechange', 'contextlost', 'contextrestored', 'mousewheel', 'scrollend',
+    'securitypolicyviolation', 'slotchange', 'webkitanimationend', 'webkitanimationiteration', 'webkitanimationstart',
+    'webkittransitionend', 'auxclick', 'selectstart', 'selectionchange', 'animationcancel', 'animationend',
+    'animationiteration', 'animationstart', 'transitionrun', 'transitionstart', 'transitionend', 'transitioncancel',
+    'beforexrselect', 'afterprint', 'messageerror', 'devicemotion', 'deviceorientation', 'deviceorientationabsolute',
+    'pointerrawupdate', 'pageswap', 'pagereveal', 'scrollsnapchange', 'scrollsnapchanging', 'gamepadconnected',
+    'gamepaddisconnected'];
+  for (const type of handlers) {
+    let current = null, listener = null;
+    define('on' + type, {
+      get() { return current; },
+      set(value) {
+        if (listener) globalThis.removeEventListener(type, listener);
+        current = typeof value === 'function' || (value !== null && typeof value === 'object') ? value : null;
+        listener = typeof current === 'function' ? function (event) { return current.call(this, event); } : null;
+        if (listener) globalThis.addEventListener(type, listener);
+      },
+    });
   }
 })();
 

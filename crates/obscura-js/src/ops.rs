@@ -1313,6 +1313,54 @@ fn host_memory_bytes() -> Option<u64> {
     None
 }
 
+fn native_source_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Private>> {
+    let name = v8::String::new(scope, "obscura.nativeSource")?;
+    Some(v8::Private::for_api(scope, Some(name)))
+}
+
+/// Records the `Function.prototype.toString` text of an engine function on
+/// the function itself, under a private key no script can see. Every realm
+/// (page, frames) shares the isolate's private keys, so a frame's
+/// `Function.prototype.toString.call(parentFunction)` answers the same
+/// `[native code]` text the page's does. A per-realm registry answered
+/// with the source code, which CreepJS reads through a nested iframe.
+#[op2(fast)]
+fn op_mark_native<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    function: v8::Local<'s, v8::Value>,
+    #[string] text: String,
+) {
+    let Ok(object) = function.try_cast::<v8::Object>() else {
+        return;
+    };
+    let (Some(key), Some(value)) = (native_source_key(scope), v8::String::new(scope, &text)) else {
+        return;
+    };
+    object.set_private(scope, key, value.into());
+}
+
+/// The text `op_mark_native` recorded for `function`, or undefined.
+#[op2]
+fn op_native_source<'s, 'i>(
+    scope: &mut v8::PinScope<'s, 'i>,
+    function: v8::Local<'s, v8::Value>,
+) -> v8::Local<'s, v8::Value> {
+    let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
+    if function.is_proxy() {
+        return undefined;
+    }
+    let Ok(object) = function.try_cast::<v8::Object>() else {
+        return undefined;
+    };
+    let Some(key) = native_source_key(scope) else {
+        return undefined;
+    };
+    match object.get_private(scope, key) {
+        Some(value) if value.is_string() => value,
+        _ => undefined,
+    }
+}
+
 /// What kind of value console formatting is looking at, answered by V8
 /// without running page code: `"proxy"`, `"error"`, `"array"` or `""`.
 ///
@@ -8593,6 +8641,8 @@ pub fn build_extension() -> Extension {
         op_console_value_kind(),
         op_performance_now(),
         op_host_hardware(),
+        op_mark_native(),
+        op_native_source(),
         op_fingerprint_seed(),
         op_fetch_script_sync(),
         op_fetch_body(),
@@ -8661,6 +8711,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_computed_style());
         ops.push(op_set_hovered());
         ops.push(op_css_supports());
+        ops.push(op_parse_css_color());
         ops.push(op_layout_metrics());
         ops.push(op_element_scroll_metrics());
         ops.push(op_element_scroll_to());
@@ -10450,6 +10501,16 @@ fn op_set_hovered(state: &OpState, nid: u32, frame_id: u32) {
 /// Use the renderer's declaration parser as the single feature-query source
 /// of truth. Keeping this bridge synchronous and state-free makes the common
 /// two-argument `CSS.supports()` overload a single native call.
+/// A CSS color as `[r, g, b, a]` (0-255), or null when the renderer's color
+/// parser does not accept it. Canvas fill and stroke styles use it so they
+/// take every color the page's CSS can use.
+#[cfg(feature = "render")]
+#[op2]
+#[serde]
+fn op_parse_css_color(#[string] value: &str) -> Option<[u8; 4]> {
+    obscura_render::style::parse_css_color(value)
+}
+
 #[cfg(feature = "render")]
 #[op2(fast)]
 fn op_css_supports(#[string] name: &str, #[string] value: &str) -> bool {
