@@ -213,7 +213,6 @@ pub struct Update {
 
 struct Tab {
     browser: Browser,
-    view: SharedView,
     _devtools: Option<Registration>,
 }
 
@@ -359,13 +358,13 @@ impl Engine {
 
     fn adopt(&mut self, c: client::Created) {
         let browser = c.browser.clone();
-        self.views.insert(c.tab, c.view.clone());
+        let devtools = c.observe();
+        self.views.insert(c.tab, c.ctx.view.clone());
         self.tabs.insert(
             c.tab,
             Tab {
                 browser: c.browser,
-                view: c.view,
-                _devtools: c.devtools,
+                _devtools: devtools,
             },
         );
         let (url, ops) = self.opening.remove(&c.tab).unwrap_or_default();

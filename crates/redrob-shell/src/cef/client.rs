@@ -41,11 +41,18 @@ pub struct TabCtx {
 pub struct Created {
     pub tab: TabId,
     pub browser: Browser,
-    pub view: SharedView,
-    /// Keeps the tab's DevTools session listening.
-    pub devtools: Option<Registration>,
+    pub ctx: TabCtx,
     /// Set for a page another page opened.
     pub popup: bool,
+}
+
+impl Created {
+    /// Listen to the tab's DevTools session; keep the registration.
+    pub fn observe(&self) -> Option<Registration> {
+        self.browser
+            .host()
+            .and_then(|host| host.add_dev_tools_message_observer(Some(&mut Observer::new(self.ctx.clone()))))
+    }
 }
 
 thread_local! {
@@ -284,9 +291,6 @@ wrap_life_span_handler! {
             let Some(browser) = browser else { return };
             let id = browser.identifier();
             self.ctx.sink.bind(id, self.ctx.tab);
-            let devtools = browser.host().and_then(|host| {
-                host.add_dev_tools_message_observer(Some(&mut Observer::new(self.ctx.clone())))
-            });
             let popup = self.ctx.tab >= 1 << 40;
             let tab = self.ctx.tab;
             POPUPS.with_borrow_mut(|p| p.retain(|_, t| *t != tab));
@@ -294,8 +298,7 @@ wrap_life_span_handler! {
                 c.push(Created {
                     tab: self.ctx.tab,
                     browser: browser.clone(),
-                    view: self.ctx.view.clone(),
-                    devtools,
+                    ctx: self.ctx.clone(),
                     popup,
                 })
             });
