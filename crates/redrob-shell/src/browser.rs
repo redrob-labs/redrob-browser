@@ -1,10 +1,10 @@
-//! The browser process: every window of one profile, on one engine connection.
+//! The browser process: every window of one profile, on one Chromium.
 //!
-//! The engine gives every CDP connection its own pages (docs/AGENT.md), so all
-//! windows share this process's one connection and its one relay. Each window
-//! is an OS window (an egui viewport) drawing its own [`Window`]; a tab is
-//! handed between windows as it is, with its engine target, so its page,
-//! history, scroll position and form state come along without a reload.
+//! Chromium (CEF) runs in this process; all windows share it and its one
+//! relay for agents. Each window is an OS window (an egui viewport) drawing
+//! its own [`Window`]; a tab is handed between windows as it is, with its
+//! Chromium browser, so its page, history, scroll position and form state
+//! come along without a reload.
 //!
 //! What windows share lives here and is lent to the window being drawn: the
 //! profile database, the password vault, bookmarks, history, downloads and
@@ -21,11 +21,10 @@ use egui::ViewportId;
 use crate::cdp::{self, Event, Update, WindowId};
 use crate::model::{self, Bookmark, DownloadItem, HistoryEntry, Model, Tab, TabId};
 use crate::profile::{Bounds, Profile, SavedWindow, SessionWindow};
-use crate::{media_view, relay, theme, updater, vault, Window, NEW_TAB};
+use crate::{relay, theme, updater, vault, Window, NEW_TAB};
 
 /// Everything `main` prepared before the first window opens.
 pub struct Start {
-    pub ws_url: String,
     pub endpoint_file: std::path::PathBuf,
     pub profile: Option<Profile>,
     pub incognito: bool,
@@ -48,8 +47,6 @@ pub enum Request {
 /// A tab on its way to another window, with what its window kept for it.
 pub struct Moved {
     pub tab: Tab,
-    pub media: media_view::TabMedia,
-    pub drm: Option<String>,
     pub login: Option<(String, tokio::sync::oneshot::Sender<serde_json::Value>)>,
 }
 
@@ -101,6 +98,8 @@ pub struct Browser {
     shared: Shared,
     updates: mpsc::Receiver<Update>,
     commands: tokio::sync::mpsc::UnboundedSender<(WindowId, cdp::Command)>,
+    /// What the windows asked of Chromium, run on this thread (cdp.rs).
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<(WindowId, cdp::Command)>,
     open_rx: mpsc::Receiver<Option<String>>,
     login_rx: mpsc::Receiver<relay::LoginRequest>,
     places: relay::Places,
@@ -118,6 +117,54 @@ pub struct Browser {
     session_saved_at: Instant,
     /// The session was saved for the last time; closing must not overwrite it.
     final_saved: bool,
+}
+
+/// The window's wgpu device. It may import Chromium's frames as GPU
+/// textures (cef/osr.rs), which on Linux and Vulkan on Windows needs the
+/// external-memory feature where the adapter has it.
+pub fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
+    use eframe::wgpu;
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    let base = setup.device_descriptor.clone();
+    setup.device_descriptor = Arc::new(move |adapter: &wgpu::Adapter| {
+        let mut d = base(adapter);
+        let wanted = wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF
+            | wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32;
+        d.required_features |= adapter.features() & wanted;
+        d
+    });
+    eframe::egui_wgpu::WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    }
+}
+
+/// Whether Chromium may hand frames as shared GPU textures: a hardware
+/// adapter whose device can import them. `REDROB_OSR=cpu` or `gpu` decides.
+fn shared_texture(state: &eframe::egui_wgpu::RenderState) -> bool {
+    use eframe::wgpu;
+    match std::env::var("REDROB_OSR").as_deref() {
+        Ok("cpu") => return false,
+        Ok("gpu") => return true,
+        _ => {}
+    }
+    let info = state.adapter.get_info();
+    if matches!(info.device_type, wgpu::DeviceType::Cpu | wgpu::DeviceType::Other) {
+        return false;
+    }
+    let features = state.device.features();
+    match info.backend {
+        wgpu::Backend::Vulkan if cfg!(target_os = "linux") => {
+            features.contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF)
+        }
+        wgpu::Backend::Vulkan if cfg!(windows) => {
+            features.contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32)
+        }
+        wgpu::Backend::Dx12 => cfg!(windows),
+        wgpu::Backend::Metal => cfg!(target_os = "macos"),
+        _ => false,
+    }
 }
 
 /// The OS window for a browser window: undecorated except on macOS, at
@@ -185,10 +232,23 @@ impl Browser {
             places: places.clone(),
             wake: Arc::new(move || wake_ctx.request_repaint_of(ViewportId::ROOT)),
         };
-        let (ws_url, endpoint_file) = (start.ws_url, start.endpoint_file);
+        let endpoint_file = start.endpoint_file;
         let repaint_ctx = ctx.clone();
         let placement: Arc<Mutex<HashMap<TabId, ViewportId>>> = Default::default();
         let wake_of = placement.clone();
+        // A page changed: redraw the window showing it.
+        let sink = crate::cef::Sink::new(
+            upd_tx.clone(),
+            Arc::new(move |tab: Option<TabId>| {
+                let viewport = tab
+                    .and_then(|t| wake_of.lock().ok()?.get(&t).copied())
+                    .unwrap_or(ViewportId::ROOT);
+                repaint_ctx.request_repaint_of(viewport);
+            }),
+        );
+        // Chromium's work runs in window passes (cef::pump).
+        let pump_ctx = ctx.clone();
+        crate::cef::set_waker(move |delay| pump_ctx.request_repaint_after_for(delay, ViewportId::ROOT));
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -196,24 +256,10 @@ impl Browser {
                 .expect("tokio runtime");
             let errors = upd_tx.clone();
             rt.block_on(async move {
-                if let Err(e) = cdp::run(
-                    ws_url,
-                    endpoint_file,
-                    relay_window,
-                    cmd_rx,
-                    upd_tx,
-                    move |tab: Option<TabId>| {
-                        let viewport = tab
-                            .and_then(|t| wake_of.lock().ok()?.get(&t).copied())
-                            .unwrap_or(ViewportId::ROOT);
-                        repaint_ctx.request_repaint_of(viewport);
-                    },
-                )
-                .await
-                {
+                if let Err(e) = cdp::relay(endpoint_file, relay_window).await {
                     let _ = errors.send(Update {
                         tab: 0,
-                        event: Event::Error(e.to_string()),
+                        event: Event::Error(format!("agent relay: {e}")),
                     });
                 }
             });
@@ -260,6 +306,12 @@ impl Browser {
             },
             None => (None, "no wgpu device".to_string()),
         };
+        let accelerated = cc.wgpu_render_state.as_ref().is_some_and(shared_texture);
+        cdp::init(
+            sink,
+            gpu.as_ref().filter(|_| accelerated).map(|g| g.device()),
+            accelerated,
+        );
         let mut browser = Self {
             windows: Vec::new(),
             shared: Shared {
@@ -274,6 +326,7 @@ impl Browser {
             },
             updates: upd_rx,
             commands: cmd_tx,
+            command_rx: cmd_rx,
             open_rx,
             login_rx,
             places,
@@ -339,10 +392,7 @@ impl Browser {
             profile: None,
             last_session_save: Instant::now(),
             show_downloads: false,
-            show_devtools: false,
             internal: Default::default(),
-            media: Default::default(),
-            drm: Default::default(),
             vault: None,
             pending_save: None,
             agent_tx,
@@ -360,9 +410,10 @@ impl Browser {
             focus_address: false,
             focus_page: false,
             error: None,
-            last_size: (0, 0, 0.0),
+            last_size: (0, 0, 0.0, (0, 0)),
             address_id: egui::Id::new("address"),
-            autoscroll: Default::default(),
+            page_input: Default::default(),
+            page_focused: false,
             incognito: self.incognito,
             wid,
             viewport,
@@ -515,20 +566,14 @@ impl Browser {
         if focused {
             self.focused = w.wid;
         }
-        if crate::compositor::tracing() {
-            eprintln!("redrob-browser: pass window={}", w.wid);
-        }
         self.shared.lend(w);
         w.frame(ui);
         self.shared.reclaim(w);
     }
 
     /// A window closed. The last one stays in the saved session, as in
-    /// Chrome; any other leaves it, and its tabs close in the engine.
+    /// Chrome; any other leaves it, and its tabs close in Chromium.
     fn close_window(&mut self, i: usize) {
-        if let Some(gpu) = &mut self.shared.gpu {
-            gpu.release(self.windows[i].wid);
-        }
         if self.windows.len() == 1 {
             self.save_session();
             self.final_saved = true;
@@ -537,7 +582,6 @@ impl Browser {
         }
         let mut w = self.windows.remove(i);
         for t in std::mem::take(&mut w.model.tabs) {
-            w.media.drop_tab(t.id);
             w.op(t.id, cdp::Op::Close);
         }
         self.save_session();
@@ -556,24 +600,15 @@ impl Browser {
                 }
                 Request::Detach { moved, at } => {
                     let i = self.new_window(Some(from), at);
-                    let Moved {
-                        tab,
-                        media,
-                        drm,
-                        login,
-                    } = *moved;
+                    let Moved { tab, login } = *moved;
                     let w = &mut self.windows[i];
                     let id = tab.id;
-                    w.media.put_tab(media);
-                    if let Some(key_system) = drm {
-                        w.drm.requested(id, key_system);
-                    }
                     if let Some(login) = login {
                         w.agent_logins.insert(id, login);
                     }
                     w.model.insert_tab(tab, true);
-                    // Activate from the new window: the engine gives the
-                    // target that window's page size and keeps it on screen.
+                    // Activate from the new window: Chromium gives the
+                    // page that window's size and keeps it on screen.
                     w.activated();
                 }
                 Request::Quit => {
@@ -714,6 +749,12 @@ impl Browser {
     fn after(&mut self, ctx: &egui::Context) {
         let windows = self.windows.len();
         self.handle_requests(ctx);
+        // The windows' commands go to Chromium, and Chromium does its work.
+        for tab in cdp::process(&mut self.command_rx) {
+            if let Some(gpu) = &mut self.shared.gpu {
+                gpu.release_tab(tab);
+            }
+        }
         if self.windows.is_empty() {
             ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Close);
             return;

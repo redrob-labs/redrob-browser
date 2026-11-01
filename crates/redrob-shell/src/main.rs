@@ -1,9 +1,9 @@
 //! Redrob Browser window.
 //!
 //! Tabs, a toolbar with back, forward, reload, an address field with
-//! suggestions and a bookmarks bar. Each tab's page is drawn on the GPU
-//! from the display list the engine sends (compositor/); input inside the
-//! page area goes to the engine as CDP input events.
+//! suggestions and a bookmarks bar. Every tab is a Chromium page (CEF,
+//! docs/CEF.md) rendered off screen and drawn as a texture (compositor/);
+//! input inside the page area goes to Chromium as CEF input events.
 
 // A GUI program on Windows: no console window behind the browser. Its errors
 // go to a log file and a message box instead (startup.rs).
@@ -11,22 +11,14 @@
 
 mod account;
 mod agent_bridge;
-mod autoscroll;
 mod browser;
 mod cdp;
-#[allow(dead_code)]
 mod cef;
 mod compositor;
-mod devtools;
-mod drm_tab;
-mod engine;
 mod i18n;
 mod import_chrome;
-mod input;
 mod instance;
 mod internal;
-mod media;
-mod media_view;
 mod model;
 mod profile;
 mod relay;
@@ -35,7 +27,6 @@ mod startup;
 mod theme;
 mod updater;
 mod vault;
-mod webvtt;
 
 use std::sync::mpsc;
 
@@ -48,11 +39,15 @@ use theme::{size, Bar, Icon};
 const NEW_TAB: &str = "about:blank";
 
 /// `--incognito`: a private window. Its settings live in a temporary folder
-/// deleted when the browser closes, and its engine keeps cookies and storage
-/// in memory only.
+/// deleted when the browser closes, and Chromium keeps its cookies and
+/// storage in memory only.
 const INCOGNITO_FLAG: &str = "--incognito";
 
 fn main() -> anyhow::Result<()> {
+    // Chromium's renderer, GPU and utility processes are this program.
+    if let Some(code) = cef::subprocess() {
+        std::process::exit(code);
+    }
     startup::init();
     run().inspect_err(|e| startup::fail(e))
 }
@@ -60,8 +55,8 @@ fn main() -> anyhow::Result<()> {
 fn run() -> anyhow::Result<()> {
     let incognito = std::env::args().any(|a| a == INCOGNITO_FLAG);
     let start_url = std::env::args().skip(1).find(|a| !a.starts_with("--"));
-    // One process, and so one engine, per profile: a later launch asks the
-    // running browser for a window and exits (instance.rs).
+    // One process, and so one Chromium, per profile: a later launch asks
+    // the running browser for a window and exits (instance.rs).
     let paths = instance::paths(incognito);
     let _instance_lock = match instance::claim(&paths, start_url.as_deref())? {
         instance::Claim::Handed => return Ok(()),
@@ -101,13 +96,16 @@ fn run() -> anyhow::Result<()> {
     if let Some(engine) = profile.as_ref().and_then(|p| p.setting("search_engine")) {
         model::set_search_engine(&engine);
     }
-    // Incognito cookies and storage stay in the engine's memory.
-    let storage = profile
-        .as_ref()
-        .filter(|_| !incognito)
-        .map(|p| p.engine_dir());
-    let engine = engine::Engine::start(storage.as_deref())?;
-    // `redrob-browser tab ...` and agents find the relay here; cdp::run
+    // Chromium keeps its state in the profile; incognito cookies and
+    // storage stay in memory.
+    let root = match (&incognito_dir, &profile) {
+        (Some(dir), _) => dir.join("chromium"),
+        (None, Some(p)) => p.dir.join("chromium"),
+        (None, None) => std::env::temp_dir().join(format!("redrob-browser-{}", std::process::id())),
+    };
+    let cache = (!incognito).then(|| root.join("Default"));
+    cef::start(cef::Config { root, cache })?;
+    // `redrob-browser tab ...` and agents find the relay here; cdp::relay
     // writes it once the relay is listening. Every window's tabs are on it.
     let endpoint_file = paths.endpoint.clone();
     let restore = match profile.as_ref().filter(|_| !incognito) {
@@ -123,11 +121,10 @@ fn run() -> anyhow::Result<()> {
             restore.first().and_then(|w| w.bounds),
             restore.first().is_some_and(|w| w.maximized),
         ),
+        wgpu_options: browser::wgpu_options(),
         ..Default::default()
     };
-    let ws_url = engine.ws_url.clone();
     let start = browser::Start {
-        ws_url,
         endpoint_file: endpoint_file.clone(),
         profile,
         incognito,
@@ -140,9 +137,11 @@ fn run() -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(browser::App::start(cc, start)))),
     );
     let _ = std::fs::remove_file(&endpoint_file);
-    drop(engine);
+    // Every page closes before Chromium stops.
+    cdp::close_all(std::time::Duration::from_secs(3));
+    cef::shutdown();
     if let Some(dir) = incognito_dir {
-        // The engine has exited; nothing of this window may stay on disk.
+        // Chromium has stopped; nothing of this window may stay on disk.
         let _ = std::fs::remove_dir_all(dir);
     }
     self_update::restart_if_requested();
@@ -199,11 +198,7 @@ struct Window {
     profile: Option<profile::Profile>,
     last_session_save: std::time::Instant,
     show_downloads: bool,
-    show_devtools: bool,
     internal: internal::State,
-    media: media_view::Media,
-    /// Tabs whose page asked for DRM video the engine cannot play.
-    drm: drm_tab::Offers,
     vault: Option<vault::Vault>,
     /// A sign-in the person just made, waiting for "save this password?".
     pending_save: Option<(String, String, zeroize::Zeroizing<String>)>,
@@ -229,10 +224,13 @@ struct Window {
     /// does, so scrolling keys (Page Down, Space, End) reach the page.
     focus_page: bool,
     error: Option<String>,
-    last_size: (u32, u32, f32),
+    last_size: (u32, u32, f32, (i32, i32)),
     last_title: String,
     address_id: egui::Id,
-    autoscroll: autoscroll::Autoscroll,
+    /// Pointer, click and wheel state of the page area (cef/input.rs).
+    page_input: cef::input::State,
+    /// Whether the page area had keyboard focus last frame.
+    page_focused: bool,
     /// A private window (`--incognito`).
     incognito: bool,
     /// Which window this is, for the engine connection all windows share.
@@ -276,7 +274,7 @@ impl Window {
             let id = self.model.alloc_id();
             let mut tab = Tab::new(id, &saved.url);
             tab.title = saved.title;
-            // Our own pages are drawn here; their engine tab waits on about:blank.
+            // Our own pages are drawn here; their Chromium tab waits on about:blank.
             let internal = internal::is_internal(&saved.url);
             tab.loading = !internal && saved.url != NEW_TAB;
             if internal {
@@ -315,7 +313,7 @@ impl Window {
     fn open_tab(&mut self, url: &str, activate: bool) {
         let id = self.model.alloc_id();
         let mut tab = Tab::new(id, url);
-        // Our own pages are drawn by the window; the engine tab waits on about:blank.
+        // Our own pages are drawn by the window; the Chromium tab waits on about:blank.
         let engine_url = if internal::is_internal(url) {
             tab.loading = false;
             tab.title = internal::title(url).to_string();
@@ -340,8 +338,6 @@ impl Window {
 
     fn close_tab(&mut self, index: usize) {
         if let Some(id) = self.model.close_tab(index) {
-            self.media.drop_tab(id);
-            self.drm.clear(id);
             self.op(id, Op::Close);
         }
         if self.model.tabs.is_empty() {
@@ -369,9 +365,6 @@ impl Window {
             };
             self.op(t.id, Op::Activate);
         }
-        if self.show_devtools {
-            self.devtools_opened();
-        }
     }
 
     fn navigate(&mut self, url: String) {
@@ -391,7 +384,6 @@ impl Window {
     }
 
     fn drain_updates(&mut self, ctx: &egui::Context) {
-        let mut open_links = Vec::new();
         while let Ok(Update { tab, event }) = self.updates.try_recv() {
             if let Event::Download {
                 guid,
@@ -412,18 +404,6 @@ impl Window {
                 });
                 continue;
             }
-            if let Event::Media(v) = &event {
-                self.media.request(tab, v);
-                continue;
-            }
-            if let Event::MediaRects(r) = event {
-                self.media.set_rects(tab, r);
-                continue;
-            }
-            if let Event::DrmRequested { key_system } = event {
-                self.drm.requested(tab, key_system);
-                continue;
-            }
             if let Event::LoginSubmitted {
                 origin,
                 username,
@@ -433,16 +413,38 @@ impl Window {
                 self.offer_save(tab, origin, username, password);
                 continue;
             }
-            if let Event::Opened { url, opener } = &event {
+            if let Event::Opened {
+                url,
+                opener,
+                background,
+            } = &event
+            {
                 let mut t = Tab::new(tab, url);
                 t.loading = true;
                 // A tab no page opened came from outside the window: an agent.
                 t.agent = opener.is_none();
+                // Next to its opener, as in Chrome.
+                let keep = self.model.active;
                 if let Some(i) = opener.and_then(|o| self.model.index_of(o)) {
                     self.model.active = i;
                 }
-                self.model.insert_tab(t, true);
-                self.activated();
+                self.model.insert_tab(t, !*background);
+                if *background {
+                    self.model.active = keep.min(self.model.tabs.len() - 1);
+                    if let Some(i) = self.model.index_of(tab) {
+                        if i <= keep {
+                            self.model.active = (keep + 1).min(self.model.tabs.len() - 1);
+                        }
+                    }
+                } else {
+                    self.activated();
+                }
+                continue;
+            }
+            if let Event::Closed = event {
+                if let Some(i) = self.model.index_of(tab) {
+                    self.close_tab(i);
+                }
                 continue;
             }
             let active = self.active_id() == Some(tab);
@@ -455,51 +457,16 @@ impl Window {
                 continue;
             };
             match event {
-                Event::Scene(msg) => t.scene.apply(msg),
-                Event::SceneLink(link) => t.scene.set_link(link),
-                Event::SceneUnavailable(e) => t.scene.error = Some(e),
-                Event::ScrollKey(key) => {
-                    t.scene.scroll_key(key);
-                    t.scene.flush();
-                }
-                Event::WheelAnswer {
-                    node,
-                    prevented,
-                    scrolled,
-                    at,
-                    delta,
-                    smooth,
-                } => {
-                    // A cancelled wheel must not have moved the page; a
-                    // deferred one moves now that the page let it.
-                    let res = t.scene.resolve(t.scene.viewport());
-                    t.scene.wheel_answer(node, prevented);
-                    if prevented && scrolled {
-                        t.scene.scroll_at(&res, at, (-delta.0, -delta.1), smooth);
-                    } else if !prevented && !scrolled {
-                        t.scene.scroll_at(&res, at, delta, smooth);
-                    }
-                    t.scene.flush();
-                }
-                Event::Console { level, text } => t.devtools.log(&level, text),
-                Event::NetRequest { id, method, url } => t.devtools.request(id, method, url),
-                Event::NetResponse { id, status, mime } => t.devtools.response(&id, status, mime),
-                Event::Dom(root) => t.devtools.dom = Some(root),
-                Event::Styles(styles) => t.devtools.set_styles(styles),
-                Event::Highlight(model) => t.devtools.set_highlight(model),
-                Event::Picked(node) => t.devtools.picked(node),
-                // Our own pages keep their redrob:// address while the engine
-                // tab underneath sits on about:blank.
+                // Chromium's own developer tools show the console.
+                Event::Console { .. } => {}
+                // Our own pages keep their redrob:// address while the
+                // Chromium tab underneath sits on about:blank.
                 Event::Navigated(url) | Event::UrlChanged(url)
                     if url == NEW_TAB && internal::is_internal(&t.url) => {}
                 Event::Title(_) | Event::Loading(_) if internal::is_internal(&t.url) => {}
                 Event::Navigated(url) => {
-                    self.media.drop_tab(tab);
-                    self.drm.clear(tab);
-                    t.devtools.navigated();
                     t.url = url.clone();
                     t.title.clear();
-                    t.scene.navigated();
                     visited = Some((url, String::new()));
                 }
                 Event::UrlChanged(url) => {
@@ -524,17 +491,10 @@ impl Window {
                         self.notice = Some(i18n::t("No sign-in form on this page.").to_string());
                     }
                 }
-                Event::LinkAt(link) => {
-                    if let Some(url) = self.autoscroll.link_answer(link) {
-                        open_links.push(url);
-                    }
-                }
                 Event::Opened { .. }
+                | Event::Closed
                 | Event::Download { .. }
-                | Event::LoginSubmitted { .. }
-                | Event::DrmRequested { .. }
-                | Event::Media(_)
-                | Event::MediaRects(_) => {}
+                | Event::LoginSubmitted { .. } => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -560,9 +520,6 @@ impl Window {
                     url_now
                 };
             }
-        }
-        for url in open_links {
-            self.open_tab(&url, false);
         }
         let title = match self.model.active_tab().map(|t| t.label().to_string()) {
             Some(l) if !l.is_empty() => format!("{l} - {}", t("Redrob Browser")),
@@ -650,7 +607,7 @@ impl Window {
             i.consume_key(Modifiers::NONE, Key::F12) || i.consume_key(shift, Key::I)
         });
         if tools {
-            self.toggle_devtools();
+            self.devtools();
         }
         // Ctrl+Shift+PageUp/PageDown move the active tab left or right.
         let (left, right) = ctx.input_mut(|i| {
@@ -1003,46 +960,10 @@ impl Window {
         self.notice = Some(t("Sending to Redrob Code...").to_string());
     }
 
-    fn toggle_devtools(&mut self) {
-        self.show_devtools = !self.show_devtools;
-        if self.show_devtools {
-            self.devtools_opened();
-        }
-    }
-
-    /// Network reporting starts the first time the tools open on a tab.
-    fn devtools_opened(&mut self) {
-        let Some(t) = self.model.active_tab_mut() else {
-            return;
-        };
-        if !t.devtools.network_on {
-            t.devtools.network_on = true;
-            let id = t.id;
-            self.op(id, Op::DevtoolsOpen);
-        }
-    }
-
-    fn devtools_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(t) = self.model.active_tab_mut() else {
-            return;
-        };
-        let id = t.id;
-        let act = devtools::ui(ui, &mut t.devtools);
-        if let Some(expr) = act.evaluate {
-            self.op(id, Op::Evaluate(expr));
-        }
-        if act.refresh_dom {
-            self.op(id, Op::GetDom);
-        }
-        if let Some(node) = act.styles_for {
-            self.op(id, Op::NodeStyles(node));
-        }
-        if let Some(node) = act.highlight {
-            self.op(id, Op::Highlight(node));
-        }
-        if act.close {
-            self.show_devtools = false;
-            self.op(id, Op::Highlight(None));
+    /// Chromium's developer tools for the active tab, in their own window.
+    fn devtools(&mut self) {
+        if let Some(id) = self.active_id() {
+            self.op(id, Op::DevTools);
         }
     }
 
@@ -1087,7 +1008,7 @@ impl Window {
                     ui.close();
                 }
                 if item(ui, Icon::Code, t("Developer tools")).clicked() {
-                    self.toggle_devtools();
+                    self.devtools();
                     ui.close();
                 }
                 if item(ui, Icon::Settings, t("Settings")).clicked() {
@@ -1211,8 +1132,6 @@ impl Window {
         };
         let id = tab.id;
         let moved = browser::Moved {
-            media: self.media.take_tab(id),
-            drm: self.drm.take(id),
             login: self.agent_logins.remove(&id),
             tab,
         };
@@ -2272,23 +2191,6 @@ impl Window {
                 self.toolbar(ui);
                 self.bookmarks_bar(ui);
                 self.save_bar(ui);
-                let page = self
-                    .model
-                    .active_tab()
-                    .map(|t| t.url.clone())
-                    .unwrap_or_default();
-                let mut drm_notice = None;
-                let active = self.active_id();
-                if self.drm.wants_bar(active, &page) {
-                    theme::bar(ui, Bar::Info, |ui| {
-                        if let drm_tab::Choice::Notice(n) = self.drm.bar(ui, active, &page) {
-                            drm_notice = Some(n);
-                        }
-                    });
-                }
-                if let Some(n) = drm_notice {
-                    self.notice = Some(n);
-                }
                 if let Some(e) = self.error.clone() {
                     theme::bar(ui, Bar::Danger, |ui| {
                         ui.label(egui::RichText::new(e).color(p.danger));
@@ -2341,19 +2243,6 @@ impl Window {
                 }
             });
 
-        if self.show_devtools {
-            egui::Panel::right("devtools")
-                .resizable(true)
-                .default_size(440.0)
-                .frame(
-                    egui::Frame::new()
-                        .fill(p.surface_raised)
-                        .inner_margin(egui::Margin::same(8))
-                        .stroke(Stroke::new(1.0, p.border_subtle)),
-                )
-                .show(ui, |ui| self.devtools_panel(ui));
-        }
-
         if self.show_downloads && !self.model.downloads.is_empty() {
             egui::Panel::bottom("downloads")
                 .frame(
@@ -2374,10 +2263,19 @@ impl Window {
                 // At a fractional scale the page area is a fractional number
                 // of CSS pixels; round up so the page covers its last column
                 // and row instead of leaving a white line.
+                // Where the page area is on screen, for popups and screenX.
+                let window_at = ctx
+                    .input(|i| i.viewport().inner_rect)
+                    .map_or(egui::Pos2::ZERO, |r| r.min);
+                let origin = (
+                    (window_at.x + rect.left()).round() as i32,
+                    (window_at.y + rect.top()).round() as i32,
+                );
                 let size = (
                     (rect.width() - 0.01).ceil() as u32,
                     (rect.height() - 0.01).ceil() as u32,
                     scale,
+                    origin,
                 );
                 if size != self.last_size && size.0 > 0 && size.1 > 0 {
                     self.last_size = size;
@@ -2385,6 +2283,7 @@ impl Window {
                         width: size.0,
                         height: size.1,
                         scale,
+                        origin,
                     });
                 }
                 if self.model.tabs.is_empty() {
@@ -2433,189 +2332,120 @@ impl Window {
                 }
                 // Web pages are white until they paint, as in every browser.
                 ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
-                let page_slot = ui.painter().add(egui::Shape::Noop);
                 let page_id = self.model.tabs[tab_index].id;
-                let view = (rect.width(), rect.height());
-                let local = |p: egui::Pos2| (p.x - rect.left(), p.y - rect.top());
-                let mut animating = self.model.tabs[tab_index].scene.tick();
-                let res = self.model.tabs[tab_index].scene.resolve(view);
-                // Scrollbars take their own pointer input before the page.
-                let bars =
-                    compositor::scrollbars(ui, rect, &mut self.model.tabs[tab_index].scene, &res);
-                let over_bar = |p: &egui::Pos2| bars.iter().any(|b| b.contains(*p));
-
-                if response.clicked() || response.drag_started() || self.focus_page {
-                    response.request_focus();
-                    self.editing = false;
-                    self.focus_page = false;
-                }
-                let focused = response.has_focus();
-                let mut events = ui.input(|i| i.events.clone());
-                events.retain(|e| match e {
-                    egui::Event::PointerButton { pos, .. } => !over_bar(pos),
-                    _ => true,
-                });
-                let pointer = ui.input(|i| i.pointer.hover_pos());
-                // Middle-click autoscroll takes its clicks before the page sees them.
-                let ask = self.autoscroll.filter(&mut events, rect);
-                if let Some((x, y)) = ask.ask_link_at {
-                    let scene = &self.model.tabs[tab_index].scene;
-                    if scene.has_frame() {
-                        // The hit regions know the link: no round trip.
-                        let link = scene.hover(&res, (x, y)).and_then(|h| h.link);
-                        if let Some(url) = self.autoscroll.link_answer(link) {
-                            self.open_tab(&url, false);
-                        }
-                    } else {
-                        self.op(page_id, Op::LinkAt { x, y });
-                    }
-                }
-                let tab_index = self.model.active;
-                if self.autoscroll.active() {
-                    let step = self.autoscroll.tick(pointer, rect);
-                    if let Some(anchor) = self.autoscroll.anchor() {
-                        let t = &mut self.model.tabs[tab_index];
-                        t.scene.scroll_at(
-                            &res,
-                            local(anchor),
-                            (step.scroll.x, step.scroll.y),
-                            false,
-                        );
-                    }
-                    let p = *theme::palette(ui);
-                    self.autoscroll.paint(
-                        ui.painter(),
-                        p.ink_primary,
-                        p.surface_base.gamma_multiply(0.9),
-                    );
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::AllScroll);
-                    ui.ctx().request_repaint();
-                }
-                if response.hovered() || focused || response.is_pointer_button_down_on() {
-                    let hover = pointer.filter(|p| !over_bar(p));
-                    let t = &mut self.model.tabs[tab_index];
-                    let mut ops = devtools::pick_input(
-                        &mut t.devtools,
-                        &mut events,
-                        rect,
-                        self.show_devtools,
-                    );
-                    let input = input::page_ops(&events, hover, rect, focused);
-                    ops.extend(input.ops);
-                    if let Some(at) = input.pressed_at {
-                        t.scene.pointer_down(&res, at);
-                    }
-                    for w in input.wheel {
-                        let node = t.scene.hover(&res, w.at).map(|h| h.node);
-                        let scrolled = match t.scene.wheel_plan(node) {
-                            compositor::WheelPlan::Scrolled => {
-                                t.scene.scroll_at(&res, w.at, w.delta, w.smooth);
-                                true
-                            }
-                            compositor::WheelPlan::Deferred | compositor::WheelPlan::Cancelled => {
-                                false
-                            }
-                        };
-                        ops.push(Op::Wheel {
-                            x: w.at.0,
-                            y: w.at.1,
-                            dx: w.delta.0,
-                            dy: w.delta.1,
-                            modifiers: w.modifiers,
-                            node,
-                            scrolled,
-                            smooth: w.smooth,
-                        });
-                    }
-                    let id = t.id;
-                    for op in ops {
-                        self.op(id, op);
-                    }
-                }
-                let t = &mut self.model.tabs[tab_index];
-                t.scene.flush();
-                animating |= t.scene.tick();
-                // Offsets may have moved this frame: draw with the new ones.
-                let res = t.scene.resolve(view);
-                let scale = ctx.pixels_per_point();
-                match &mut self.gpu {
-                    Ok(gpu) => {
-                        let media = &mut self.media;
-                        let texture = gpu.draw(
-                            self.wid,
-                            page_id,
-                            &mut t.scene,
-                            &res,
-                            view,
-                            scale,
-                            &mut |key| media.external_frame(page_id, key),
-                        );
-                        if let (Some(id), true) = (texture, t.scene.has_frame()) {
-                            // Whole physical pixels, so the texture maps 1:1.
-                            let min = (rect.min.to_vec2() * scale).round() / scale;
-                            let shown = Rect::from_min_size(min.to_pos2(), rect.size());
-                            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                            ui.painter().set(
-                                page_slot,
-                                egui::Shape::image(id, shown.intersect(rect), uv, Color32::WHITE),
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            tf("This page cannot be drawn: {0}", &[e]),
-                            egui::FontId::proportional(14.0),
-                            Color32::from_gray(90),
-                        );
-                    }
-                }
-                if !t.scene.has_frame() {
-                    if let Some(e) = &t.scene.error {
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            tf("This page cannot be drawn: {0}", &[e]),
-                            egui::FontId::proportional(14.0),
-                            Color32::from_gray(90),
-                        );
-                    }
-                }
-                let composited = t.scene.external_rects(&res);
-                self.media.set_composited(page_id, &composited);
-                // The cursor and the hovered link come from the hit regions.
-                let t = &self.model.tabs[tab_index];
-                let hovered = pointer
-                    .filter(|p| rect.contains(*p) && !over_bar(p) && response.hovered())
-                    .and_then(|p| t.scene.hover(&res, local(p)));
-                let in_page = pointer.is_some_and(|p| rect.contains(p));
-                if !self.autoscroll.active() && in_page && response.hovered() {
-                    ui.ctx()
-                        .set_cursor_icon(compositor::cursor_icon(hovered.as_ref()));
-                }
-                if let Some(link) = hovered.as_ref().and_then(|h| h.link.as_deref()) {
-                    compositor::status_bubble(ui, rect, link, pointer);
-                }
-                if animating {
-                    ctx.request_repaint();
-                }
-                // Video layers go over the page.
-                if !self.media.is_empty() {
-                    let commands = self.commands.clone();
-                    self.media.poll(Some(page_id), |t, op| {
-                        let _ = commands.send(Command::Tab(t, op));
-                    });
-                    if self.media.paint(ui, rect, page_id) {
-                        ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                    } else {
-                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
-                    }
-                }
-
-                if let Some(model) = &self.model.tabs[tab_index].devtools.highlight {
-                    devtools::paint_highlight(ui.painter(), rect, model);
-                }
+                self.page(ui, rect, &response, page_id);
             });
     }
+
+    /// The page area of tab `tab`: Chromium's frame, the cursor, the link
+    /// under the pointer, and the person's input sent to the page.
+    fn page(&mut self, ui: &mut egui::Ui, rect: Rect, response: &egui::Response, tab: TabId) {
+        let ctx = ui.ctx().clone();
+        if response.clicked()
+            || response.drag_started()
+            || response.is_pointer_button_down_on()
+            || self.focus_page
+        {
+            response.request_focus();
+            self.editing = false;
+            self.focus_page = false;
+        }
+        let focused = response.has_focus();
+        if focused {
+            // Tab, arrows and Escape belong to the page while it has focus.
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    response.id,
+                    egui::EventFilter {
+                        tab: true,
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        escape: true,
+                    },
+                )
+            });
+        }
+        if focused != self.page_focused {
+            self.page_focused = focused;
+            self.op(tab, Op::Focus(focused));
+        }
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let hovering = response.hovered() || response.is_pointer_button_down_on();
+        let events = ui.input(|i| i.events.clone());
+        let mut ops = cef::input::to_ops(
+            &mut self.page_input,
+            &events,
+            pointer.filter(|_| hovering),
+            rect,
+            focused,
+        );
+        ops.extend(cef::input::file_drops(&mut self.page_input, &ctx, pointer, rect));
+        for op in ops {
+            self.op(tab, op);
+        }
+        let Some(view) = cdp::view(tab) else {
+            return;
+        };
+        let scale = ctx.pixels_per_point();
+        // Whole physical pixels, so the texture maps 1:1.
+        let min = ((rect.min.to_vec2() * scale).round() / scale).to_pos2();
+        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        match &mut self.gpu {
+            Ok(gpu) => {
+                let frame = gpu.frame(tab, &view);
+                let painter = ui.painter().with_clip_rect(rect);
+                if let Some((id, (w, h))) = frame.page {
+                    let shown = Rect::from_min_size(min, Vec2::new(w as f32, h as f32) / scale);
+                    painter.image(id, shown, uv, Color32::WHITE);
+                }
+                // An open <select> list or picker, over the page.
+                if let Some((id, at)) = frame.popup {
+                    painter.image(id, at.translate(min.to_vec2()), uv, Color32::WHITE);
+                }
+            }
+            Err(e) => {
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    tf("This page cannot be drawn: {0}", &[e]),
+                    egui::FontId::proportional(14.0),
+                    Color32::from_gray(90),
+                );
+            }
+        }
+        let v = cef::osr::lock(&view);
+        let in_page = pointer.is_some_and(|p| rect.contains(p)) && response.hovered();
+        if in_page || response.is_pointer_button_down_on() {
+            ctx.set_cursor_icon(v.cursor);
+        }
+        if let Some(link) = v.status.as_deref().filter(|_| in_page) {
+            compositor::status_bubble(ui, rect, link, pointer);
+        }
+        let tooltip = v.tooltip.clone().filter(|_| in_page);
+        // A text field has focus: the input method composes there.
+        if focused && v.editing {
+            let caret = v.ime_rect.map_or(
+                Rect::from_min_size(rect.min, Vec2::new(1.0, 16.0)),
+                |[x, y, w, h]| {
+                    Rect::from_min_size(
+                        rect.min + Vec2::new(x as f32, y as f32),
+                        Vec2::new(w.max(1) as f32, h.max(1) as f32),
+                    )
+                },
+            );
+            ctx.output_mut(|o| {
+                o.ime = Some(egui::output::IMEOutput {
+                    purpose: egui::IMEPurpose::Normal,
+                    rect: caret,
+                    cursor_rect: caret,
+                    should_interrupt_composition: false,
+                })
+            });
+        }
+        drop(v);
+        if let Some(t) = tooltip {
+            response.clone().on_hover_text_at_pointer(t);
+        }
+    }
 }
+
