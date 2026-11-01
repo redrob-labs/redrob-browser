@@ -1889,6 +1889,13 @@ pub(crate) fn queue_retained_style_mutation(
     if is_resource && has_resource {
         return true;
     }
+    if matches!(mutation, obscura_render::RetainedStyleMutation::Stylesheet)
+        && pending
+            .iter()
+            .any(|queued| matches!(queued, obscura_render::RetainedStyleMutation::Stylesheet))
+    {
+        return true;
+    }
     if let obscura_render::RetainedStyleMutation::Animation { node } = &mutation {
         if pending.iter().any(|queued| {
             matches!(
@@ -2222,11 +2229,7 @@ fn op_external_stylesheet_set(
     if changed && connected {
         state.activity_generation = state.activity_generation.wrapping_add(1);
         #[cfg(feature = "render")]
-        {
-            state.prepared_render = None;
-            state.pending_style_mutations.clear();
-            state.resolved_scroll = None;
-        }
+        invalidate_stylesheet_render(&mut state);
     }
     changed
 }
@@ -2289,11 +2292,24 @@ fn op_cssom_stylesheet_has(state: &OpState, owner_nid: u32, frame_id: u32) -> bo
 fn invalidate_cssom_render(state: &mut ObscuraState) {
     state.activity_generation = state.activity_generation.wrapping_add(1);
     #[cfg(feature = "render")]
+    invalidate_stylesheet_render(state);
+}
+
+/// A style sheet changed outside the DOM. Keep the retained layout: the next
+/// flush restyles only what rules appended to the cached parse can match.
+#[cfg(feature = "render")]
+fn invalidate_stylesheet_render(state: &mut ObscuraState) {
+    if state.prepared_render.is_some()
+        && !queue_retained_style_mutation(
+            &mut state.pending_style_mutations,
+            obscura_render::RetainedStyleMutation::Stylesheet,
+        )
     {
         state.prepared_render = None;
         state.pending_style_mutations.clear();
-        state.resolved_scroll = None;
     }
+    state.style_query_cache = None;
+    state.resolved_scroll = None;
 }
 
 #[op2]

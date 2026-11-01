@@ -1092,6 +1092,10 @@ pub enum RetainedStyleMutation {
     /// DOM, stylesheet, and computed declarations are unchanged, so no style
     /// node is dirty.
     Resource,
+    /// A linked or CSSOM style sheet changed. The DOM is unchanged; the
+    /// layout compares the new sheet with the cached parse and restyles the
+    /// elements an appended rule can match, or everything otherwise.
+    Stylesheet,
 }
 
 impl From<AttributeStyleMutation> for RetainedStyleMutation {
@@ -3775,6 +3779,37 @@ fn cascade_walk(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
 ) {
+    // Flat-tree ancestors of every fresh node. A retained element outside
+    // this set roots a subtree whose styles are all retained: nothing in it
+    // needs the cascade, so the walk does not descend into it.
+    let fresh_ancestors = fresh_styles.map(|fresh| {
+        // Both the flat tree (a slotted node is visited from its slot) and
+        // the light tree (an unslotted host child is visited from its host).
+        let light_parent = |node: NodeId| {
+            let parent = tree.with_node(node, |node| node.parent).flatten()?;
+            Some(tree.shadow_root_info(parent).map_or(parent, |root| root.host))
+        };
+        let mut flat = HashSet::new();
+        let mut light = HashSet::new();
+        for &node in fresh {
+            let mut current = rendered_parent(tree, node);
+            while let Some(parent) = current {
+                if !flat.insert(parent) {
+                    break;
+                }
+                current = rendered_parent(tree, parent);
+            }
+            let mut current = light_parent(node);
+            while let Some(parent) = current {
+                if !light.insert(parent) {
+                    break;
+                }
+                current = light_parent(parent);
+            }
+        }
+        flat.extend(light);
+        flat
+    });
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum MatcherBase {
         // Push/pop on the matcher currently on top (the caller's matcher, or
@@ -3882,6 +3917,16 @@ fn cascade_walk(
                 else {
                     continue;
                 };
+                if let (Some(fresh), Some(ancestors)) = (fresh_styles, fresh_ancestors.as_ref()) {
+                    if is_element
+                        && !fresh.contains(&visit.id)
+                        && !ancestors.contains(&visit.id)
+                        && styles.contains_key(&visit.id)
+                        && custom_properties.contains_key(&visit.id)
+                    {
+                        continue;
+                    }
+                }
 
                 let descendant_display_none = visit.display_none
                     || styles
@@ -4858,7 +4903,7 @@ fn empty_state_may_have_changed(
             RetainedStyleMutation::Attribute(_) => false,
             RetainedStyleMutation::Animation { .. } => false,
             RetainedStyleMutation::WaapiAnimation { .. } => false,
-            RetainedStyleMutation::Resource => false,
+            RetainedStyleMutation::Resource | RetainedStyleMutation::Stylesheet => false,
             RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
                 old_parent,
                 new_parent,
@@ -4921,6 +4966,18 @@ fn retained_style_plan(
     sheet: &crate::css::Stylesheet,
     mutations: &[RetainedStyleMutation],
 ) -> RetainedStylePlan {
+    retained_style_plan_for_sheet(tree, sheet, mutations, false)
+}
+
+/// `retained_style_plan`, where `sheet_appended` says the caller already
+/// invalidated for the rules a changed `<style>` added. A style element's
+/// insertion or text then needs no whole-document fallback.
+fn retained_style_plan_for_sheet(
+    tree: &DomTree,
+    sheet: &crate::css::Stylesheet,
+    mutations: &[RetainedStyleMutation],
+    sheet_appended: bool,
+) -> RetainedStylePlan {
     let mut dirty = HashSet::new();
     let mut batched_insert_parents = HashSet::new();
     let mut checked_empty_parents = HashSet::new();
@@ -4964,7 +5021,10 @@ fn retained_style_plan(
             }
             previous_damage = Some((dirty.len(), mutation));
         }
-        if matches!(mutation, RetainedStyleMutation::Resource) {
+        if matches!(
+            mutation,
+            RetainedStyleMutation::Resource | RetainedStyleMutation::Stylesheet
+        ) {
             continue;
         }
         if let RetainedStyleMutation::Animation { node } = mutation {
@@ -4994,9 +5054,10 @@ fn retained_style_plan(
                 } => {
                     // Inserting or moving a style subtree changes the ordered
                     // author stylesheet, so parsing/index reuse is forbidden.
-                    if subtree_contains_style_element(tree, node)
-                        || node_is_style_text(tree, node, old_parent)
-                        || node_is_style_text(tree, node, Some(new_parent))
+                    if !sheet_appended
+                        && (subtree_contains_style_element(tree, node)
+                            || node_is_style_text(tree, node, old_parent)
+                            || node_is_style_text(tree, node, Some(new_parent)))
                     {
                         if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
                             eprintln!(
@@ -5082,7 +5143,7 @@ fn retained_style_plan(
                     );
                 }
                 TreeStyleMutation::Text { node, parent } => {
-                    if node_is_style_text(tree, node, parent) {
+                    if !sheet_appended && node_is_style_text(tree, node, parent) {
                         if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
                             eprintln!(
                                 "[timing] retained-style fallback reason=style-text node={} parent={parent:?}",
@@ -6158,8 +6219,11 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     let css_sources = document_stylesheet_sources(tree, viewport, media_type);
 
     let t0 = std::time::Instant::now();
-    let (sheet, stylesheet_cache_hit) = match stylesheet_cache {
-        Some(cache) => cache.get_or_parse(tree, &css_sources, viewport, media_type),
+    let (sheet, stylesheet_cache_hit, sheet_resume) = match stylesheet_cache {
+        Some(cache) => {
+            let (sheet, hit) = cache.get_or_parse(tree, &css_sources, viewport, media_type);
+            (sheet, hit, cache.take_resume())
+        }
         None => (
             std::sync::Arc::new(crate::css::Stylesheet::parse_for_viewport_and_media(
                 tree,
@@ -6168,6 +6232,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 media_type,
             )),
             false,
+            None,
         ),
     };
     let shadow_sheets = collect_shadow_stylesheets(tree, viewport, media_type);
@@ -6202,7 +6267,12 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             }
             return None;
         }
-        if !stylesheet_cache_hit {
+        // A sheet that only gained rules (a new `<style>`, usually) changes
+        // the styles of the elements those rules can match, and nothing else.
+        let appended_keys = (!stylesheet_cache_hit && shadow_sheets.is_empty())
+            .then(|| sheet_resume.and_then(|resume| sheet.appended_rule_keys(&resume)))
+            .flatten();
+        if !stylesheet_cache_hit && appended_keys.is_none() {
             if timing {
                 eprintln!("[timing] retained-style fallback reason=stylesheet-changed");
             }
@@ -6223,13 +6293,38 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             .custom_properties
             .retain(|node, _| connected.contains(node));
         let _prof = crate::prof::start();
-        let plan = retained_style_plan(tree, &sheet, mutations);
+        let plan = retained_style_plan_for_sheet(tree, &sheet, mutations, appended_keys.is_some());
         crate::prof::stop(crate::prof::STYLE_PLAN, _prof);
         match plan {
             RetainedStylePlan::Reuse {
                 mut dirty,
                 has_animation_damage,
             } => {
+                if let Some(keys) = appended_keys.as_ref().filter(|keys| !keys.is_empty()) {
+                    let before = dirty.len();
+                    for &node in &connected {
+                        if !dirty.contains(&node) && keys.may_match(tree, node) {
+                            add_style_subtree(tree, node, &mut dirty);
+                        }
+                    }
+                    if timing {
+                        eprintln!(
+                            "[timing] retained-style sheet-append damage +{}",
+                            dirty.len() - before
+                        );
+                    }
+                }
+                // A connected element without a retained style or property
+                // map is cascaded fresh anyway; naming it lets the cascade
+                // skip every subtree that holds no fresh node.
+                for &node in &connected {
+                    if (!retained.styles.contains_key(&node)
+                        || !retained.custom_properties.contains_key(&node))
+                        && tree.with_node(node, |node| node.is_element()).unwrap_or(false)
+                    {
+                        dirty.insert(node);
+                    }
+                }
                 if !retained_is_query_seed && !active_containers.is_empty() && sheet.has_container_queries() {
                     let mut matcher = tree.matcher();
                     add_container_query_reset_scopes(
