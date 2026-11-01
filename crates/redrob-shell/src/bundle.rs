@@ -29,45 +29,6 @@ pub fn credits_file() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Whether Chromium's Linux sandbox can start for the programs in `exe_dir`:
-/// either `chrome-sandbox` there is the set-user-ID root helper (a tar file
-/// cannot make it one; `sudo chown root:root chrome-sandbox && sudo chmod
-/// 4755 chrome-sandbox` does), or this user may create a user namespace and
-/// new PID and network namespaces inside it (the namespace sandbox; Ubuntu
-/// 23.10 and later forbid it unless an AppArmor profile allows the program).
-/// When neither holds Chromium aborts at start, so the window starts CEF with
-/// `no_sandbox` instead and says so on standard error.
-#[cfg(target_os = "linux")]
-#[allow(dead_code)] // read by the CEF start-up (cef/app.rs)
-pub fn linux_sandbox_usable(exe_dir: &Path) -> bool {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    if let Ok(m) = fs::metadata(exe_dir.join("chrome-sandbox")) {
-        if m.uid() == 0 && m.permissions().mode() & 0o4000 != 0 {
-            return true;
-        }
-    }
-    // A child process tries what the namespace sandbox does first; the
-    // parent keeps its own namespaces.
-    // SAFETY: the child calls only async-signal-safe functions (unshare,
-    // _exit) and never returns into Rust code.
-    unsafe {
-        let pid = libc::fork();
-        if pid == 0 {
-            let ok = libc::unshare(libc::CLONE_NEWUSER) == 0
-                && libc::unshare(libc::CLONE_NEWPID | libc::CLONE_NEWNET) == 0;
-            libc::_exit(if ok { 0 } else { 1 });
-        }
-        if pid < 0 {
-            return false;
-        }
-        let mut status = 0;
-        if libc::waitpid(pid, &mut status, 0) != pid {
-            return false;
-        }
-        libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0
-    }
-}
-
 /// The top-level entries the manifest in `dir` names (`locales/en-US.pak`
 /// names `locales`). Empty when `dir` has no manifest (a package from before
 /// the CEF runtime, which held only the programs and the licence files).
