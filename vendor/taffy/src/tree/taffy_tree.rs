@@ -432,6 +432,9 @@ where
                         || !node.style.grid_template_columns.is_empty())
                 } => compute_grid_layout(tree, node_id, inputs),
                 (_, false) => {
+                    // Leaves resolve calc() padding, border, margin and sizes
+                    // with the tree's resolver like every other algorithm.
+                    let calc_resolver = tree.taffy.config.calc_resolver;
                     let node_key = node_id.into();
                     let style = &tree.taffy.nodes[node_key].style;
                     let has_context = tree.taffy.nodes[node_key].has_context;
@@ -439,7 +442,7 @@ where
                     let measure_function = |known_dimensions, available_space| {
                         (tree.measure_function)(known_dimensions, available_space, node_id, node_context, style)
                     };
-                    compute_leaf_layout(inputs, style, |_, _| 0.0, measure_function)
+                    compute_leaf_layout(inputs, style, calc_resolver, measure_function)
                 }
             }
         };

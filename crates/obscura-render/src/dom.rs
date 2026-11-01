@@ -2360,6 +2360,7 @@ fn sync_resolved_percentage_padding(
 ) {
     let has_percentage_padding = styles.values().any(|style| {
         style.padding_percent.iter().any(Option::is_some)
+            || style.padding_calc.iter().any(Option::is_some)
             || style
                 .before_pseudo
                 .as_deref()
@@ -2385,6 +2386,21 @@ fn sync_resolved_percentage_padding(
         }
         if let Some(percent) = style.padding_percent[3] {
             style.padding.left = percent * containing_block_width;
+        }
+        for (index, calc) in style.padding_calc.clone().iter().enumerate() {
+            let Some(calc) = calc else {
+                continue;
+            };
+            let px = crate::style::resolve_grid_calc(
+                std::sync::Arc::as_ptr(calc).cast(),
+                containing_block_width,
+            );
+            match index {
+                0 => style.padding.top = px,
+                1 => style.padding.right = px,
+                2 => style.padding.bottom = px,
+                _ => style.padding.left = px,
+            }
         }
     }
 
@@ -2481,7 +2497,33 @@ fn resolve_inline_percentage_heights(
         let dom_id = id_map.get(&node).copied();
 
         if let (Some(dom_id), Some(parent_id)) = (dom_id, nearest_dom_parent) {
-            let is_direct_dom_child = rendered_parent(tree, dom_id) == Some(parent_id);
+            // Non-atomic inline boxes (and `display: contents`) are never
+            // containing blocks: a percentage inside `<span>` or an unknown
+            // element resolves against the nearest block container, which
+            // here is the nearest Taffy-backed DOM ancestor.
+            let mut is_direct_dom_child = false;
+            let mut ancestor = rendered_parent(tree, dom_id);
+            for _ in 0..tree.len() {
+                let Some(current) = ancestor else {
+                    break;
+                };
+                if current == parent_id {
+                    is_direct_dom_child = true;
+                    break;
+                }
+                let transparent = styles.get(&current).is_some_and(|style| {
+                    style.display_contents
+                        || (style.display == crate::Display::Inline
+                            && !style.is_inline_block
+                            && !style.is_replaced_box
+                            && style.position.is_none()
+                            && style.float.is_none())
+                });
+                if !transparent {
+                    break;
+                }
+                ancestor = rendered_parent(tree, current);
+            }
             let child_percent = styles.get(&dom_id).and_then(|style| {
                 (style.size_expressions[1].is_none()
                     && !style.ignores_used_box_sizes()
@@ -3351,6 +3393,16 @@ fn cascade_node_style(
         let mut style = crate::style::ua_style(elem.local.as_ref());
         if elem.ns.as_ref() == "http://www.w3.org/2000/svg" && elem.local.as_ref() != "svg" {
             // SVG content elements keep the initial `display: inline`.
+            style.css_display = crate::CssDisplay::Inline;
+        } else if elem.ns.as_ref() == "http://www.w3.org/1999/xhtml"
+            && !crate::style::is_known_html_element(elem.local.as_ref())
+        {
+            // No UA rule matches an autonomous custom element or an
+            // HTMLUnknownElement, so it keeps the initial `display: inline`
+            // (`<yt-image>` around a `height:100%` thumbnail must not become
+            // an auto-height block that the image's percentage resolves
+            // against).
+            style.display = crate::Display::Inline;
             style.css_display = crate::CssDisplay::Inline;
         }
         // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
@@ -7849,18 +7901,27 @@ fn layout_dom_once(
                 }
             }
             // A `display: contents` element generates no box: its children
-            // keep the containing block it was given.
+            // keep the containing block it was given. A non-atomic inline box
+            // is never the containing block of its in-flow children either:
+            // they resolve percentages against the nearest block container
+            // (CSS 2.2 10.1), so `<span><img style=height:100%></span>` in a
+            // 280px block is 280px tall.
+            let inline_box = styles
+                .get(&id)
+                .is_some_and(|style| is_non_atomic_inline_box(tree, &styles, id, style));
             if !styles.get(&id).is_some_and(|style| style.display_contents) {
-                inh.cb_width = child_cb_width;
                 if let Some(style) = styles.get(&id) {
                     if style.position.is_some() {
                         inh.abs_cb_height = child_cb_height_definite
                             .then(|| child_cb_height + style.padding.top + style.padding.bottom);
                     }
                 }
-                inh.cb_height = child_cb_height;
-                inh.cb_height_definite = child_cb_height_definite;
-                inh.cb_height_deferred = child_cb_height_deferred;
+                if !inline_box {
+                    inh.cb_width = child_cb_width;
+                    inh.cb_height = child_cb_height;
+                    inh.cb_height_definite = child_cb_height_definite;
+                    inh.cb_height_deferred = child_cb_height_deferred;
+                }
             }
             for child in style_children(tree, id).into_iter().rev() {
                 queue.push((child, inh.clone()));
@@ -12558,6 +12619,44 @@ fn abspos_inset_content_height(style: &crate::LayoutStyle, cb_height: Option<f32
     Some(content.max(0.0))
 }
 
+/// Whether `id` generates a non-atomic inline box (an inline element that a
+/// float, absolute positioning or a flex/grid parent does not blockify).
+/// Such a box never establishes a containing block for in-flow children.
+fn is_non_atomic_inline_box(
+    tree: &DomTree,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    id: NodeId,
+    style: &crate::LayoutStyle,
+) -> bool {
+    if style.display != crate::Display::Inline
+        || style.display_contents
+        || style.is_inline_block
+        || style.is_replaced_box
+        || style.float.is_some()
+        || matches!(style.position, Some(taffy::Position::Absolute))
+    {
+        return false;
+    }
+    let mut parent = rendered_parent(tree, id);
+    for _ in 0..tree.len() {
+        let Some(parent_id) = parent else {
+            return true;
+        };
+        let Some(parent_style) = styles.get(&parent_id) else {
+            return true;
+        };
+        if parent_style.display_contents {
+            parent = rendered_parent(tree, parent_id);
+            continue;
+        }
+        return !matches!(
+            parent_style.display,
+            crate::Display::Flex | crate::Display::Grid
+        ) || parent_style.internal_flex_container;
+    }
+    true
+}
+
 pub(crate) fn rendered_parent(tree: &DomTree, id: NodeId) -> Option<NodeId> {
     let parent = tree.with_node(id, |node| node.parent)??;
     if let Some(root) = tree.shadow_root_info(parent) {
@@ -15128,6 +15227,9 @@ fn build_table_box(
         grid_style.padding_relative = [None; 4];
         grid_style.padding_expressions = Default::default();
     }
+    // The table spacing below is added to the padding pixels; a calc()
+    // padding handle would replace them in Taffy.
+    grid_style.padding_calc = Default::default();
     grid_style.padding.left += horizontal_spacing;
     grid_style.padding.right += horizontal_spacing;
     grid_style.padding.top += vertical_spacing;
@@ -22179,6 +22281,59 @@ mod tests {
             "the percentage image must resolve against the measured item width: {:?}",
             rect("art")
         );
+    }
+
+    #[test]
+    fn percentage_height_inside_an_inline_resolves_against_the_block_container() {
+        // An inline box is never a containing block: a `height:100%` atomic
+        // or block inside `<span>` (or an unknown/custom element, which is
+        // inline by default) resolves against the nearest block container.
+        // YouTube's `<a style=position:absolute;top:0;bottom:0><yt-image>
+        // <img style=height:100%>` thumbnails are 281px in Chrome, not the
+        // image's natural 404px. Expected sizes are Chrome 145's.
+        let tree = parse_html(
+            r#"<style>html,body{margin:0} .c{width:500px;height:280px}
+               img{width:100%;height:100%}</style>
+               <div class=c><img id=a src=a.png></div>
+               <div class=c><span><img id=b src=a.png></span></div>
+               <div class=c><yt-image><img id=c src=a.png></yt-image></div>
+               <div class=c style="position:relative"><a style="position:absolute;display:block;top:0;bottom:0;width:500px"><yt-image><img id=d src=a.png></yt-image></a></div>
+               <div class=c><span><div id=e style="height:100%">x</div></span></div>"#,
+        );
+        let mut intrinsic = HashMap::new();
+        for id in ["a", "b", "c", "d"] {
+            intrinsic.insert(tree.get_element_by_id(id).unwrap(), (720.0, 404.0));
+        }
+        let laid = layout_dom_with_images(&tree, (1280.0, 800.0), &intrinsic);
+        for id in ["a", "b", "c", "d", "e"] {
+            let rect = laid.rects[&tree.get_element_by_id(id).unwrap()];
+            assert!(
+                (rect.width - 500.0).abs() < 0.01 && (rect.height - 280.0).abs() < 0.01,
+                "#{id} must be 500x280: {rect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn calc_percentage_padding_resolves_against_the_flex_item_width() {
+        // YouTube's player keeps 16:9 with `padding-top: calc(var(--h) /
+        // var(--w) * 100%)` inside the flexed primary column. The percentage
+        // is of the column's used width (896px -> 504px in Chrome 145), not
+        // the 1248px flex container the style pass estimates.
+        let tree = parse_html(
+            r#"<style>html,body{margin:0}</style>
+               <div style="display:flex;width:1248px"><div style="flex:1;min-width:0">
+               <div id=a style="--h:9;--w:16;padding-top:calc(var(--h)/var(--w)*100%)"></div>
+               <div id=b style="padding-top:calc(50% + 10px)"></div>
+               </div><div style="width:352px;flex:none"></div></div>
+               <div style="width:880px"><div id=c style="padding-top:calc(9/16*100%)"></div></div>"#,
+        );
+        let laid = layout_dom(&tree, (1280.0, 800.0));
+        let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
+        assert!((rect("c").height - 495.0).abs() < 0.01, "{:?}", rect("c"));
+        assert!((rect("a").width - 896.0).abs() < 0.01, "{:?}", rect("a"));
+        assert!((rect("a").height - 504.0).abs() < 0.01, "{:?}", rect("a"));
+        assert!((rect("b").height - 458.0).abs() < 0.01, "{:?}", rect("b"));
     }
 
     #[test]
