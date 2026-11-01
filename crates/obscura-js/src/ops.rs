@@ -1072,26 +1072,30 @@ fn fetch_max_body_bytes() -> usize {
 /// streamed chunks exceed the cap (a lying or chunked server). Streaming keeps
 /// a multi-GB response from ever being fully allocated.
 async fn read_body_capped(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     max: usize,
 ) -> Result<Vec<u8>, deno_error::JsErrorBox> {
+    // Body chunks arrive on the transport runtime, not between page tasks.
+    obscura_net::on_transport(read_body_capped_here(response, max))
+        .await
+        .map_err(deno_error::JsErrorBox::generic)
+}
+
+async fn read_body_capped_here(
+    mut response: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, String> {
     if let Some(len) = response.content_length() {
         if len > max as u64 {
-            return Err(deno_error::JsErrorBox::generic(format!(
+            return Err(format!(
                 "response body of {len} bytes exceeds the maximum of {max}"
-            )));
+            ));
         }
     }
     let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| deno_error::JsErrorBox::generic(e.to_string()))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
         if buf.len() + chunk.len() > max {
-            return Err(deno_error::JsErrorBox::generic(format!(
-                "response body exceeds the maximum of {max} bytes"
-            )));
+            return Err(format!("response body exceeds the maximum of {max} bytes"));
         }
         buf.extend_from_slice(&chunk);
     }
@@ -4754,9 +4758,11 @@ async fn fetch_url_inner(
                 unsafe_header_names.join(","),
             );
         }
-        let preflight = preflight_request.send().await.map_err(|e| {
-            deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e))
-        })?;
+        let preflight = obscura_net::on_transport(preflight_request.send())
+            .await
+            .map_err(|e| {
+                deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e))
+            })?;
 
         // Fetch spec: the preflight response's status must be an ok status
         // before its CORS headers are consulted (#973).
@@ -4921,7 +4927,7 @@ async fn fetch_url_inner(
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 PageInFlightGuard(counter.clone())
             });
-            req.send()
+            obscura_net::on_transport(req.send())
                 .await
                 .map_err(|error| deno_error::JsErrorBox::generic(error.to_string()))?
         };

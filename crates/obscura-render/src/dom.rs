@@ -6737,18 +6737,18 @@ fn layout_dom_once(
                             && parent.css_display == crate::CssDisplay::Layout
                             && stretched_grid_item(parent, style))
                             || parent.display == crate::Display::Flex
-                            && !parent.internal_flex_container
-                            && if matches!(
-                                parent.flex_direction,
-                                Some(
-                                    taffy::FlexDirection::Column
-                                        | taffy::FlexDirection::ColumnReverse
-                                )
-                            ) {
-                                parent_definite
-                            } else {
-                                stretched_row_flex_item(parent, style)
-                            }
+                                && !parent.internal_flex_container
+                                && if matches!(
+                                    parent.flex_direction,
+                                    Some(
+                                        taffy::FlexDirection::Column
+                                            | taffy::FlexDirection::ColumnReverse
+                                    )
+                                ) {
+                                    parent_definite
+                                } else {
+                                    stretched_row_flex_item(parent, style)
+                                }
                     })
             });
             let reused_computed_style = fresh_styles
@@ -13635,6 +13635,7 @@ where
         margin: f32,
         inline_edges: f32,
         content_box: bool,
+        keyword: crate::IntrinsicWidth,
     }
 
     // Snapshot every containing-space input before intrinsic subtree
@@ -13722,6 +13723,7 @@ where
                 margin,
                 inline_edges,
                 content_box: style.box_sizing == crate::BoxSizing::ContentBox,
+                keyword: style.width_intrinsic,
             })
         })
         .collect();
@@ -13743,7 +13745,11 @@ where
             continue;
         };
         let fill = (candidate.available - candidate.margin).max(0.0);
-        let used_outer = min_content.max(max_content.min(fill));
+        let used_outer = match candidate.keyword {
+            crate::IntrinsicWidth::FitContent => min_content.max(max_content.min(fill)),
+            crate::IntrinsicWidth::MaxContent => max_content,
+            crate::IntrinsicWidth::MinContent => min_content,
+        };
         let declaration = if candidate.content_box {
             (used_outer - candidate.inline_edges).max(0.0)
         } else {

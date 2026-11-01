@@ -3655,7 +3655,9 @@ impl Page {
 
     async fn settle_runtime_for_duration(js: &mut ObscuraJsRuntime, duration_ms: u64) {
         let started = tokio::time::Instant::now();
-        let _ = js.run_event_loop_for_duration_or_navigation(duration_ms).await;
+        let _ = js
+            .run_event_loop_for_duration_or_navigation(duration_ms)
+            .await;
         let requested = tokio::time::Duration::from_millis(duration_ms);
         let elapsed = started.elapsed();
         // A document that is navigating away has nothing left to wait for;

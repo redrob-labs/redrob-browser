@@ -47,7 +47,7 @@ const __obscuraCore = globalThis.Deno.core;
     '_elemHrefURL', '_setElemHrefPart', '_pad', '_daysInMonth',
     '_isoWeek1Monday', '_inputParseNumber', '_inputFormatNumber',
     '_htmlAttrName', '_convertNodes', '_fragmentContextPayload', '_parseHTMLFragment', '_xmlWellFormed', '_elementClassFor', '_wrap', '_wrapEl',
-    '_resolveUrl', '_registerIframe', '_reflectedUnsigned', '_base64ToUint8Array',
+    '_resolveUrl', '_registerIframe', '_reflectedUnsigned', '_iframeContentWindow', '_base64ToUint8Array',
     '_bodyToUint8Array', '_arrayBufferFromBytes',
     '_installWasmStreamingFallback', '_urlParseOp', '_urlSetOp',
     '_urlResolveOp', '_decodeBodyWithCharset', '_utf8DecodeBytes',
@@ -5546,7 +5546,7 @@ class Element extends Node {
     }
     if (!this._iframeWin) {
       if (this.parentNode === null) return null;
-      this.contentDocument;
+      _contentDocumentGetter.call(this);
     }
     return this._iframeWin;
   }
@@ -8685,7 +8685,7 @@ for (let i = 0; i < 50; i++) {
     get() {
       const iframes = document.querySelectorAll('iframe');
       if (i < iframes.length) {
-        return iframes[i].contentWindow;
+        return _iframeContentWindow(iframes[i]);
       }
       return undefined;
     },
@@ -15646,6 +15646,15 @@ globalThis.DocumentFragment = DocumentFragment;
 globalThis.DocumentType = DocumentType;
 globalThis.Node = Node;
 globalThis.Element = Element;
+// The engine's own iframe -> window lookup. Pages (ad verification scripts)
+// replace HTMLIFrameElement.prototype.contentWindow with getters that read
+// contentDocument.defaultView; a native path that went through the public
+// property re-entered such a getter forever, building a frame per level.
+const _contentWindowGetter = Object.getOwnPropertyDescriptor(Element.prototype, "contentWindow").get;
+const _contentDocumentGetter = Object.getOwnPropertyDescriptor(Element.prototype, "contentDocument").get;
+function _iframeContentWindow(element) {
+  return element ? _contentWindowGetter.call(element) : undefined;
+}
 globalThis.Document = Document;
 // document.all. In browsers it is an HTMLAllCollection that V8 marks
 // "undetectable": falsy, typeof "undefined", == null, yet !== undefined.
@@ -15841,7 +15850,7 @@ function _windowNamedValue(name) {
   for (const element of matches) {
     if (element.localName === "iframe" && _windowNameEligibleElement(element)
         && element.getAttribute("name") === name) {
-      const window = element.contentWindow;
+      const window = _iframeContentWindow(element);
       if (window) return window;
     }
   }
@@ -16487,8 +16496,8 @@ class _IframeDocument {
   set title(v) { this._title = v; }
   get URL() { return this._url; }
   get documentURI() { return this._url; }
-  get location() { return this._iframeEl?.contentWindow?.location; }
-  get defaultView() { return this._iframeEl?.contentWindow; }
+  get location() { return _iframeContentWindow(this._iframeEl)?.location; }
+  get defaultView() { return _iframeContentWindow(this._iframeEl); }
   get ownerDocument() { return null; }
   get compatMode() { return 'CSS1Compat'; }
   get activeElement() { return this._body; }
@@ -16801,7 +16810,19 @@ function _connectSrcdocFrames(root, html) {
 }
 
 function _ensureInitialFrameRealm(element, srcdoc) {
-  if (element._frameId || !element.isConnected) return;
+  // Script run while the realm is being built (its init, a listener it
+  // wakes) can ask for the frame again before its id is recorded; building a
+  // second realm then recursed without bound.
+  if (element._frameId || !element.isConnected || element._initialFrameRealmBusy) return;
+  element._initialFrameRealmBusy = true;
+  try {
+    return _buildInitialFrameRealm(element, srcdoc);
+  } finally {
+    element._initialFrameRealmBusy = false;
+  }
+}
+
+function _buildInitialFrameRealm(element, srcdoc) {
   // An opaque sandbox must never receive the creator's security token.
   let opaque = element.hasAttribute('sandbox') &&
       !element.getAttribute('sandbox').toLowerCase().split(/\s+/).includes('allow-same-origin');

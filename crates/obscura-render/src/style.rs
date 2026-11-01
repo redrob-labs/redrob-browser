@@ -1706,7 +1706,16 @@ fn apply_layout_value(style: &mut LayoutStyle, name: &str, value: &str) {
         // between logical and physical longhands.
         "width" | "inline-size" => {
             style.width = dimension_value(value);
-            style.width_fit_content = value.trim().eq_ignore_ascii_case("fit-content");
+            let keyword = value.trim();
+            style.width_intrinsic = if keyword.eq_ignore_ascii_case("max-content") {
+                crate::IntrinsicWidth::MaxContent
+            } else if keyword.eq_ignore_ascii_case("min-content") {
+                crate::IntrinsicWidth::MinContent
+            } else {
+                crate::IntrinsicWidth::FitContent
+            };
+            style.width_fit_content = keyword.eq_ignore_ascii_case("fit-content")
+                || style.width_intrinsic != crate::IntrinsicWidth::FitContent;
             style.size_expressions[0] = deferred_length_expression(value);
             style.width_set = true;
         }
@@ -3925,7 +3934,12 @@ fn supports_conservative_known_value(name: &str, value: &str) -> bool {
             && tokens.iter().all(|token| dimension(token, auto))
     };
     match name {
-        "width" | "inline-size" => lower == "fit-content" || dimension(value, true),
+        "width" | "inline-size" => {
+            matches!(
+                lower.as_str(),
+                "fit-content" | "max-content" | "min-content"
+            ) || dimension(value, true)
+        }
         "word-spacing" => lower == "normal" || parse_word_spacing_length(value).is_some(),
         "height" | "block-size" | "min-width" | "min-inline-size" | "min-height"
         | "min-block-size" | "max-width" | "max-inline-size" | "max-height" | "max-block-size"
