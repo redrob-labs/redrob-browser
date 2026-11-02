@@ -764,6 +764,11 @@ impl Window {
 
     fn on_download(&mut self, item: model::DownloadItem) {
         let finished = matches!(item.state.as_str(), "completed" | "canceled");
+        let known = self.model.downloads.iter().any(|d| d.guid == item.guid);
+        // A save dialog the person closed: Chrome lists nothing for it.
+        if !known && item.state == "canceled" && item.path.is_empty() {
+            return;
+        }
         match self
             .model
             .downloads
@@ -775,6 +780,9 @@ impl Window {
                 d.bytes = item.bytes;
                 if !item.path.is_empty() {
                     d.path = item.path.clone();
+                }
+                if !item.filename.is_empty() {
+                    d.filename = item.filename.clone();
                 }
                 if !item.url.is_empty() {
                     d.url = item.url.clone();
@@ -809,7 +817,12 @@ impl Window {
                     "paused" => t("Paused"),
                     _ => t("Downloading"),
                 };
-                ui.label(format!("{}  {}  {} KB", d.filename, state, d.bytes / 1024));
+                ui.label(format!(
+                    "{}  {}  {}",
+                    d.filename,
+                    state,
+                    size_label(d.bytes)
+                ));
                 let path = std::path::Path::new(&d.path);
                 match d.state.as_str() {
                     "inProgress" | "paused" => {
@@ -2598,5 +2611,21 @@ impl Window {
             self.focus_page = true;
             ctx.request_repaint();
         }
+    }
+}
+
+/// A download size the way Chrome's download list shows it: B, KB, MB, GB.
+fn size_label(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
