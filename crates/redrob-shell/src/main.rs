@@ -2062,10 +2062,8 @@ impl Window {
             self.suggest.close();
             return false;
         }
-        !self
-            .model
-            .suggest(&self.suggest.typed, SUGGESTIONS)
-            .is_empty()
+        // Any text has a first row: what was typed.
+        !self.suggest.typed.trim().is_empty()
     }
 
     /// The text the field shows for a highlighted row: what was typed for
