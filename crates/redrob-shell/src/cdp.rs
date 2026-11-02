@@ -342,9 +342,11 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
         let resized = client::take_resized();
         let paused = client::take_paused();
         let escaped = client::take_popup_escaped();
+        let focused = client::take_focused();
         let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
         if created.is_empty()
+            && focused.is_empty()
             && closed.is_empty()
             && resized.is_empty()
             && paused.is_empty()
@@ -361,6 +363,9 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
             }
             for (tab, w, h) in resized {
                 e.resize_popup(tab, w, h);
+            }
+            for tab in focused {
+                e.page_focused(tab);
             }
             for tab in paused {
                 e.popup_paused(tab);
@@ -530,6 +535,21 @@ impl Engine {
         self.sync_window(window);
         for op in ops {
             self.handle(window, tab, op);
+        }
+    }
+
+    /// `tab`'s page took the keyboard (a click in it). A page hosted as a
+    /// Chrome window of its own (cef/host.rs) counts as active, and takes
+    /// keys, only while its own native window has the X input focus:
+    /// Chromium asks the window manager for that, which ignores a window
+    /// inside another. So the page on screen gets it here, as the window
+    /// manager would give it.
+    fn page_focused(&mut self, tab: TabId) {
+        if !crate::cef::host::enabled() || !self.shown(tab) {
+            return;
+        }
+        if let Some(child) = self.tabs.get(&tab).and_then(|t| t.native) {
+            native::focus(child);
         }
     }
 

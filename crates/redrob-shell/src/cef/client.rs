@@ -76,6 +76,8 @@ thread_local! {
     /// Pages that asked for a size of their own (`set_auto_resize_enabled`),
     /// in points.
     static RESIZED: RefCell<Vec<(TabId, i32, i32)>> = const { RefCell::new(Vec::new()) };
+    /// Pages that took the keyboard (`on_got_focus`).
+    static FOCUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
     /// Pages the DevTools debugger paused (`Debugger.paused`).
     static PAUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
 }
@@ -109,6 +111,11 @@ pub fn take_popup_escaped() -> bool {
 /// before its first script, cdp.rs).
 pub fn take_paused() -> Vec<TabId> {
     PAUSED.with_borrow_mut(std::mem::take)
+}
+
+/// Pages that took the keyboard since the last call.
+pub fn take_focused() -> Vec<TabId> {
+    FOCUSED.with_borrow_mut(std::mem::take)
 }
 
 /// Sizes pages asked for since the last call (cef/handlers/extensions.rs).
@@ -465,6 +472,7 @@ wrap_focus_handler! {
 
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {
             // A click in the page, or the window gave it the keyboard.
+            FOCUSED.with_borrow_mut(|f| f.push(self.ctx.tab));
             self.ctx.sink.send_tab(self.ctx.tab, Event::Focused);
         }
 
