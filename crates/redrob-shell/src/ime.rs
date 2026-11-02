@@ -45,3 +45,14 @@ pub fn after_pass(ctx: &egui::Context, focused: bool) {
     #[cfg(not(target_os = "linux"))]
     let _ = (ctx, focused);
 }
+
+/// A key egui has no name for (한/영, 한자), read from X (cef/xdnd.rs).
+#[cfg(target_os = "linux")]
+pub fn raw_key(sym: u32, code: u32, release: bool) {
+    fcitx::raw_key(sym, code, release);
+}
+
+#[cfg(target_os = "linux")]
+pub fn has_raw_keys() -> bool {
+    fcitx::has_raw_keys()
+}

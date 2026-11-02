@@ -98,6 +98,26 @@ fn ime() -> Option<std::sync::MutexGuard<'static, Fcitx>> {
         .map(|m| m.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// Keys egui has no name for (the 한/영 and 한자 keys), read from X by
+/// cef/xdnd.rs while the window has the keyboard: keysym, keycode, release.
+static RAW_KEYS: Mutex<Vec<(u32, u32, bool)>> = Mutex::new(Vec::new());
+
+/// Hand a key egui cannot carry to the input method on the next pass.
+pub fn raw_key(sym: u32, code: u32, release: bool) {
+    RAW_KEYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push((sym, code, release));
+}
+
+/// Whether keys wait for the next pass of the window composing text.
+pub fn has_raw_keys() -> bool {
+    !RAW_KEYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_empty()
+}
+
 pub fn before_pass(ctx: &egui::Context, focused: bool) {
     let Some(mut f) = ime() else { return };
     let viewport = ctx.viewport_id();
@@ -120,6 +140,12 @@ pub fn before_pass(ctx: &egui::Context, focused: bool) {
         let _ = f.drain();
     }
     let active = f.owner == Some(viewport);
+    if active {
+        let raw = std::mem::take(&mut *RAW_KEYS.lock().unwrap_or_else(|e| e.into_inner()));
+        for (sym, code, release) in raw {
+            out.extend(f.raw(sym, code, release));
+        }
+    }
     let events = ctx.input_mut(|i| std::mem::take(&mut i.events));
     let mut skip_text = false;
     for ev in events {
@@ -337,6 +363,23 @@ impl Fcitx {
                 }
             }
         }
+        out
+    }
+
+    /// Hand fcitx5 a key by its keysym and keycode; what it produced.
+    fn raw(&mut self, sym: u32, code: u32, release: bool) -> Vec<Event> {
+        let time = self.epoch.elapsed().as_millis() as u32;
+        let mut out = self.drain();
+        if let Some(reply) = self.call("ProcessKeyEventBatch", &(sym, code, 0u32, release, time)) {
+            if let Ok((events, _)) = reply.body().deserialize::<(Vec<(u32, OwnedValue)>, bool)>() {
+                for (kind, value) in events {
+                    if kind == BATCHED_COMMIT_STRING {
+                        out.extend(String::try_from(value).ok().map(commit));
+                    }
+                }
+            }
+        }
+        out.extend(self.drain());
         out
     }
 

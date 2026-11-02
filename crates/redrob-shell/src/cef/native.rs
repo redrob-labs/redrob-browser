@@ -85,6 +85,23 @@ pub fn of(browser: &cef::Browser) -> Option<Handle> {
 
 pub use imp::{detach, find_window, focus, place, reparent, set_visible};
 
+/// The browser window's own controls take the keyboard.
+#[cfg(not(target_os = "linux"))]
+pub fn focus_chrome(top: Handle) {
+    focus(top);
+}
+
+/// Whether the browser window's controls have the keyboard while the
+/// window reads as unfocused (Linux, focus window); elsewhere the window's
+/// own focus says it.
+#[cfg(not(target_os = "linux"))]
+pub fn chrome_has_keyboard(_top: Handle) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
+pub use imp::{chrome_has_keyboard, focus_chrome};
+
 #[cfg(target_os = "linux")]
 mod imp {
     use std::sync::OnceLock;
@@ -280,6 +297,36 @@ mod imp {
             c.ignore_error();
         }
         let _ = x.conn.flush();
+    }
+
+    /// The browser window's own controls take the keyboard.
+    pub fn focus_chrome(top: Handle) {
+        let Some(x) = x() else { return };
+        let to = crate::cef::xdnd::focus_window(top.0 as Window).unwrap_or(top.0 as Window);
+        if let Ok(c) = x
+            .conn
+            .set_input_focus(InputFocus::PARENT, to, x11rb::CURRENT_TIME)
+        {
+            c.ignore_error();
+        }
+        let _ = x.conn.flush();
+    }
+
+    /// Whether the browser window's controls have the keyboard. The window
+    /// manager focuses the browser window itself (a click in its chrome):
+    /// the keyboard moves on to its focus window.
+    pub fn chrome_has_keyboard(top: Handle) -> bool {
+        let Some(x) = x() else { return false };
+        let top = top.0 as Window;
+        let Some(f) = x.conn.get_input_focus().ok().and_then(|c| c.reply().ok()) else {
+            return false;
+        };
+        let proxy = crate::cef::xdnd::focus_window(top);
+        if f.focus == top {
+            focus_chrome(Handle(top as usize));
+            return true;
+        }
+        proxy == Some(f.focus)
     }
 }
 

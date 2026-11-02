@@ -421,6 +421,7 @@ impl Browser {
             took_focus: false,
             window_focused: false,
             address_focused: false,
+            chrome_keyboard: false,
             minimized: false,
             page_shortcuts: Vec::new(),
             status: None,
@@ -557,6 +558,13 @@ impl Browser {
                 ctx.request_repaint_of(w.viewport);
             }
         }
+        // The 한/영 key for the window in front (cef/xdnd.rs, ime.rs).
+        #[cfg(target_os = "linux")]
+        if crate::ime::has_raw_keys() {
+            if let Some(i) = self.focused_index() {
+                ctx.request_repaint_of(self.windows[i].viewport);
+            }
+        }
         while let Ok(url) = self.open_rx.try_recv() {
             let i = self.new_window(None, None);
             let w = &mut self.windows[i];
@@ -687,6 +695,13 @@ impl Browser {
             w.maximized = v.maximized.unwrap_or(false);
             v.focused == Some(true)
         });
+        // Linux: whether the chrome (its focus window, cef/native.rs) has
+        // the keyboard comes from X; winit's focus also covers the page.
+        let focused = match w.native {
+            Some(n) if cfg!(target_os = "linux") => crate::cef::native::chrome_has_keyboard(n),
+            _ => focused,
+        };
+        w.chrome_keyboard = focused;
         if focused {
             self.focused = w.wid;
         }

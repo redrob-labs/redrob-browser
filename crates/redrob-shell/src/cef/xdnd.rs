@@ -8,6 +8,16 @@
 //! itself); over the tab strip and toolbar it is the drop target, as
 //! Chrome's omnibox and tab strip are: a dropped link or text opens there
 //! ([`take_drops`]).
+//!
+//! The same connection owns each browser window's focus window
+//! ([`focus_window`]): an input-only child out of sight that has the
+//! keyboard while the chrome does. With the browser window itself focused,
+//! X reports keys to the page under the pointer; and X never passes key
+//! events above the focus window, so the keys it gets are handed on to the
+//! browser window (winit), as GTK's focus window does for GTK. The keys
+//! egui has no name for, the Korean 한/영 and 한자 keys, go to the input
+//! method (ime.rs) on the way. While a page has the keyboard, its window
+//! takes them and Chromium's input method does.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -258,6 +268,14 @@ fn run() {
         let st = st.get_or_insert_with(State::default);
         match ev {
             Event::ClientMessage(e) => client_message(x, st, &e),
+            Event::KeyPress(e) => {
+                korean_key(x, e.detail, false);
+                pass_key(x, e);
+            }
+            Event::KeyRelease(e) => {
+                korean_key(x, e.detail, true);
+                pass_key(x, e);
+            }
             Event::SelectionNotify(e) => {
                 let Some(d) = st.drag.take() else { continue };
                 let mut text = String::new();
@@ -296,6 +314,93 @@ fn run() {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// Each browser window's focus window, by browser window.
+static FOCUS: Mutex<Option<HashMap<Window, Window>>> = Mutex::new(None);
+
+/// The focus window of browser window `top`, made the first time.
+pub fn focus_window(top: Window) -> Option<Window> {
+    let x = x()?;
+    let mut f = FOCUS.lock().unwrap_or_else(|e| e.into_inner());
+    let f = f.get_or_insert_with(HashMap::new);
+    if let Some(w) = f.get(&top) {
+        return Some(*w);
+    }
+    let w = x.conn.generate_id().ok()?;
+    let aux = CreateWindowAux::new().event_mask(EventMask::KEY_PRESS | EventMask::KEY_RELEASE);
+    x.conn
+        .create_window(
+            0,
+            w,
+            top,
+            -10,
+            -10,
+            1,
+            1,
+            0,
+            WindowClass::INPUT_ONLY,
+            0,
+            &aux,
+        )
+        .ok()?;
+    x.conn.map_window(w).ok()?;
+    let _ = x.conn.flush();
+    f.insert(top, w);
+    Some(w)
+}
+
+/// A key the focus window got goes on to its browser window, as if the
+/// server had sent it there.
+fn pass_key(x: &X, e: x11rb::protocol::xproto::KeyPressEvent) {
+    let top = FOCUS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|f| f.iter().find(|(_, w)| **w == e.event).map(|(t, _)| *t));
+    let Some(top) = top else { return };
+    let mut k = e;
+    k.event = top;
+    k.child = e.event;
+    let mask = if e.response_type & 0x7f == x11rb::protocol::xproto::KEY_RELEASE_EVENT {
+        EventMask::KEY_RELEASE
+    } else {
+        EventMask::KEY_PRESS
+    };
+    let _ = x.conn.send_event(false, top, mask, k);
+    let _ = x.conn.flush();
+}
+
+/// The 한/영 (Hangul) and 한자 (Hangul_Hanja) keysyms.
+const HANGUL: [u32; 2] = [0xff31, 0xff34];
+
+fn korean_key(x: &X, code: u8, release: bool) {
+    static MAP: OnceLock<HashMap<u8, u32>> = OnceLock::new();
+    let map = MAP.get_or_init(|| {
+        let setup = x.conn.setup();
+        let (min, max) = (setup.min_keycode, setup.max_keycode);
+        let mut m = HashMap::new();
+        if let Some(r) = x
+            .conn
+            .get_keyboard_mapping(min, max - min + 1)
+            .ok()
+            .and_then(|c| c.reply().ok())
+        {
+            let per = r.keysyms_per_keycode.max(1) as usize;
+            for (i, syms) in r.keysyms.chunks(per).enumerate() {
+                if let Some(s) = syms.iter().find(|s| HANGUL.contains(s)) {
+                    m.insert(min + i as u8, *s);
+                }
+            }
+        }
+        m
+    });
+    if let Some(sym) = map.get(&code) {
+        crate::ime::raw_key(*sym, code as u32, release);
+        if let Some(w) = WAKE.get() {
+            w();
         }
     }
 }

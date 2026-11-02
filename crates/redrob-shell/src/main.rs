@@ -54,37 +54,6 @@ fn main() -> anyhow::Result<()> {
     }
     // Before anything opens a file: fds 3 and 4 become Chromium's DevTools pipe.
     cef::reserve_devtools_pipe();
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("TMP_PTRACER").is_some() {
-        extern "C" fn dump(_: libc::c_int) {
-            eprintln!(
-                "TMP main thread stuck:\n{}",
-                std::backtrace::Backtrace::force_capture()
-            );
-        }
-        // SAFETY: debug only.
-        unsafe {
-            libc::signal(
-                libc::SIGURG,
-                dump as extern "C" fn(libc::c_int) as libc::sighandler_t,
-            );
-            let main = libc::pthread_self();
-            let main = main as usize;
-            std::thread::spawn(move || {
-                let mut last = 0;
-                let mut same = 0;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    let now = cef::pumps();
-                    same = if now == last && now > 0 { same + 1 } else { 0 };
-                    last = now;
-                    if same == 3 {
-                        libc::pthread_kill(main as libc::pthread_t, libc::SIGURG);
-                    }
-                }
-            });
-        }
-    }
     startup::init();
     run().inspect_err(|e| startup::fail(e))
 }
@@ -286,6 +255,9 @@ struct Window {
     window_focused: bool,
     /// Whether the address bar had the keyboard last frame.
     address_focused: bool,
+    /// The window is in front with its own controls (not the page) having
+    /// the keyboard (browser.rs).
+    chrome_keyboard: bool,
     /// Minimized: its page is hidden to Chromium (browser.rs).
     minimized: bool,
     /// Window shortcuts pressed while the page had the keyboard.
@@ -1879,10 +1851,15 @@ impl Window {
                                     .color(p.ink_muted),
                             ),
                     );
-                    if self.focus_address {
+                    // Only once the window has the keyboard back from the
+                    // page: egui drops focus requests while it has not.
+                    let window_focused = self.chrome_keyboard;
+                    if self.focus_address && window_focused {
                         self.focus_address = false;
                         field.request_focus();
                         self.editing = true;
+                    } else if self.focus_address {
+                        ui.ctx().request_repaint();
                     }
                     if field.gained_focus() {
                         // Select all, like every browser, so typing replaces the address.
@@ -2335,7 +2312,7 @@ impl Window {
         self.find_native(&ctx);
         // Back from another program (the window manager focused the
         // window): the page gets the keyboard back if it had it.
-        let focused = ctx.input(|i| i.viewport().focused == Some(true));
+        let focused = self.chrome_keyboard;
         if focused && !self.window_focused && self.page_focused {
             self.focus_page = true;
         }
@@ -2535,7 +2512,7 @@ impl Window {
                 let page_id = self.model.tabs[tab_index].id;
                 self.page(&ctx, rect, page_id);
             });
-        popup::end_frame(&ctx, self.page_focused);
+        popup::end_frame(&ctx, self.page_focused || self.chrome_keyboard);
     }
 
     /// Find this window's native handle: it sets a title only it has, looks

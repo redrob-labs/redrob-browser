@@ -71,6 +71,9 @@ parley = { path = "vendor/parley" }
 parley_engine = { path = "vendor/parley_engine" }
 # Build rav1d (AVIF/AV1) without nasm-assembled x86 kernels; see vendor/avif-decode/Cargo.toml.
 avif-decode = { path = "vendor/avif-decode" }
+# The window's keyboard stays its own while a child window (its focus
+# window, a Chromium page) has it; see vendor/winit/REDROB.md.
+winit = { path = "vendor/winit" }
 
 # Unwinding (the Rust default) is REQUIRED for the anti-panic protocol: ops wrap
 # their bodies in std::panic::catch_unwind so a panic degrades to an error return

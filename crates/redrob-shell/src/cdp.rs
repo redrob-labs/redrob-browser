@@ -761,7 +761,7 @@ fn run(window: WindowId, cmd: Command) {
             }
             trace(format_args!("focus window {window}: page let go"));
             if let Some((p, _)) = e.places.get(&window) {
-                native::focus(p.parent);
+                native::focus_chrome(p.parent);
             }
             trace(format_args!("focus window {window}: done"));
         }
