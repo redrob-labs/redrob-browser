@@ -9364,7 +9364,7 @@ fn layout_dom_once(
                                 &mut measure,
                             )
                             .ok()?;
-                            tree.layout(node).ok().map(|layout| layout.size.width)
+                            Some(tree.unrounded_layout(node).size.width)
                         },
                     )
                 {
@@ -9420,7 +9420,7 @@ fn layout_dom_once(
                                         &mut measure,
                                     )
                                     .ok()?;
-                                    tree.layout(node).ok().map(|layout| layout.size.width)
+                                    Some(tree.unrounded_layout(node).size.width)
                                 },
                             ) {
                                 let _ = tree.compute_layout_with_measure(
@@ -9523,7 +9523,7 @@ fn layout_dom_once(
                                 &mut measure,
                             )
                             .ok()?;
-                            tree.layout(node).ok().map(|layout| layout.size.width)
+                            Some(tree.unrounded_layout(node).size.width)
                         },
                     )
                 {
@@ -9579,7 +9579,7 @@ fn layout_dom_once(
                                         &mut measure,
                                     )
                                     .ok()?;
-                                    tree.layout(node).ok().map(|layout| layout.size.width)
+                                    Some(tree.unrounded_layout(node).size.width)
                                 },
                             ) {
                                 let _ = tree.compute_layout_with_measure(

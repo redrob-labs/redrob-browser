@@ -5350,14 +5350,11 @@ async fn fetch_url_inner(
     // The body streams in on the transport runtime from here on. A small body
     // is usually already in the connection's buffer with its headers; give it
     // a moment so it completes with them, as when it was read on this thread.
-    let mut body_read = obscura_net::spawn_on_transport(read_body_capped_here(
-        response,
-        fetch_max_body_bytes(),
-    ));
-    let early_body =
-        tokio::time::timeout(std::time::Duration::from_millis(5), &mut body_read)
-            .await
-            .ok();
+    let mut body_read =
+        obscura_net::spawn_on_transport(read_body_capped_here(response, fetch_max_body_bytes()));
+    let early_body = tokio::time::timeout(std::time::Duration::from_millis(5), &mut body_read)
+        .await
+        .ok();
     // A resource must not form an ownership cycle with its OpState table.
     let body_state = Rc::downgrade(&state);
     let body = Box::pin(async move {

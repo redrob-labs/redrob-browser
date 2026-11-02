@@ -8530,10 +8530,15 @@ mod tests {
             }
         }
         drop(advance);
+        // Frame documents are queued in the order they finished loading,
+        // which varies, so remove the iframe of the frame that is loading.
+        let attached = page.frames[0].frame_id();
         page.js
             .as_mut()
             .unwrap()
-            .evaluate("(document.querySelector('iframe').remove(), 1)")
+            .evaluate(&format!(
+                "([...document.querySelectorAll('iframe')].find(f => f._frameId === {attached}).remove(), 1)"
+            ))
             .unwrap();
 
         page.release_detached_frames();

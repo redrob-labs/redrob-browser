@@ -14927,7 +14927,9 @@ mod tests {
     fn script_registered_url_font_reaches_render_resource_collection() {
         let loads = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let loader_loads = std::sync::Arc::clone(&loads);
-        let font = include_bytes!("../../obscura-render/assets/liberation-serif.ttf").to_vec();
+        // A sans face: the fallback for an unknown family is Liberation Serif,
+        // so a serif fixture would measure the same before and after.
+        let font = include_bytes!("../../obscura-render/assets/liberation-sans.ttf").to_vec();
         let mut rt = parser_image_runtime(
             r#"<html><body style="margin:0">
                 <span id="sample" style="display:inline-block;width:max-content;
@@ -15192,7 +15194,8 @@ mod tests {
         ).unwrap();
         assert_eq!(
             rt.evaluate("box.style.opacity").unwrap(),
-            serde_json::json!(".2")
+            // Chrome serializes the authored `.2` as "0.2".
+            serde_json::json!("0.2")
         );
         assert_eq!(
             rt.evaluate("box.getAnimations()[0] === __animation")
@@ -15222,7 +15225,8 @@ mod tests {
         rt.execute_script("cancel", "__animation.cancel()").unwrap();
         assert_eq!(
             rt.evaluate("box.style.opacity").unwrap(),
-            serde_json::json!(".2")
+            // Chrome serializes the authored `.2` as "0.2".
+            serde_json::json!("0.2")
         );
         assert_eq!(
             rt.evaluate("getComputedStyle(box).opacity").unwrap(),

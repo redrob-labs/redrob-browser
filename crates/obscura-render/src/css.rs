@@ -2678,7 +2678,7 @@ pub struct StylesheetCache {
 
 /// The rule counts of the parse a sheet continued from: every rule at or
 /// past these indexes was parsed after the sources the two sheets share.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone)]
 pub(crate) struct SheetResume {
     rules: usize,
     before: usize,
@@ -2686,6 +2686,10 @@ pub(crate) struct SheetResume {
     placeholder: usize,
     /// The continued parse left `@keyframes` and `@property` unchanged.
     globals_unchanged: bool,
+    /// The cached sheet when the parse continued from before its last
+    /// source: that source changed or moved, so the rules it held past the
+    /// same counts may have stopped matching elements they styled.
+    replaced: Option<Arc<Stylesheet>>,
 }
 
 /// Selector keys of the rules a sheet gained over the parse it continued.
@@ -2752,9 +2756,11 @@ impl AppendedRuleKeys {
 }
 
 impl Stylesheet {
-    /// Keys of the rules this sheet holds past `resume`, or `None` when one
-    /// of them can match any element (no subject key, `:root`, host or
-    /// slotted rules) or the continued parse changed `@keyframes`/`@property`.
+    /// Keys of the rules this sheet holds past `resume` (and, when the parse
+    /// continued from before a replaced last source, the rules the replaced
+    /// sheet held there), or `None` when one of them can match any element
+    /// (no subject key, `:root`, host or slotted rules) or the continued
+    /// parse changed `@keyframes`/`@property`.
     pub(crate) fn appended_rule_keys(&self, resume: &SheetResume) -> Option<AppendedRuleKeys> {
         if !resume.globals_unchanged {
             return None;
@@ -2765,6 +2771,14 @@ impl Stylesheet {
             attributes: Default::default(),
             locals: Default::default(),
         };
+        self.note_rule_keys_past(resume, &mut keys)?;
+        if let Some(replaced) = resume.replaced.as_deref() {
+            replaced.note_rule_keys_past(resume, &mut keys)?;
+        }
+        Some(keys)
+    }
+
+    fn note_rule_keys_past(&self, resume: &SheetResume, keys: &mut AppendedRuleKeys) -> Option<()> {
         let first = resume.rules;
         if self.host_rules.iter().any(|&index| index >= first)
             || self.slotted_rules.iter().any(|&index| index >= first)
@@ -2810,7 +2824,7 @@ impl Stylesheet {
                 };
             }
         }
-        Some(keys)
+        Some(())
     }
 }
 
@@ -2880,19 +2894,26 @@ impl StylesheetCache {
             .and_then(|entry| {
                 let old = entry.sources.len();
                 if old < sources.len() && entry.sources[..] == sources[..old] {
-                    return Some((old, Arc::clone(&entry.sheet), entry.fold.clone()));
+                    return Some((old, Arc::clone(&entry.sheet), entry.fold.clone(), None));
                 }
                 let (sheet, fold) = entry.before_last.as_ref()?;
                 let kept = old.checked_sub(1)?;
-                (kept < sources.len() && entry.sources[..kept] == sources[..kept])
-                    .then(|| (kept, Arc::clone(sheet), fold.clone()))
+                (kept < sources.len() && entry.sources[..kept] == sources[..kept]).then(|| {
+                    (
+                        kept,
+                        Arc::clone(sheet),
+                        fold.clone(),
+                        Some(Arc::clone(&entry.sheet)),
+                    )
+                })
             });
-        let (done, mut sheet, mut fold) = match resume {
-            Some((done, sheet, fold)) => (done, (*sheet).clone(), fold),
+        let (done, mut sheet, mut fold, replaced) = match resume {
+            Some((done, sheet, fold, replaced)) => (done, (*sheet).clone(), fold, replaced),
             None => (
                 0,
                 Stylesheet::empty(crate::AnimationSampleTime::default()),
                 ParseFold::default(),
+                None,
             ),
         };
         let resumed = (done > 0).then(|| {
@@ -2903,6 +2924,7 @@ impl StylesheetCache {
                     after: sheet.after_rules.rules.len(),
                     placeholder: sheet.placeholder_rules.rules.len(),
                     globals_unchanged: false,
+                    replaced,
                 },
                 sheet.keyframes.clone(),
                 sheet.registered_custom_properties.clone(),
