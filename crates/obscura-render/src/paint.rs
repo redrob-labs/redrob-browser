@@ -1346,6 +1346,10 @@ pub struct PreparedRender {
     /// Changes whenever layout, styles or selected images change, so paint
     /// damage can reuse what it measured of an unchanged frame.
     paint_epoch: u64,
+    /// Per-node results behind `viewport_fixed`, `scroll_tree` and `sticky`,
+    /// for the next retained layout (see `dom::derived`). `None` once those
+    /// were recomputed some other way.
+    derived_memo: Option<crate::dom::derived::DerivedMemo>,
 }
 
 fn next_paint_epoch() -> u64 {
@@ -1446,6 +1450,7 @@ impl PreparedRender {
             self.content_size = derived.content_size;
             self.sticky = derived.sticky;
             self.scroll_tree = derived.scroll_tree;
+            self.derived_memo = None;
         }
         self.animation_sample = sample;
         self.has_active_waapi_animations = timeline.has_active_waapi(sample.time);
@@ -4233,6 +4238,17 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
         animation_mutations.as_slice()
     };
     crate::prof::stop(crate::prof::RETAIN_CHECKS, _prof);
+    let previous_rendered = previous.layout.rendered_tree.clone();
+    let previous_derived =
+        previous
+            .derived_memo
+            .take()
+            .map(|memo| crate::dom::derived::PreviousDerived {
+                memo,
+                viewport_fixed: std::mem::take(&mut previous.viewport_fixed),
+                scroll_tree: std::mem::take(&mut previous.scroll_tree),
+                sticky: std::mem::take(&mut previous.sticky),
+            });
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
@@ -4246,6 +4262,8 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             transforms: std::mem::take(&mut previous.layout.transforms),
             projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
             clip_inputs: previous.layout.clip_inputs,
+            previous_rendered,
+            derived: previous_derived,
         }),
     };
     drop(previous);
@@ -4561,7 +4579,29 @@ fn prepare_dom_internal_unverified(
             Some(top.map_or(y, |top| top.min(y)))
         });
     let layout_done = std::time::Instant::now();
-    let derived = laid.derived_layout_state(tree, viewport);
+    let seed = laid.derived_seed.take();
+    let (derived, derived_memo) = laid.derived_layout_state_retained(tree, viewport, seed);
+    if crate::dom::layout_verify_enabled() {
+        // The per-node computation must equal the whole-document one.
+        let whole = laid.derived_layout_state(tree, viewport);
+        let difference = if derived.content_size != whole.content_size {
+            Some(format!(
+                "content_size {:?} vs {:?}",
+                derived.content_size, whole.content_size
+            ))
+        } else if derived.viewport_fixed != whole.viewport_fixed {
+            Some("viewport_fixed differs".into())
+        } else {
+            crate::dom::sticky_layout_difference(&derived.sticky, &whole.sticky).or_else(|| {
+                crate::dom::scroll_tree_difference(&derived.scroll_tree, &whole.scroll_tree)
+            })
+        };
+        if let Some(difference) = difference {
+            panic!(
+                "OBSCURA_LAYOUT_VERIFY (derived): retained derived geometry differs: {difference}"
+            );
+        }
+    }
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
         eprintln!(
             "[timing] prepare images={:?} fonts={:?} svg={:?}",
@@ -4609,6 +4649,7 @@ fn prepare_dom_internal_unverified(
         layout: laid,
         query_seed,
         paint_epoch: next_paint_epoch(),
+        derived_memo: Some(derived_memo),
     })
 }
 

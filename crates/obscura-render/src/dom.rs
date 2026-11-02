@@ -341,6 +341,9 @@ pub struct DomLayout {
     /// Inline formatting contexts (`crate::ifc`), placed and clipped, keyed
     /// by root element in `ifc.by_node`.
     pub(crate) ifc: crate::ifc::IfcStore,
+    /// The previous render's derived geometry and where this layout changed
+    /// since, when this is a retained layout (see `derived::DerivedSeed`).
+    pub(crate) derived_seed: Option<derived::DerivedSeed>,
 }
 
 /// Whether `OBSCURA_LAYOUT_VERIFY` asks every incremental layout to be checked
@@ -1178,6 +1181,10 @@ pub(crate) struct RetainedGeometry {
     pub(crate) projective_transforms: HashMap<NodeId, crate::Mat4>,
     /// The root font size and viewport the clips were resolved with.
     pub(crate) clip_inputs: (f32, (f32, f32)),
+    /// The rendered tree of that layout.
+    pub(crate) previous_rendered: Option<std::rc::Rc<FlatTree>>,
+    /// What the render of that layout derived from it.
+    pub(crate) derived: Option<derived::PreviousDerived>,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -1207,7 +1214,7 @@ pub(crate) struct ScrollContainer {
 /// Immutable scrolling topology derived from one final layout. Hot paint and
 /// geometry paths index the two node vectors directly by `NodeId`; they never
 /// walk ancestors or hash a node to discover which scrolling area moves it.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct ScrollTree {
     pub containers: Vec<ScrollContainer>,
     /// Scrolling area established by this node, if any.
@@ -1793,6 +1800,7 @@ impl DomLayout {
                 &mut self.projective_transforms,
                 root_font_size,
                 viewport,
+                None,
                 None,
             );
         }
@@ -2942,11 +2950,19 @@ fn resolve_clip_rects(
     // inherited in that layout: then a subtree without changes keeps the
     // entries the maps already hold for it.
     retained: Option<(&ClipDirty, bool)>,
+    // By node index: set for every node walked (see `derived::DerivedSeed`).
+    mut walked: Option<&mut [bool]>,
 ) {
     if let Some((dirty, same_inputs)) = retained {
         if same_inputs && !dirty.in_subtree(id) {
             return;
         }
+    }
+    if let Some(slot) = walked
+        .as_deref_mut()
+        .and_then(|walked| walked.get_mut(id.index()))
+    {
+        *slot = true;
     }
     clip_rects.insert(id, inherited.clone());
     let style = styles.get(&id);
@@ -3078,6 +3094,7 @@ fn resolve_clip_rects(
             root_font_size,
             viewport,
             retained_child,
+            walked.as_deref_mut(),
         );
     }
 }
@@ -7472,6 +7489,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     )
 }
 
+pub(crate) mod derived;
 mod flow;
 
 fn layout_dom_once(
@@ -10917,13 +10935,30 @@ fn layout_dom_once(
         .and_then(|style| style.font_size)
         .unwrap_or(16.0);
     let clip_inputs = (root_font_size, viewport);
+    let mut derived_seed = None;
     if let Some(root_id) = root {
+        let mut derived_changes = None;
         let dirty = retained_geometry
             .take()
             .filter(|geometry| geometry.clip_inputs == clip_inputs)
             .zip(fresh_styles.as_ref())
-            .map(|(geometry, fresh)| {
-                let dirty = ClipDirty::new(tree, &geometry.rects, &rects, fresh);
+            .map(|(mut geometry, fresh)| {
+                let mut dirty = ClipDirty::new(tree, &geometry.rects, &rects, fresh);
+                // The derived geometry of the previous render can be kept
+                // where this walk does not go once the walk also goes where
+                // the rendered tree changed.
+                if let (Some(previous), Some(old_flat)) =
+                    (geometry.derived.take(), geometry.previous_rendered.take())
+                {
+                    let changes = rendered_tree_changes(&old_flat, &current_flat_tree(tree));
+                    for &id in &changes.children_changed {
+                        dirty.mark(tree, id, 0);
+                    }
+                    for &id in &changes.added {
+                        dirty.mark(tree, id, ClipDirty::STYLE);
+                    }
+                    derived_changes = Some((previous, changes));
+                }
                 if crate::prof::enabled() {
                     eprintln!(
                         "[timing] clip-dirty own={} subtree={} old_rects={} rects={}",
@@ -10946,6 +10981,9 @@ fn layout_dom_once(
                 projective_transforms.retain(|id, _| flat.contains(*id));
                 dirty
             });
+        let mut walked = derived_changes
+            .is_some()
+            .then(|| vec![false; tree.node_slot_count()]);
         resolve_clip_rects(
             tree,
             root_id,
@@ -10962,7 +11000,27 @@ fn layout_dom_once(
             root_font_size,
             viewport,
             dirty.as_ref().map(|dirty| (dirty, true)),
+            walked.as_deref_mut(),
         );
+        if let (Some((previous, changes)), Some(mut changed)) = (derived_changes, walked) {
+            // Also outside the document element's subtree, which the walk
+            // does not enter.
+            for &id in changes.children_changed.iter().chain(&changes.added) {
+                let mut current = Some(id);
+                while let Some(node) = current {
+                    match changed.get_mut(node.index()) {
+                        Some(seen) => *seen = true,
+                        None => break,
+                    }
+                    current = rendered_parent(tree, node);
+                }
+            }
+            derived_seed = Some(derived::DerivedSeed {
+                previous,
+                changed,
+                removed: changes.removed,
+            });
+        }
     }
 
     phase_marks.push(("clips", crate::prof::mark()));
@@ -11031,6 +11089,7 @@ fn layout_dom_once(
             text_engine: engine,
             ifc: ifc_items.ifc,
             generated_boxes,
+            derived_seed,
         },
         signature,
         query_stats,
@@ -13926,6 +13985,38 @@ impl FlatTree {
         }
         out
     }
+}
+
+/// How one rendered tree differs from an earlier one.
+pub(crate) struct RenderedTreeChanges {
+    /// Nodes on both whose rendered children differ.
+    pub(crate) children_changed: Vec<NodeId>,
+    /// Nodes on the new tree only.
+    pub(crate) added: Vec<NodeId>,
+    /// Nodes on the old tree only.
+    pub(crate) removed: Vec<NodeId>,
+}
+
+pub(crate) fn rendered_tree_changes(old: &FlatTree, new: &FlatTree) -> RenderedTreeChanges {
+    let mut changes = RenderedTreeChanges {
+        children_changed: Vec::new(),
+        added: Vec::new(),
+        removed: Vec::new(),
+    };
+    if std::ptr::eq(old, new) {
+        return changes;
+    }
+    for &id in new.walk.iter() {
+        if !old.contains(id) {
+            changes.added.push(id);
+        } else if old.children(id) != new.children(id) {
+            changes.children_changed.push(id);
+        }
+    }
+    changes
+        .removed
+        .extend(old.walk.iter().copied().filter(|id| !new.contains(*id)));
+    changes
 }
 
 /// The flat tree of `tree`'s current state, built if needed.
