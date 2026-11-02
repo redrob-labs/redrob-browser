@@ -17,7 +17,6 @@ pub const MANIFEST: &str = "bundle-manifest.txt";
 /// window: beside the programs, or in `Contents/Resources` of the macOS app.
 /// The About page links it; `None` when this copy is not a release bundle
 /// (a `cargo run`).
-#[allow(dead_code)] // linked from the About page
 pub fn credits_file() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;

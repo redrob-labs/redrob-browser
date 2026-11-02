@@ -6,6 +6,7 @@
 //! (`OnAcceleratedPaint`: dmabuf, IOSurface, D3D11 shared handle) when the
 //! window's wgpu device can import them, else as BGRA pixels (`OnPaint`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cef::{
@@ -126,6 +127,15 @@ pub type SharedView = Arc<Mutex<View>>;
 
 pub fn lock(v: &SharedView) -> MutexGuard<'_, View> {
     v.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+static IMPORTED: AtomicBool = AtomicBool::new(false);
+static IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// A GPU frame could not be imported into the window's device: tabs opened
+/// from now on ask Chromium for pixels instead.
+pub fn import_failed() -> bool {
+    IMPORT_FAILED.load(Ordering::SeqCst)
 }
 
 /// The window's GPU, when CEF frames can be imported into it.
@@ -267,10 +277,22 @@ wrap_render_handler! {
             let texture = match unsafe { handle.import_texture(&gpu.device, &gpu.queue) } {
                 Ok(t) => t,
                 Err(e) => {
-                    eprintln!("redrob-browser: page frame import failed: {e}");
+                    // New tabs take pixels from here on (cdp.rs).
+                    if !IMPORT_FAILED.swap(true, Ordering::SeqCst) {
+                        eprintln!(
+                            "redrob-browser: page frame import failed ({e}); new tabs use pixel upload (REDROB_OSR=cpu starts that way)"
+                        );
+                    }
                     return;
                 }
             };
+            if !IMPORTED.swap(true, Ordering::SeqCst) {
+                eprintln!(
+                    "redrob-browser: first GPU frame imported, {}x{}",
+                    texture.width(),
+                    texture.height()
+                );
+            }
             let popup = *type_.as_ref() == sys::cef_paint_element_type_t::PET_POPUP;
             {
                 let mut v = lock(&self.view);

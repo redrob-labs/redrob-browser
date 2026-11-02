@@ -34,6 +34,10 @@ wrap_app! {
                 command_line
                     .append_switch_with_value(Some(&CefString::from(name)), Some(&CefString::from(v)))
             };
+            if super::PIPE.load(std::sync::atomic::Ordering::SeqCst) {
+                // DevTools on fds 3 and 4 only (cef/mod.rs), no port.
+                switch("remote-debugging-pipe");
+            }
             switch("noerrdialogs");
             switch("hide-crash-restore-bubble");
             if cfg!(target_os = "macos") {

@@ -42,8 +42,9 @@ and never offers to save a password typed in it.
 ```bash
 redrob-browser                      # open the window
 redrob-browser open https://example.com
-redrob-browser tab list             # id, URL, title, window, agent
-redrob-browser tab open https://example.com
+redrob-browser tab list             # id, URL, title, window, agent, active
+redrob-browser tab open https://example.com   # behind the person's tab
+redrob-browser tab activate <id>    # bring it to the front
 redrob-browser tab read <id>        # outline with [ref=N] handles
 redrob-browser tab click <id> <ref>
 redrob-browser tab type <id> <ref> "text" --submit
@@ -56,7 +57,7 @@ redrob-browser tab close <id>
 ```
 
 `redrob-browser mcp` offers the same on the window's tabs as MCP tools: `window_tab_list`,
-`window_tab_open`, `window_tab_close`, `window_navigate`, `window_snapshot`, `window_click`,
+`window_tab_open`, `window_tab_activate`, `window_tab_close`, `window_navigate`, `window_snapshot`, `window_click`,
 `window_type`, `window_press_key`, `window_scroll`, `window_evaluate`, `window_markdown`,
 `window_screenshot` (Chromium's `Page.captureScreenshot`) and `window_login`. The `browser_*`
 tools keep driving the MCP server's own headless engine.

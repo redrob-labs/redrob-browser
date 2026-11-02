@@ -4,7 +4,7 @@
 //! against each tab's CEF browser, and CEF's handlers (cef/client.rs) send
 //! page changes back as [`Update`]s tagged with the tab. Agents and
 //! `redrob-browser tab ...` reach the same tabs through Chromium's DevTools
-//! server, behind the window's relay ([`relay`]).
+//! protocol, behind the window's relay ([`relay`]).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -451,13 +451,14 @@ impl Engine {
         }
         self.views.insert(tab, view.clone());
         self.opening.insert(tab, (url, Vec::new()));
+        let shared_texture = self.shared_texture && !osr::import_failed();
         let mut client = client::new(TabCtx {
             tab,
             sink: self.sink.clone(),
             view,
-            gpu: self.gpu.clone(),
+            gpu: self.gpu.clone().filter(|_| shared_texture),
         });
-        let info = client::window_info(self.shared_texture);
+        let info = client::window_info(shared_texture);
         let settings = client::browser_settings();
         let mut context = crate::cef::request_context();
         // The page loads its address once the window's scripts are in
@@ -625,13 +626,13 @@ pub async fn relay(
     endpoint_file: std::path::PathBuf,
     window: crate::relay::Window,
 ) -> anyhow::Result<()> {
-    let port = loop {
-        if let Some(p) = crate::cef::devtools_port() {
-            break p;
+    let devtools = loop {
+        if let Some(d) = crate::cef::take_devtools() {
+            break d;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    let relay_url = crate::relay::start(port, window).await?;
+    let relay_url = crate::relay::start(devtools.into(), window).await?;
     crate::write_private(&endpoint_file, &relay_url);
     Ok(())
 }

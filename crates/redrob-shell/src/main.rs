@@ -50,6 +50,8 @@ fn main() -> anyhow::Result<()> {
     if let Some(code) = cef::subprocess() {
         std::process::exit(code);
     }
+    // Before anything opens a file: fds 3 and 4 become Chromium's DevTools pipe.
+    cef::reserve_devtools_pipe();
     startup::init();
     run().inspect_err(|e| startup::fail(e))
 }
@@ -314,7 +316,7 @@ impl Window {
         self.session_dirty = true;
     }
 
-    fn open_tab(&mut self, url: &str, activate: bool) {
+    fn open_tab(&mut self, url: &str, activate: bool) -> TabId {
         let id = self.model.alloc_id();
         let mut tab = Tab::new(id, url);
         // Our own pages are drawn by the window; the Chromium tab waits on about:blank.
@@ -338,6 +340,7 @@ impl Window {
                 self.focus_page = true;
             }
         }
+        id
     }
 
     fn close_tab(&mut self, index: usize) {

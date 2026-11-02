@@ -94,6 +94,12 @@ static QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(
 /// `Opened` is still on its way) wait here, at most this many.
 const MAX_ORPHANS: usize = 64;
 
+struct TargetWaiter {
+    tab: TabId,
+    reply: tokio::sync::oneshot::Sender<Result<String, String>>,
+    since: Instant,
+}
+
 pub struct Browser {
     /// In the order they opened; the first one drawn in the root viewport,
     /// while it lives.
@@ -105,6 +111,11 @@ pub struct Browser {
     command_rx: tokio::sync::mpsc::UnboundedReceiver<(WindowId, cdp::Command)>,
     open_rx: mpsc::Receiver<Option<String>>,
     login_rx: mpsc::Receiver<relay::LoginRequest>,
+    /// Agents' tab requests (relay.rs).
+    tab_rx: mpsc::Receiver<relay::TabRequest>,
+    /// Agent tabs opened and waiting for their target id, which answers
+    /// `Target.createTarget`.
+    target_waiters: Vec<TargetWaiter>,
     places: relay::Places,
     /// The viewport showing each tab, so an engine update for a tab wakes
     /// only the window it is in.
@@ -173,6 +184,26 @@ fn shared_texture(state: &eframe::egui_wgpu::RenderState) -> bool {
     }
 }
 
+/// Which way Chromium's frames reach the window, for the log.
+fn frame_path(state: Option<&eframe::egui_wgpu::RenderState>, accelerated: bool) -> String {
+    let Some(state) = state else {
+        return "pixel upload (no wgpu device)".to_string();
+    };
+    let info = state.adapter.get_info();
+    let gpu = format!("{} on {:?}", info.name, info.backend);
+    if !accelerated {
+        return format!("pixel upload (OnPaint), {gpu}");
+    }
+    let kind = if cfg!(target_os = "linux") {
+        "dmabuf"
+    } else if cfg!(target_os = "macos") {
+        "IOSurface"
+    } else {
+        "D3D11 shared handle"
+    };
+    format!("GPU shared texture (OnAcceleratedPaint, {kind}), {gpu}")
+}
+
 /// The OS window for a browser window: undecorated except on macOS, at
 /// `bounds` when known.
 pub fn window_builder(
@@ -228,6 +259,7 @@ impl Browser {
         let (upd_tx, upd_rx) = mpsc::channel();
         let (login_tx, login_rx) = mpsc::channel();
         let (open_tx, open_rx) = mpsc::channel();
+        let (tab_tx, tab_rx) = mpsc::channel();
         let places: relay::Places = Default::default();
         // Background threads wake the root viewport; the other windows are
         // drawn from its frame.
@@ -235,9 +267,8 @@ impl Browser {
         let relay_window = relay::Window {
             login: login_tx,
             open_window: open_tx,
-            // The Obscura window learns of agent tabs from Target.targetCreated;
-            // the CEF window opens them itself (C1).
-            open_tab: None,
+            // Agent tabs are window tabs: the window opens, shows and closes them.
+            tabs: Some(tab_tx),
             places: places.clone(),
             wake: Arc::new(move || wake_ctx.request_repaint_of(ViewportId::ROOT)),
         };
@@ -325,6 +356,10 @@ impl Browser {
             None => (None, "no wgpu device".to_string()),
         };
         let accelerated = cc.wgpu_render_state.as_ref().is_some_and(shared_texture);
+        eprintln!(
+            "redrob-browser: page frames: {}",
+            frame_path(cc.wgpu_render_state.as_ref(), accelerated)
+        );
         cdp::init(
             sink,
             gpu.as_ref().filter(|_| accelerated).map(|g| g.device()),
@@ -347,6 +382,8 @@ impl Browser {
             command_rx: cmd_rx,
             open_rx,
             login_rx,
+            tab_rx,
+            target_waiters: Vec::new(),
             places,
             last_places: HashMap::new(),
             placement,
@@ -379,8 +416,12 @@ impl Browser {
         }
         let first = &mut browser.windows[0];
         match start.start_url {
-            Some(url) => first.open_tab(&model::to_url(&url), true),
-            None if first.model.tabs.is_empty() => first.open_tab(NEW_TAB, true),
+            Some(url) => {
+                first.open_tab(&model::to_url(&url), true);
+            }
+            None if first.model.tabs.is_empty() => {
+                first.open_tab(NEW_TAB, true);
+            }
             None => {}
         }
         browser.session_sig = browser.session_signature();
@@ -555,12 +596,118 @@ impl Browser {
                 ctx.request_repaint_of(self.windows[i].viewport);
             }
         }
+        while let Ok(req) = self.tab_rx.try_recv() {
+            self.tab_request(ctx, req);
+        }
         while let Ok(url) = self.open_rx.try_recv() {
             let i = self.new_window(None, None);
             let w = &mut self.windows[i];
             match url {
-                Some(u) => w.open_tab(&model::to_url(&u), true),
-                None => w.open_tab(NEW_TAB, true),
+                Some(u) => {
+                    w.open_tab(&model::to_url(&u), true);
+                }
+                None => {
+                    w.open_tab(NEW_TAB, true);
+                }
+            }
+        }
+    }
+
+    /// The window and index of the tab with this DevTools target id.
+    fn find_target(&self, target: &str) -> Option<(usize, usize)> {
+        if target.is_empty() {
+            return None;
+        }
+        self.windows.iter().enumerate().find_map(|(i, w)| {
+            w.model
+                .tabs
+                .iter()
+                .position(|t| t.target_id == target)
+                .map(|j| (i, j))
+        })
+    }
+
+    /// An agent's `Target.createTarget`, `activateTarget` or `closeTarget`.
+    fn tab_request(&mut self, ctx: &egui::Context, req: relay::TabRequest) {
+        match req {
+            relay::TabRequest::Open {
+                url,
+                background,
+                new_window,
+                reply,
+            } => {
+                // The window's own pages (passwords, settings) are the person's.
+                if crate::internal::is_internal(&url) {
+                    let _ = reply.send(Err(format!("{url} is not for agents")));
+                    return;
+                }
+                let i = if new_window {
+                    self.new_window(None, None)
+                } else {
+                    match self.focused_index() {
+                        Some(i) => i,
+                        None => {
+                            let _ = reply.send(Err("the browser has no window".into()));
+                            return;
+                        }
+                    }
+                };
+                let w = &mut self.windows[i];
+                let id = w.open_tab(&url, new_window || !background);
+                if let Some(t) = w.model.tab_mut(id) {
+                    t.agent = true;
+                }
+                w.session_dirty = true;
+                ctx.request_repaint_of(w.viewport);
+                self.target_waiters.push(TargetWaiter {
+                    tab: id,
+                    reply,
+                    since: Instant::now(),
+                });
+            }
+            relay::TabRequest::Activate { target, reply } => {
+                let found = self.find_target(&target);
+                if let Some((i, j)) = found {
+                    let w = &mut self.windows[i];
+                    w.select_tab(j);
+                    ctx.request_repaint_of(w.viewport);
+                }
+                let _ = reply.send(found.is_some());
+            }
+            relay::TabRequest::Close { target, reply } => {
+                let found = self.find_target(&target);
+                if let Some((i, j)) = found {
+                    let w = &mut self.windows[i];
+                    w.close_tab(j);
+                    ctx.request_repaint_of(w.viewport);
+                }
+                let _ = reply.send(found.is_some());
+            }
+        }
+    }
+
+    /// Answer agents whose new tab now has its target id.
+    fn answer_waiters(&mut self) {
+        if self.target_waiters.is_empty() {
+            return;
+        }
+        let ids: HashMap<TabId, String> = self
+            .windows
+            .iter()
+            .flat_map(|w| w.model.tabs.iter().map(|t| (t.id, t.target_id.clone())))
+            .collect();
+        for w in std::mem::take(&mut self.target_waiters) {
+            match ids.get(&w.tab) {
+                Some(t) if !t.is_empty() => {
+                    let _ = w.reply.send(Ok(t.clone()));
+                }
+                None => {
+                    let _ = w.reply.send(Err("the tab closed".into()));
+                }
+                Some(_) if w.since.elapsed() > Duration::from_secs(15) => {
+                    let _ = w.reply.send(Err("Chromium did not open the tab".into()));
+                }
+                Some(_) => self.target_waiters.push(w),
             }
         }
     }
@@ -643,13 +790,14 @@ impl Browser {
     fn publish_places(&mut self) {
         let mut now = HashMap::new();
         for (n, w) in self.windows.iter().enumerate() {
-            for t in &w.model.tabs {
+            for (j, t) in w.model.tabs.iter().enumerate() {
                 if !t.target_id.is_empty() {
                     now.insert(
                         t.target_id.clone(),
                         relay::TabPlace {
                             window: n as u32 + 1,
                             agent: t.agent,
+                            active: j == w.model.active,
                         },
                     );
                 }
@@ -787,6 +935,7 @@ impl Browser {
             ctx.request_repaint_of(ViewportId::ROOT);
         }
         self.publish_places();
+        self.answer_waiters();
         self.save_if_changed(ctx);
     }
 

@@ -25,6 +25,8 @@ pub struct Tab {
     pub window: Option<u64>,
     /// An agent opened it.
     pub agent: bool,
+    /// The front tab of its window.
+    pub active: bool,
 }
 
 /// The relay address of the running window.
@@ -143,16 +145,28 @@ impl Cdp {
                 title: i["title"].as_str().unwrap_or("").to_string(),
                 window: i["redrobWindow"].as_u64(),
                 agent: i["redrobAgent"] == true,
+                active: i["redrobActive"] == true,
             })
             .collect())
     }
 
-    /// Open an agent tab; returns its id.
+    /// Open an agent tab behind the person's current one; returns its id.
     pub async fn open(&mut self, url: &str) -> anyhow::Result<String> {
         let t = self
-            .call(None, "Target.createTarget", json!({ "url": url }))
+            .call(
+                None,
+                "Target.createTarget",
+                json!({ "url": url, "background": true }),
+            )
             .await?;
         Ok(t["targetId"].as_str().unwrap_or("").to_string())
+    }
+
+    /// Bring a tab to the front of its window.
+    pub async fn activate(&mut self, id: &str) -> anyhow::Result<()> {
+        self.call(None, "Target.activateTarget", json!({ "targetId": id }))
+            .await?;
+        Ok(())
     }
 
     pub async fn close(&mut self, id: &str) -> anyhow::Result<()> {
@@ -395,8 +409,9 @@ pub fn tools() -> Vec<Value> {
     let r#ref =
         json!({ "type": "integer", "description": "Element ref from window_snapshot ([ref=N])" });
     vec![
-        json!({ "name": "window_tab_list", "description": "List the tabs of the person's Redrob Browser window: id, URL, title, window number and whether an agent opened it.", "inputSchema": { "type": "object", "properties": {} } }),
-        json!({ "name": "window_tab_open", "description": "Open a new agent tab in the person's browser window and return its id.", "inputSchema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } }),
+        json!({ "name": "window_tab_list", "description": "List the tabs of the person's Redrob Browser window: id, URL, title, window number, whether an agent opened it and whether it is the front tab of its window.", "inputSchema": { "type": "object", "properties": {} } }),
+        json!({ "name": "window_tab_open", "description": "Open a new agent tab in the person's browser window, behind their current tab, and return its id.", "inputSchema": { "type": "object", "properties": { "url": { "type": "string" } }, "required": ["url"] } }),
+        json!({ "name": "window_tab_activate", "description": "Bring a window tab to the front, so the person sees it.", "inputSchema": { "type": "object", "properties": { "id": id }, "required": ["id"] } }),
         json!({ "name": "window_tab_close", "description": "Close a window tab.", "inputSchema": { "type": "object", "properties": { "id": id }, "required": ["id"] } }),
         json!({ "name": "window_navigate", "description": "Navigate a window tab and wait for it to load.", "inputSchema": { "type": "object", "properties": { "id": id, "url": { "type": "string" } }, "required": ["id", "url"] } }),
         json!({ "name": "window_snapshot", "description": "Outline of a window tab's page; elements carry [ref=N] handles for window_click and window_type.", "inputSchema": { "type": "object", "properties": { "id": id }, "required": ["id"] } }),
@@ -440,11 +455,15 @@ async fn run_tool(name: &str, args: &Value) -> anyhow::Result<Value> {
                 .list()
                 .await?
                 .into_iter()
-                .map(|t| json!({ "id": t.id, "url": t.url, "title": t.title, "window": t.window, "agent": t.agent }))
+                .map(|t| json!({ "id": t.id, "url": t.url, "title": t.title, "window": t.window, "agent": t.agent, "active": t.active }))
                 .collect();
             text(serde_json::to_string(&tabs)?)
         }
         "window_tab_open" => text(c.open(&s("url")?).await?),
+        "window_tab_activate" => {
+            c.activate(&s("id")?).await?;
+            text("activated".into())
+        }
         "window_tab_close" => {
             c.close(&s("id")?).await?;
             text("closed".into())
