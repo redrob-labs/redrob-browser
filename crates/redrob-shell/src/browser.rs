@@ -733,7 +733,9 @@ impl Browser {
             self.focused = w.wid;
         }
         self.shared.lend(w);
+        crate::ime::before_pass(&ctx, focused);
         w.frame(ui);
+        crate::ime::after_pass(&ctx, focused);
         self.shared.reclaim(w);
     }
 

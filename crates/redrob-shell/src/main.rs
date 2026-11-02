@@ -18,6 +18,7 @@ mod cdp;
 mod cef;
 mod compositor;
 mod i18n;
+mod ime;
 mod import_chrome;
 mod instance;
 mod internal;
@@ -108,6 +109,8 @@ fn run() -> anyhow::Result<()> {
         (None, None) => std::env::temp_dir().join(format!("redrob-browser-{}", std::process::id())),
     };
     let cache = (!incognito).then(|| root.join("Default"));
+    // Before winit opens its input method (ime.rs).
+    ime::init();
     cef::start(cef::Config { root, cache })?;
     // `redrob-browser tab ...` and agents find the relay here; cdp::relay
     // writes it once the relay is listening. Every window's tabs are on it.
