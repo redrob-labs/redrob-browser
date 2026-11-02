@@ -5,6 +5,34 @@ use crate::style::{Dimension, LengthPercentage, LengthPercentageAuto};
 use crate::style_helpers::TaffyZero;
 use crate::CompactLength;
 
+/// The NaN basis a `calc()` size is resolved with, when its percentage basis is indefinite, in a
+/// layout made for the max-content size (any other layout passes `f32::NAN`). The resolver tells
+/// the two apart by their bits: a cyclic percentage can contribute differently to the max-content
+/// size than to the min-content size and to a layout in a definite available space.
+pub const MAX_CONTENT_INDEFINITE_BASIS_BITS: u32 = 0x7fc0_0001;
+
+#[cfg(feature = "std")]
+std::thread_local! {
+    static MAX_CONTENT_LAYOUT: core::cell::Cell<bool> = const { core::cell::Cell::new(false) };
+}
+
+/// Note whether the layout being computed is made for the max-content inline size; returns the
+/// previous value, to restore when it ends.
+#[cfg(feature = "std")]
+pub(crate) fn set_max_content_layout(value: bool) -> bool {
+    MAX_CONTENT_LAYOUT.with(|cell| cell.replace(value))
+}
+
+/// The basis an indefinite percentage basis is passed to the calc resolver as.
+#[inline]
+fn indefinite_basis() -> f32 {
+    #[cfg(feature = "std")]
+    if MAX_CONTENT_LAYOUT.with(core::cell::Cell::get) {
+        return f32::from_bits(MAX_CONTENT_INDEFINITE_BASIS_BITS);
+    }
+    f32::NAN
+}
+
 /// Trait to encapsulate behaviour where we need to resolve from a
 /// potentially context-dependent size or dimension into
 /// a context-independent size or dimension.
@@ -57,14 +85,19 @@ impl MaybeResolve<Option<f32>, Option<f32>> for LengthPercentageAuto {
 impl MaybeResolve<Option<f32>, Option<f32>> for Dimension {
     /// Converts the given [`Dimension`] into an absolute length
     ///
-    /// Can return `None`
+    /// Can return `None`. A `calc()` size without a basis asks the resolver with a NaN basis:
+    /// a finite answer is the value the size takes while its percentage basis is indefinite
+    /// (a cyclic percentage during intrinsic sizing), NaN means auto.
     fn maybe_resolve(self, context: Option<f32>, calc: impl Fn(*const (), f32) -> f32) -> Option<f32> {
         match self.0.tag() {
             CompactLength::AUTO_TAG => None,
             CompactLength::LENGTH_TAG => Some(self.0.value()),
             CompactLength::PERCENT_TAG => context.map(|dim| dim * self.0.value()),
             #[cfg(feature = "calc")]
-            _ if self.0.is_calc() => context.map(|dim| calc(self.0.calc_value(), dim)),
+            _ if self.0.is_calc() => match context {
+                Some(dim) => Some(calc(self.0.calc_value(), dim)),
+                None => Some(calc(self.0.calc_value(), indefinite_basis())).filter(|value| value.is_finite()),
+            },
             _ => unreachable!(),
         }
     }

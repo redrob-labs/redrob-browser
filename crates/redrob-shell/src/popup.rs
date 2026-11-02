@@ -1,6 +1,7 @@
 //! What the window shows over the page area: menus, the address bar's
-//! suggestions, the page's context menu, tooltips, the link status bubble
-//! and the tab being dragged out.
+//! suggestions, the page's context menu, tooltips and the link status
+//! bubble. A tab dragged out of the strip is a window of its own that
+//! follows the pointer (browser.rs).
 //!
 //! The page is a native child window (docs/CEF.md), so nothing egui paints
 //! in the window can cover it. As in Chrome, each of these is a small window
@@ -47,6 +48,26 @@ pub fn show<R>(
             },
         ),
         None => at,
+    };
+    // A new popup window spends its first two frames off screen: the first
+    // measures what it draws, the second draws it at that size. Shown in
+    // place at once, it came up at a guessed size and grew a frame later
+    // (eframe resizes a window after drawing it), its unpainted part
+    // flashing over the page: the address bar's suggestions on the first
+    // letter typed. Off screen rather than hidden: showing a window on
+    // Windows and macOS gives it the keyboard.
+    let age_id = id.with("age");
+    let pass = ctx.cumulative_pass_nr();
+    let age = match ctx.data(|d| d.get_temp::<(u64, u32)>(age_id)) {
+        Some((last, age)) if last + 1 >= pass => age.saturating_add(u32::from(last != pass)),
+        _ => 0,
+    };
+    ctx.data_mut(|d| d.insert_temp(age_id, (pass, age)));
+    let at = if age < 2 {
+        ctx.request_repaint();
+        egui::pos2(-30000.0, -30000.0)
+    } else {
+        at
     };
     let builder = ViewportBuilder::default()
         .with_title("Redrob Browser")
@@ -291,9 +312,4 @@ pub fn status(ctx: &Context, page: Rect, link: &str) {
             ui.label(egui::RichText::new(text).size(12.0));
         },
     );
-}
-
-/// Something that follows the pointer (a tab dragged out of the strip).
-pub fn ghost(ctx: &Context, id: Id, at: Pos2, add: impl FnOnce(&mut Ui)) {
-    show(ctx, id, to_screen(ctx, at), 260.0, true, add);
 }

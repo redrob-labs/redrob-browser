@@ -8,8 +8,8 @@
       "sha256": "aabe1df4aca6e07bf45c3eee7156dedb194bb01402ef84ad0db2873874bb252f"
     },
     {
-      "file": "crates/redrob-shell/assets/redrob-ui/redrob-browser-icon.svg",
-      "sha256": "017841c0c856d6b6e7eab34c8db6f6f48d53ce20d915732c7eeafbecf43d2c29"
+      "file": "crates/redrob-shell/assets/redrob-ui/redrob-browser-icon-web.svg",
+      "sha256": "1ce12193746cdeb767c058300dc9f3e7756ea187f53a8f2671480e620c91db8e"
     },
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/anonymous.svg",
@@ -18,6 +18,10 @@
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/back.svg",
       "sha256": "3f6e2291a724a3081a78e1f03fd45d05634a6c986b9551883230c5ad3631723b"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/folder.svg",
+      "sha256": "21572f81ab0282017ba3e8a301e6c23903e57670b14631e09c1bc42054f872b2"
     },
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/close.svg",
@@ -86,6 +90,14 @@
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/user.svg",
       "sha256": "a067a8658f47178fbf2e127720433b0ed8e8f731012ab9f7552c5c86fc0efbc3"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/bookOpen.svg",
+      "sha256": "5728d8b953d74d76109ea9d747b7f46d7c7affbfab18dc5515caeaf225104f88"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/plug.svg",
+      "sha256": "a9049afac41660369c12a020c6557f6ddf2e070956ead07b60fb1b7df64dd4c8"
     }
   ],
   "font": {

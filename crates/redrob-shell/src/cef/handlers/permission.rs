@@ -32,6 +32,28 @@ pub enum Kind {
     Fonts,
     Windows,
     Idle,
+    /// Open links of a kind (`registerProtocolHandler`, mailto:).
+    Protocols,
+    /// Edit files and folders (File System Access).
+    Files,
+    /// Take the keyboard (Escape, system keys) in fullscreen.
+    Keyboard,
+    /// Hide and take the mouse pointer.
+    Pointer,
+    /// Reach devices on the local network.
+    LocalNetwork,
+    /// Motion sensors.
+    Sensors,
+    /// Play protected content (identifies the device).
+    ProtectedMedia,
+    /// Virtual or augmented reality, hand tracking.
+    Xr,
+    /// Sign in with an identity provider.
+    Identity,
+    /// Install itself as an app.
+    Install,
+    /// Scroll and zoom a tab it captures.
+    CapturedSurface,
     /// A permission with no name of its own here: the CEF bit.
     Other(u32),
 }
@@ -52,9 +74,57 @@ impl Kind {
             Kind::Fonts => "fonts",
             Kind::Windows => "windows",
             Kind::Idle => "idle",
+            Kind::Protocols => "protocols",
+            Kind::Files => "files",
+            Kind::Keyboard => "keyboard",
+            Kind::Pointer => "pointer",
+            Kind::LocalNetwork => "local_network",
+            Kind::Sensors => "sensors",
+            Kind::ProtectedMedia => "protected_media",
+            Kind::Xr => "xr",
+            Kind::Identity => "identity",
+            Kind::Install => "install",
+            Kind::CapturedSurface => "captured_surface",
             Kind::Other(bit) => return format!("permission.other.{bit}"),
         };
         format!("permission.{name}")
+    }
+
+    /// The kind saved under `key` ([`Kind::key`]).
+    pub fn from_key(key: &str) -> Option<Kind> {
+        const KINDS: [Kind; 24] = [
+            Kind::Camera,
+            Kind::Microphone,
+            Kind::Screen,
+            Kind::Location,
+            Kind::Notifications,
+            Kind::Clipboard,
+            Kind::Midi,
+            Kind::Downloads,
+            Kind::Storage,
+            Kind::Fonts,
+            Kind::Windows,
+            Kind::Idle,
+            Kind::Protocols,
+            Kind::Files,
+            Kind::Keyboard,
+            Kind::Pointer,
+            Kind::LocalNetwork,
+            Kind::Sensors,
+            Kind::ProtectedMedia,
+            Kind::Xr,
+            Kind::Identity,
+            Kind::Install,
+            Kind::CapturedSurface,
+            Kind::Other(0),
+        ];
+        if let Some(bit) = key
+            .strip_prefix("permission.other.")
+            .and_then(|b| b.parse().ok())
+        {
+            return Some(Kind::Other(bit));
+        }
+        KINDS.into_iter().find(|k| k.key() == key)
     }
 
     /// What the prompt says the site wants to do (English; ui.rs translates).
@@ -72,6 +142,17 @@ impl Kind {
             Kind::Fonts => "Use the fonts on your computer",
             Kind::Windows => "Manage windows on all your displays",
             Kind::Idle => "Know when you're actively using this device",
+            Kind::Protocols => "Open a type of link",
+            Kind::Files => "Edit files and folders on your device",
+            Kind::Keyboard => "Use your keyboard",
+            Kind::Pointer => "Use and move your mouse pointer",
+            Kind::LocalNetwork => "Look for and connect to devices on your local network",
+            Kind::Sensors => "Use your motion sensors",
+            Kind::ProtectedMedia => "Play protected content",
+            Kind::Xr => "Use your virtual reality device",
+            Kind::Identity => "Sign you in with an identity service",
+            Kind::Install => "Install itself as an app",
+            Kind::CapturedSurface => "Scroll and zoom the tab you share",
             Kind::Other(_) => "Use another feature of your computer",
         }
     }
@@ -96,6 +177,33 @@ pub fn prompt_kinds(bits: u32) -> Vec<Kind> {
         (P::CEF_PERMISSION_TYPE_LOCAL_FONTS, Kind::Fonts),
         (P::CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, Kind::Windows),
         (P::CEF_PERMISSION_TYPE_IDLE_DETECTION, Kind::Idle),
+        (
+            P::CEF_PERMISSION_TYPE_REGISTER_PROTOCOL_HANDLER,
+            Kind::Protocols,
+        ),
+        (P::CEF_PERMISSION_TYPE_FILE_SYSTEM_ACCESS, Kind::Files),
+        (P::CEF_PERMISSION_TYPE_KEYBOARD_LOCK, Kind::Keyboard),
+        (P::CEF_PERMISSION_TYPE_POINTER_LOCK, Kind::Pointer),
+        (
+            P::CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS_DEPRECATED,
+            Kind::LocalNetwork,
+        ),
+        (P::CEF_PERMISSION_TYPE_LOCAL_NETWORK, Kind::LocalNetwork),
+        (P::CEF_PERMISSION_TYPE_LOOPBACK_NETWORK, Kind::LocalNetwork),
+        (P::CEF_PERMISSION_TYPE_SENSORS, Kind::Sensors),
+        (
+            P::CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER,
+            Kind::ProtectedMedia,
+        ),
+        (P::CEF_PERMISSION_TYPE_AR_SESSION, Kind::Xr),
+        (P::CEF_PERMISSION_TYPE_VR_SESSION, Kind::Xr),
+        (P::CEF_PERMISSION_TYPE_HAND_TRACKING, Kind::Xr),
+        (P::CEF_PERMISSION_TYPE_IDENTITY_PROVIDER, Kind::Identity),
+        (P::CEF_PERMISSION_TYPE_WEB_APP_INSTALLATION, Kind::Install),
+        (
+            P::CEF_PERMISSION_TYPE_CAPTURED_SURFACE_CONTROL,
+            Kind::CapturedSurface,
+        ),
     ];
     let mut out = Vec::new();
     for bit in (0..32).map(|i| 1u32 << i).filter(|b| bits & b != 0) {
@@ -126,6 +234,14 @@ pub fn media_kinds(bits: u32) -> Vec<Kind> {
         out.push(Kind::Screen);
     }
     out
+}
+
+/// Whether a media request shares a screen, window or tab
+/// (`getDisplayMedia`) rather than a camera or microphone.
+pub fn is_display_capture(bits: u32) -> bool {
+    let desktop = M::CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE as u32
+        | M::CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE as u32;
+    bits & desktop != 0
 }
 
 /// The media bits of `requested` that `allowed` kinds cover.
@@ -286,6 +402,11 @@ wrap_permission_handler! {
             let (Some(browser), Some(callback)) = (browser, callback) else {
                 return 0;
             };
+            // Sharing a screen, window or tab: Chrome's own picker, which
+            // asks which one (the window cannot list them).
+            if is_display_capture(requested_permissions) && crate::cef::native::chrome_style() {
+                return 0;
+            }
             let Some(origin) = super::site_of(&super::arg(requesting_origin)) else {
                 return 0;
             };
@@ -402,7 +523,9 @@ mod tests {
             | P::CEF_PERMISSION_TYPE_MIC_STREAM as u32;
         assert_eq!(prompt_kinds(cam), vec![Kind::Camera, Kind::Microphone]);
         let ar = P::CEF_PERMISSION_TYPE_AR_SESSION as u32;
-        assert_eq!(prompt_kinds(ar), vec![Kind::Other(ar)]);
+        assert_eq!(prompt_kinds(ar), vec![Kind::Xr]);
+        let quota = P::CEF_PERMISSION_TYPE_DISK_QUOTA as u32;
+        assert_eq!(prompt_kinds(quota), vec![Kind::Other(quota)]);
     }
 
     #[test]

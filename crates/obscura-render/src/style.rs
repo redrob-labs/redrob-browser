@@ -806,9 +806,17 @@ pub(crate) fn apply_declarations_with_locked_color_scheme(style: &mut LayoutStyl
         let Some((name, value)) = decl.split_once(':') else {
             continue;
         };
-        let name = name.trim().to_ascii_lowercase();
+        // Sheets are lowercased already: copy only a name that is not.
+        let name = name.trim();
+        let lower;
+        let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            lower = name.to_ascii_lowercase();
+            lower.as_str()
+        } else {
+            name
+        };
         if name != "color-scheme" {
-            apply_value(style, &name, value.trim());
+            apply_value(style, name, value.trim());
         }
     }
 }
@@ -1258,6 +1266,18 @@ fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
             .cssom
             .ua_overrides
             .retain(|(property, _)| !declaration_sets(name, property));
+    }
+    // Only the properties below read the value.
+    if !matches!(
+        name,
+        "text-align" | "vertical-align" | "font-family" | "font" | "font-size"
+    ) {
+        match name {
+            "flex-direction" | "flex-flow" => style.cssom.flex_direction = style.flex_direction,
+            "align-items" | "place-items" => style.cssom.align_items = style.align_items,
+            _ => {}
+        }
+        return;
     }
     let lower = value.trim().to_ascii_lowercase();
     match name {
@@ -5095,12 +5115,20 @@ pub(crate) struct GridCalcExpression {
     context_initialized: std::sync::atomic::AtomicBool,
     /// Insets may resolve negative; track sizes clamp at zero.
     signed: bool,
+    /// A plain percentage (`expression` is then empty).
+    percent: Option<f32>,
+    /// The value while the percentage basis is indefinite (asked with a NaN
+    /// basis), as bits, in a layout for the max-content size and in any
+    /// other; NaN: auto. See `cyclic_inline_size`.
+    standin: [u32; 2],
 }
 
 impl PartialEq for GridCalcExpression {
     fn eq(&self, other: &Self) -> bool {
         use std::sync::atomic::Ordering::Relaxed;
-        self.expression == other.expression
+        self.percent.map(f32::to_bits) == other.percent.map(f32::to_bits)
+            && self.standin == other.standin
+            && self.expression == other.expression
             && self.em_px.load(Relaxed) == other.em_px.load(Relaxed)
             && self.rem_px.load(Relaxed) == other.rem_px.load(Relaxed)
             && self.vw.load(Relaxed) == other.vw.load(Relaxed)
@@ -5177,7 +5205,57 @@ impl GridCalcExpression {
             vh: std::sync::atomic::AtomicU32::new(0.0f32.to_bits()),
             context_initialized: std::sync::atomic::AtomicBool::new(false),
             signed: false,
+            percent: None,
+            standin: [f32::NAN.to_bits(); 2],
         })
+    }
+
+    /// The handle of a cyclic percentage inline size (`percent`, or
+    /// `expression` in the given font and viewport context): it resolves
+    /// against its basis when the basis is definite, and while it is not (a
+    /// flex item measured for its intrinsic size) is `standin.0` in a layout
+    /// for the max-content size and `standin.1` in any other (NaN: auto). Interned by value for the life of the process, so a
+    /// handle names its value: equal values share one pointer and a pointer
+    /// never comes to name another value (Taffy hashes handles into its
+    /// cache keys).
+    pub(crate) fn cyclic_inline_size(
+        percent: Option<f32>,
+        expression: &str,
+        context: (f32, f32, f32, f32),
+        standin: (f32, f32),
+    ) -> std::sync::Arc<Self> {
+        type Key = (Option<u32>, String, [u32; 4], [u32; 2]);
+        static INTERNED: std::sync::OnceLock<
+            std::sync::Mutex<crate::HashMap<Key, std::sync::Arc<GridCalcExpression>>>,
+        > = std::sync::OnceLock::new();
+        let (em, rem, vw, vh) = context;
+        let key: Key = (
+            percent.map(f32::to_bits),
+            expression.to_owned(),
+            [em.to_bits(), rem.to_bits(), vw.to_bits(), vh.to_bits()],
+            [standin.0.to_bits(), standin.1.to_bits()],
+        );
+        let mut interned = INTERNED
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        interned
+            .entry(key)
+            .or_insert_with(|| {
+                use std::sync::atomic::{AtomicBool, AtomicU32};
+                std::sync::Arc::new(Self {
+                    expression: expression.to_owned(),
+                    em_px: AtomicU32::new(em.to_bits()),
+                    rem_px: AtomicU32::new(rem.to_bits()),
+                    vw: AtomicU32::new(vw.to_bits()),
+                    vh: AtomicU32::new(vh.to_bits()),
+                    context_initialized: AtomicBool::new(true),
+                    signed: false,
+                    percent,
+                    standin: [standin.0.to_bits(), standin.1.to_bits()],
+                })
+            })
+            .clone()
     }
 
     /// A calc() inset whose percentages resolve against the containing
@@ -5249,6 +5327,14 @@ pub(crate) fn resolve_grid_calc(value: *const (), basis: f32) -> f32 {
     // SAFETY: upheld by `new_taffy_tree` and the Arc ownership documented on
     // `LayoutStyle::grid_calc_expressions`.
     let calc = unsafe { &*value.cast::<GridCalcExpression>() };
+    if basis.is_nan() {
+        // Asked without a basis (see `GridCalcExpression::cyclic_inline_size`).
+        let max_content = basis.to_bits() == taffy::MAX_CONTENT_INDEFINITE_BASIS_BITS;
+        return f32::from_bits(calc.standin[usize::from(!max_content)]);
+    }
+    if let Some(percent) = calc.percent {
+        return (basis * percent).max(0.0);
+    }
     use std::sync::atomic::Ordering;
     resolve_contextual_length(
         &calc.expression,

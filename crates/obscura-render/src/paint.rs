@@ -1346,6 +1346,10 @@ pub struct PreparedRender {
     /// Changes whenever layout, styles or selected images change, so paint
     /// damage can reuse what it measured of an unchanged frame.
     paint_epoch: u64,
+    /// Per-node results behind `viewport_fixed`, `scroll_tree` and `sticky`,
+    /// for the next retained layout (see `dom::derived`). `None` once those
+    /// were recomputed some other way.
+    derived_memo: Option<crate::dom::derived::DerivedMemo>,
 }
 
 fn next_paint_epoch() -> u64 {
@@ -1446,6 +1450,7 @@ impl PreparedRender {
             self.content_size = derived.content_size;
             self.sticky = derived.sticky;
             self.scroll_tree = derived.scroll_tree;
+            self.derived_memo = None;
         }
         self.animation_sample = sample;
         self.has_active_waapi_animations = timeline.has_active_waapi(sample.time);
@@ -4233,19 +4238,71 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
         animation_mutations.as_slice()
     };
     crate::prof::stop(crate::prof::RETAIN_CHECKS, _prof);
+    let previous_rendered = previous.layout.rendered_tree.clone();
+    // What needed the emoji font, and the text the mutations wrote that does:
+    // a changed text node, or any text inserted.
+    let mut written = Vec::new();
+    let known = mutations.iter().all(|mutation| {
+        use crate::dom::{RetainedStyleMutation as M, TreeStyleMutation as T};
+        match mutation {
+            M::Tree(T::Text { node, .. }) => {
+                written.push(*node);
+                true
+            }
+            M::Tree(T::Insert { node, .. }) => {
+                written.push(*node);
+                written.extend(tree.descendants(*node));
+                true
+            }
+            M::Tree(T::Remove { .. })
+            | M::Attribute(_)
+            | M::Animation { .. }
+            | M::WaapiAnimation { .. } => true,
+            M::Resource | M::Stylesheet => false,
+        }
+    });
+    written.retain(|id| crate::dom::text_node_may_need_emoji_font(tree, *id));
+    let emoji = known.then(|| crate::dom::EmojiNodes {
+        texts: std::mem::take(&mut previous.layout.emoji.texts),
+        generated: std::mem::take(&mut previous.layout.emoji.generated),
+        written,
+    });
+    let previous_derived =
+        previous
+            .derived_memo
+            .take()
+            .map(|memo| crate::dom::derived::PreviousDerived {
+                memo,
+                viewport_fixed: std::mem::take(&mut previous.viewport_fixed),
+                scroll_tree: std::mem::take(&mut previous.scroll_tree),
+                sticky: std::mem::take(&mut previous.sticky),
+            });
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
         signatures: std::mem::take(&mut previous.layout.cascade_signatures),
+        share: std::mem::take(&mut previous.layout.cascade_share),
         definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
         previous_rendered: previous.layout.rendered_tree.take(),
         geometry: Some(crate::dom::RetainedGeometry {
+            container_nodes: previous.layout.container_nodes.take(),
             rects: std::mem::take(&mut previous.layout.rects),
             clip_rects: std::mem::take(&mut previous.layout.clip_rects),
             translates: std::mem::take(&mut previous.layout.translates),
             transforms: std::mem::take(&mut previous.layout.transforms),
             projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
             clip_inputs: previous.layout.clip_inputs,
+            clip_styles: std::mem::take(&mut previous.layout.clip_styles),
+            clip_recheck: previous.layout.clip_recheck.take(),
+            previous_rendered,
+            derived: previous_derived,
+            counters_used: previous.layout.counters_used,
+            emoji,
+            layout_tree: previous.layout.layout_tree.take().map(|mut layout_tree| {
+                layout_tree.store = Some(std::mem::take(&mut previous.layout.ifc));
+                layout_tree.engine = Some(std::mem::take(&mut previous.layout.text_engine));
+                layout_tree
+            }),
         }),
     };
     drop(previous);
@@ -4266,7 +4323,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
 
 fn retained_animation_restyle_mutations(
     tree: &DomTree,
-    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     animation_timeline: &crate::AnimationTimelineState,
 ) -> Vec<crate::dom::RetainedStyleMutation> {
     let connected = |node: obscura_dom::tree::NodeId| {
@@ -4561,7 +4618,29 @@ fn prepare_dom_internal_unverified(
             Some(top.map_or(y, |top| top.min(y)))
         });
     let layout_done = std::time::Instant::now();
-    let derived = laid.derived_layout_state(tree, viewport);
+    let seed = laid.derived_seed.take();
+    let (derived, derived_memo) = laid.derived_layout_state_retained(tree, viewport, seed);
+    if crate::dom::layout_verify_enabled() {
+        // The per-node computation must equal the whole-document one.
+        let whole = laid.derived_layout_state(tree, viewport);
+        let difference = if derived.content_size != whole.content_size {
+            Some(format!(
+                "content_size {:?} vs {:?}",
+                derived.content_size, whole.content_size
+            ))
+        } else if derived.viewport_fixed != whole.viewport_fixed {
+            Some("viewport_fixed differs".into())
+        } else {
+            crate::dom::sticky_layout_difference(&derived.sticky, &whole.sticky).or_else(|| {
+                crate::dom::scroll_tree_difference(&derived.scroll_tree, &whole.scroll_tree)
+            })
+        };
+        if let Some(difference) = difference {
+            panic!(
+                "OBSCURA_LAYOUT_VERIFY (derived): retained derived geometry differs: {difference}"
+            );
+        }
+    }
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
         eprintln!(
             "[timing] prepare images={:?} fonts={:?} svg={:?}",
@@ -4609,6 +4688,7 @@ fn prepare_dom_internal_unverified(
         layout: laid,
         query_seed,
         paint_epoch: next_paint_epoch(),
+        derived_memo: Some(derived_memo),
     })
 }
 
@@ -12653,7 +12733,7 @@ fn paint_in_flow_generated_box(
 fn paint_positioned_pseudo(
     ifc: &mut crate::ifc::IfcStore,
     tree: &DomTree,
-    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     owner: obscura_dom::tree::NodeId,
     pixmap: &mut Pixmap,
     style: &crate::LayoutStyle,
@@ -13347,7 +13427,7 @@ fn collect_image_intrinsic_of(
 /// entry was added and layout therefore needs one resource-aware retry.
 fn collect_content_image_intrinsics(
     tree: &DomTree,
-    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
     out: &mut crate::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
@@ -13358,16 +13438,27 @@ fn collect_content_image_intrinsics(
 ) -> bool {
     let mut changed = false;
     let mut active = HashSet::default();
-    for (&nid, style) in styles {
-        if !tree
-            .with_node(nid, |node| {
-                node.as_element()
-                    .is_some_and(|name| name.local.as_ref() == "img")
+    // Without shadow trees every `<img>` with a style is on the rendered
+    // tree, which knows them.
+    let images: Vec<obscura_dom::tree::NodeId> = if tree.has_shadow_roots() {
+        styles
+            .keys()
+            .copied()
+            .filter(|&nid| {
+                tree.with_node(nid, |node| {
+                    node.as_element()
+                        .is_some_and(|name| name.local.as_ref() == "img")
+                })
+                .unwrap_or(false)
             })
-            .unwrap_or(false)
-        {
+            .collect()
+    } else {
+        crate::dom::rendered_nodes_of_kind(tree, crate::dom::ElementKind::IMG)
+    };
+    for nid in images {
+        let Some(style) = styles.get(&nid) else {
             continue;
-        }
+        };
         let Some(url) = style.content_image.as_deref() else {
             continue;
         };
@@ -14658,7 +14749,7 @@ fn serialize_svg(tree: &DomTree, root: obscura_dom::tree::NodeId) -> String {
 fn serialize_svg_styled(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     custom_properties: &crate::HashMap<
         obscura_dom::tree::NodeId,
         std::rc::Rc<crate::HashMap<String, String>>,
@@ -14702,7 +14793,7 @@ fn serialize_svg_node(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -14731,7 +14822,7 @@ fn serialize_svg_node_impl(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -15228,7 +15319,7 @@ fn inline_svg_image_hrefs(
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -24272,7 +24363,8 @@ mod tests {
             "the timeline accessor must return the exact deduplicated target set"
         );
 
-        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::default(), &timeline);
+        let mutations =
+            retained_animation_restyle_mutations(&tree, &crate::StyleTable::default(), &timeline);
         assert_eq!(
             mutations,
             vec![crate::dom::RetainedStyleMutation::WaapiAnimation { node: connected }],

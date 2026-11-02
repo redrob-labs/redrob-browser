@@ -9,7 +9,7 @@ use slotmap::{DefaultKey, SlotMap};
 use crate::block::BlockContext;
 #[cfg(all(feature = "block_layout", feature = "float_layout"))]
 use crate::compute::FloatBand;
-use crate::geometry::Size;
+use crate::geometry::{Point, Size};
 use crate::style::{AvailableSpace, Display, Style};
 use crate::sys::DefaultCheapStr;
 use crate::tree::{
@@ -85,14 +85,22 @@ pub(crate) struct TaffyConfig {
     /// Whether cache entries carry the subtree key they were computed under (see
     /// [`TaffyTree::enable_subtree_keys`])
     pub(crate) subtree_keys: bool,
+    /// Whether a final layout may be served from a node's earlier final results, deferring
+    /// the layout of its children (see [`TaffyTree::enable_deferred_performs`])
+    pub(crate) defer_performs: bool,
     /// Resolves an opaque `calc()` handle against its percentage basis.
     #[cfg(feature = "calc")]
     pub(crate) calc_resolver: fn(*const (), f32) -> f32,
 }
 
 #[cfg(feature = "calc")]
-fn default_calc_resolver(_value: *const (), _basis: f32) -> f32 {
-    0.0
+fn default_calc_resolver(_value: *const (), basis: f32) -> f32 {
+    // A NaN basis asks for the value without a basis: auto.
+    if basis.is_nan() {
+        f32::NAN
+    } else {
+        0.0
+    }
 }
 
 impl Default for TaffyConfig {
@@ -100,6 +108,7 @@ impl Default for TaffyConfig {
         Self {
             use_rounding: true,
             subtree_keys: false,
+            defer_performs: false,
             #[cfg(feature = "calc")]
             calc_resolver: default_calc_resolver,
         }
@@ -166,6 +175,34 @@ struct NodeData {
     /// The node or a descendant changed since `subtree_key` was computed. A stale node's
     /// ancestors are all stale.
     pub(crate) key_stale: bool,
+    /// The node's final layout was served from its earlier final results for this input, so
+    /// its children do not hold the layouts that layout placed (see
+    /// [`TaffyTree::enable_deferred_performs`])
+    /// Its inputs are `last_perform`.
+    pub(crate) deferred: bool,
+    /// The inputs of the node's latest final layout request, and whether it was inside a block
+    /// formatting context; `None` when it was laid out beside floats (it cannot be laid out
+    /// again from these alone)
+    pub(crate) last_perform: Option<(LayoutInput, bool)>,
+    /// The `TaffyTree::place_epoch` of the last placement that placed this node
+    pub(crate) placed_in: u32,
+    /// What the embedder noted for the subtree under the subtree key it had then (see
+    /// [`TaffyTree::set_subtree_memo`])
+    pub(crate) subtree_memo: Option<(u64, bool)>,
+    /// The epoch of the journal that holds the node's style from before its first change in it
+    pub(crate) journaled_style: u32,
+    /// The epoch of the journal that holds the node's child list from before its first change
+    pub(crate) journaled_children: u32,
+    /// The `TaffyTree::layout_seq` when the node's final layout (or unrounded box, or grid
+    /// info, or child list) last changed (see [`TaffyTree::layout_changed_since`])
+    pub(crate) layout_changed_at: u64,
+    /// The latest `layout_changed_at` in the node's subtree
+    pub(crate) subtree_layout_changed_at: u64,
+    /// The bits of the unrounded location and size `final_layout` was rounded from
+    pub(crate) rounded_from: [u32; 4],
+    /// The node an absolutely positioned node takes its static position from (see
+    /// [`TaffyTree::set_static_probe`])
+    pub(crate) static_probe: Option<NodeId>,
 }
 
 impl NodeData {
@@ -193,6 +230,16 @@ impl NodeData {
             content_key: 0,
             subtree_key: 0,
             key_stale: true,
+            deferred: false,
+            last_perform: None,
+            placed_in: 0,
+            subtree_memo: None,
+            journaled_style: 0,
+            journaled_children: 0,
+            layout_changed_at: 0,
+            subtree_layout_changed_at: 0,
+            rounded_from: [u32::MAX; 4],
+            static_probe: None,
         }
     }
 
@@ -233,6 +280,49 @@ pub struct TaffyTree<NodeContext = ()> {
     /// Lays out nodes marked as inline formatting context roots
     #[cfg(feature = "block_layout")]
     inline_layout: Option<InlineLayoutFn<NodeContext>>,
+
+    /// Nodes whose children's layouts were deferred (some may have been placed since)
+    deferred_nodes: Vec<NodeId>,
+    /// Counts the calls that place every deferred node (see `NodeData::placed_in`)
+    place_epoch: u32,
+    /// Counts the journals begun (see `Journal::epoch`)
+    journal_epoch: u32,
+    /// The node a placement lays out again: it must not be served from earlier results
+    force_perform: Option<NodeId>,
+    /// The node the latest `compute_layout_with_measure` laid out as a root: its own layout is
+    /// current whatever its ancestors wait for
+    last_root: Option<NodeId>,
+    /// The nodes created since [`TaffyTree::start_creation_log`], in creation order
+    created: Option<Vec<NodeId>>,
+    /// The changes made since [`TaffyTree::begin_journal`], oldest first
+    journal: Option<Journal>,
+    /// Counts the reads of changed layouts (see [`TaffyTree::layout_changed_since`])
+    layout_seq: u64,
+    /// The nodes removed since [`TaffyTree::take_removed`] was last called
+    removed: Vec<NodeId>,
+}
+
+/// One change recorded by the journal (see [`TaffyTree::begin_journal`])
+#[derive(Debug, Clone)]
+enum JournalOp {
+    /// A node was created
+    Created(NodeId),
+    /// A node's style was replaced; the old style and its style key, when computed
+    Style(NodeId, Style, Option<u64>),
+    /// A node's child list was changed; the old list
+    Children(NodeId, Vec<NodeId>),
+    /// A node's inline-root flag was changed; the old flag
+    InlineRoot(NodeId, bool),
+}
+
+/// The changes a [`TaffyTree`] recorded since [`TaffyTree::begin_journal`]
+#[derive(Debug, Clone, Default)]
+struct Journal {
+    /// Tells this journal's notes on nodes (`NodeData::journaled_style`) from earlier ones'
+    epoch: u32,
+    ops: Vec<JournalOp>,
+    /// A change the journal cannot undo was made (a node was removed or its context changed)
+    broken: bool,
 }
 
 /// The tree an [`InlineLayoutFn`] lays out an inline formatting context in. It gives access to the
@@ -395,6 +485,15 @@ where
             debug_log!("HIDDEN");
             return compute_hidden_layout(self, node_id);
         }
+        // A block formatting context without floats is one a layout cannot read anything from:
+        // placing the children later in a fresh one lays them out the same.
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        let (deferrable_context, in_block_context) =
+            (block_ctx.as_ref().is_none_or(|ctx| !ctx.has_floats()), block_ctx.is_some());
+        #[cfg(all(feature = "block_layout", not(feature = "float_layout")))]
+        let (deferrable_context, in_block_context) = (true, block_ctx.is_some());
+        #[cfg(not(feature = "block_layout"))]
+        let (deferrable_context, in_block_context) = (true, false);
 
         // We run the following wrapped in "compute_cached_layout", which will check the cache for an entry matching the node and inputs and:
         //   - Return that entry if exists
@@ -448,10 +547,51 @@ where
         let (bypass_cache, float_key) = bypass_cache;
         #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
         let bypass_cache = false;
+        #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
+        let float_key = 0u64;
 
-        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+        if inputs.run_mode == RunMode::PerformLayout {
+            self.taffy.nodes[node_id.into()].last_perform =
+                (!bypass_cache && float_key == 0 && deferrable_context).then_some((inputs, in_block_context));
+        }
+
+        // A final layout this node made before, for these inputs and this subtree, whose
+        // children have been laid out differently since: serve its output and place the
+        // children only when something reads them (`TaffyTree::place_deferred`).
+        if inputs.run_mode == RunMode::PerformLayout && !bypass_cache {
+            let node = &self.taffy.nodes[node_id.into()];
+            let tag = self.taffy.entry_tag(node, float_key);
+            if node.cache.has_final_layout(&inputs, tag) {
+                if node.deferred {
+                    self.taffy.nodes[node_id.into()].deferred = false;
+                }
+            } else if self.taffy.config.defer_performs
+                && deferrable_context
+                && float_key == 0
+                && self.taffy.force_perform != Some(node_id)
+            {
+                if let Some(output) = node.cache.get_final_history(&inputs, tag) {
+                    let data = &mut self.taffy.nodes[node_id.into()];
+                    if !data.deferred {
+                        self.taffy.deferred_nodes.push(node_id);
+                    }
+                    data.deferred = true;
+                    data.round_subtree_stale = true;
+                    return output;
+                }
+            }
+        }
+
+        let compute_algorithm = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
+            #[cfg(feature = "std")]
+            {
+                let slot = usize::from(inputs.run_mode == RunMode::PerformLayout);
+                ALGORITHM_RUNS[slot].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                ALGORITHM_CHILDREN[slot]
+                    .fetch_add(tree.child_count(node_id) as u64, core::sync::atomic::Ordering::Relaxed);
+            }
 
             #[cfg(feature = "block_layout")]
             if display_mode != Display::None && tree.taffy.nodes[node_id.into()].is_inline_root {
@@ -494,6 +634,20 @@ where
             }
         };
 
+        // A cyclic percentage resolves by what the layout is made for (see
+        // `MAX_CONTENT_INDEFINITE_BASIS_BITS`).
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+            #[cfg(feature = "std")]
+            let previous = crate::util::set_max_content_layout(matches!(
+                inputs.available_space.width,
+                crate::style::AvailableSpace::MaxContent
+            ));
+            let output = compute_algorithm(tree, node_id, inputs);
+            #[cfg(feature = "std")]
+            crate::util::set_max_content_layout(previous);
+            output
+        };
+
         // The bands follow from the float context, so a layout under them is cached with it.
         // The result is stored under the float key of this request, whatever a nested layout did.
         #[cfg(all(feature = "block_layout", feature = "float_layout"))]
@@ -503,10 +657,25 @@ where
             output
         };
 
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+            if inputs.run_mode != RunMode::PerformLayout {
+                return compute(tree, node_id, inputs);
+            }
+            tree.taffy.nodes[node_id.into()].deferred = false;
+            let output = compute(tree, node_id, inputs);
+            if !bypass_cache && tree.taffy.config.defer_performs {
+                let children = tree.taffy.snapshot_children(node_id);
+                tree.taffy.nodes[node_id.into()].cache.set_pending_children(children);
+            }
+            output
+        };
+
         #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
         if !float_bands.is_empty() {
             let previous = LEAF_FLOAT_BANDS.with(|bands| bands.replace(float_bands));
             let output = if bypass_cache {
+                #[cfg(feature = "std")]
+                BYPASS_RUNS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 compute(self, node_id, inputs)
             } else {
                 compute_cached_layout(self, node_id, inputs, compute)
@@ -516,6 +685,8 @@ where
         }
 
         if bypass_cache {
+            #[cfg(feature = "std")]
+            BYPASS_RUNS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             return compute(self, node_id, inputs);
         }
 
@@ -572,6 +743,33 @@ where
             None
         }
     }
+}
+
+/// How many times a layout algorithm ran (measure, perform), and over how many children
+#[cfg(feature = "std")]
+static ALGORITHM_RUNS: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+#[cfg(feature = "std")]
+static ALGORITHM_CHILDREN: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+/// How many of those runs bypassed the cache (float-sensitive boxes beside floats)
+#[cfg(feature = "std")]
+static BYPASS_RUNS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// How many times caches were emptied up to the root (`TaffyTree::mark_dirty`)
+#[cfg(feature = "std")]
+static DIRTY_MARKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Diagnostics: how many times a layout algorithm ran on a node since the process started, as
+/// (measure runs, perform runs, runs that bypassed the cache, `mark_dirty` calls)
+#[cfg(feature = "std")]
+pub fn algorithm_runs() -> (u64, u64, u64, u64) {
+    use core::sync::atomic::Ordering::Relaxed;
+    (
+        ALGORITHM_RUNS[0].load(Relaxed),
+        ALGORITHM_RUNS[1].load(Relaxed),
+        BYPASS_RUNS.load(Relaxed),
+        DIRTY_MARKS.load(Relaxed),
+    )
 }
 
 #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
@@ -656,6 +854,47 @@ where
             #[cfg(feature = "block_layout")]
             None,
         )
+    }
+
+    fn static_probe_offset(&mut self, child: NodeId, container: NodeId) -> Option<Point<f32>> {
+        let probe = self.taffy.nodes[child.into()].static_probe?;
+        if !self.taffy.nodes.contains_key(probe.into()) {
+            return None;
+        }
+        // The probe's ancestors below the container, nearest first.
+        let mut chain = Vec::new();
+        let mut current = self.taffy.parents[probe.into()];
+        loop {
+            let id = current?;
+            if id == container {
+                break;
+            }
+            chain.push(id);
+            current = self.taffy.parents[id.into()];
+        }
+        // Each was laid out by this layout before the container places its absolute children,
+        // but one served from an earlier result has not placed its children yet.
+        // Placing lays out through another view of the tree: erase the measure function's type
+        // so that view's type is not one level deeper than this one's.
+        let mut measure: &mut dyn FnMut(
+            Size<Option<f32>>,
+            Size<AvailableSpace>,
+            NodeId,
+            Option<&mut NodeContext>,
+            &Style,
+        ) -> Size<f32> = &mut self.measure_function;
+        for &id in chain.iter().rev() {
+            if self.taffy.nodes[id.into()].deferred {
+                self.taffy.place_one(id, &mut measure);
+            }
+        }
+        let mut offset = self.taffy.nodes[probe.into()].unrounded_layout.location;
+        for &id in &chain {
+            let location = self.taffy.nodes[id.into()].unrounded_layout.location;
+            offset.x += location.x;
+            offset.y += location.y;
+        }
+        Some(offset)
     }
 }
 
@@ -778,7 +1017,15 @@ where
     #[inline(always)]
     #[cfg(feature = "detailed_layout_info")]
     fn set_detailed_grid_info(&mut self, node_id: NodeId, detailed_grid_info: DetailedGridInfo) {
-        self.taffy.nodes[node_id.into()].detailed_layout_info = DetailedLayoutInfo::Grid(Box::new(detailed_grid_info));
+        let data = &mut self.taffy.nodes[node_id.into()];
+        let changed = match &data.detailed_layout_info {
+            DetailedLayoutInfo::Grid(info) => **info != detailed_grid_info,
+            _ => true,
+        };
+        if changed {
+            data.detailed_layout_info = DetailedLayoutInfo::Grid(Box::new(detailed_grid_info));
+            self.taffy.mark_layout_changed(node_id);
+        }
     }
 }
 
@@ -811,7 +1058,24 @@ where
 
     #[inline(always)]
     fn set_final_layout(&mut self, node_id: NodeId, layout: &Layout) {
-        self.taffy.nodes[node_id.into()].final_layout = *layout;
+        let data = &mut self.taffy.nodes[node_id.into()];
+        let unrounded = &data.unrounded_layout;
+        let from = [
+            unrounded.location.x.to_bits(),
+            unrounded.location.y.to_bits(),
+            unrounded.size.width.to_bits(),
+            unrounded.size.height.to_bits(),
+        ];
+        if data.final_layout != *layout || data.rounded_from != from {
+            data.final_layout = *layout;
+            data.rounded_from = from;
+            self.taffy.mark_layout_changed(node_id);
+        }
+    }
+
+    #[inline(always)]
+    fn is_deferred(&self, node_id: NodeId) -> bool {
+        self.taffy.nodes[node_id.into()].deferred
     }
 }
 
@@ -838,7 +1102,127 @@ impl<NodeContext> TaffyTree<NodeContext> {
             config: TaffyConfig::default(),
             #[cfg(feature = "block_layout")]
             inline_layout: None,
+            deferred_nodes: Vec::new(),
+            place_epoch: 0,
+            journal_epoch: 0,
+            force_perform: None,
+            last_root: None,
+            created: None,
+            journal: None,
+            layout_seq: 1,
+            removed: Vec::new(),
         }
+    }
+
+    /// Record every node created from now on (see [`Self::created_nodes`])
+    pub fn start_creation_log(&mut self) {
+        self.created = Some(Vec::new());
+    }
+
+    /// Stop recording created nodes
+    pub fn stop_creation_log(&mut self) {
+        self.created = None;
+    }
+
+    /// The nodes created since [`Self::start_creation_log`], in creation order
+    pub fn created_nodes(&self) -> &[NodeId] {
+        self.created.as_deref().unwrap_or(&[])
+    }
+
+    #[inline]
+    fn note_created(&mut self, node: NodeId) {
+        let data = &mut self.nodes[node.into()];
+        data.layout_changed_at = self.layout_seq;
+        data.subtree_layout_changed_at = self.layout_seq;
+        if let Some(created) = self.created.as_mut() {
+            created.push(node);
+        }
+        if let Some(journal) = self.journal.as_mut() {
+            journal.ops.push(JournalOp::Created(node));
+        }
+    }
+
+    #[inline]
+    fn journal_children(&mut self, parent: NodeId) {
+        // Only the list from before the first change matters: the rollback restores every
+        // list to it, and the parent links of every node in the lists it restores.
+        if let Some(journal) = self.journal.as_mut() {
+            let data = &mut self.nodes[parent.into()];
+            if data.journaled_children != journal.epoch {
+                data.journaled_children = journal.epoch;
+                let old = self.children[parent.into()].iter().copied().collect();
+                journal.ops.push(JournalOp::Children(parent, old));
+            }
+        }
+    }
+
+    /// Record every change to styles and child lists, and every node created, from now on, so
+    /// [`Self::rollback_journal`] can return the tree to its current state. Removing a node or
+    /// changing a node's context cannot be undone: the journal is then broken.
+    pub fn begin_journal(&mut self) {
+        self.journal_epoch = self.journal_epoch.wrapping_add(1).max(1);
+        self.journal = Some(Journal { epoch: self.journal_epoch, ..Journal::default() });
+    }
+
+    /// Whether a journal is being kept and every change since it began can be undone
+    pub fn journal_is_sound(&self) -> bool {
+        self.journal.as_ref().is_some_and(|journal| !journal.broken)
+    }
+
+    /// Undo every change since [`Self::begin_journal`] (newest first) and stop keeping the
+    /// journal. Cached results stay: they carry the subtree keys they were computed under.
+    /// Returns false (and changes nothing) when there is no sound journal.
+    pub fn rollback_journal(&mut self) -> bool {
+        let Some(journal) = self.journal.take() else {
+            return false;
+        };
+        if journal.broken {
+            return false;
+        }
+        for op in journal.ops.into_iter().rev() {
+            match op {
+                JournalOp::Created(node) => {
+                    let _ = self.remove(node);
+                }
+                JournalOp::Style(node, style, style_key) => {
+                    // The node held this style (and its `calc()` handles) before: the results
+                    // computed under it are still valid, whatever handles it brings back.
+                    if let Some(data) = self.nodes.get_mut(node.into()) {
+                        data.style = style;
+                        data.style_key = style_key;
+                        self.note_changed(node);
+                    }
+                }
+                JournalOp::Children(parent, old) => {
+                    if self.nodes.get(parent.into()).is_none() {
+                        continue;
+                    }
+                    let current = core::mem::take(&mut self.children[parent.into()]);
+                    for child in current.iter() {
+                        if self.parents.get((*child).into()).is_some_and(|p| *p == Some(parent)) {
+                            self.parents[(*child).into()] = None;
+                        }
+                    }
+                    for &child in old.iter() {
+                        self.parents[child.into()] = Some(parent);
+                    }
+                    self.children[parent.into()] = old.iter().copied().collect();
+                    self.note_changed(parent);
+                    self.mark_layout_changed(parent);
+                }
+                JournalOp::InlineRoot(node, flag) => {
+                    if self.nodes.get(node.into()).is_some() {
+                        let _ = self.set_inline_root(node, flag);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Stop keeping the journal without undoing anything
+    pub fn drop_journal(&mut self) {
+        self.journal = None;
     }
 
     /// Enable rounding of layout values. Rounding is enabled by default.
@@ -866,6 +1250,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let id = self.nodes.insert(NodeData::new(layout));
         let _ = self.children.insert(new_vec_with_capacity(0));
         let _ = self.parents.insert(None);
+        self.note_created(id.into());
 
         Ok(id.into())
     }
@@ -882,6 +1267,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
         let _ = self.children.insert(new_vec_with_capacity(0));
         let _ = self.parents.insert(None);
+        self.note_created(id.into());
 
         Ok(id.into())
     }
@@ -896,6 +1282,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
         let _ = self.children.insert(children.iter().copied().collect::<_>());
         let _ = self.parents.insert(None);
+        self.note_created(id);
 
         Ok(id)
     }
@@ -911,6 +1298,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
     ///
     /// Returns the id of the node removed.
     pub fn remove(&mut self, node: NodeId) -> TaffyResult<NodeId> {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.broken = true;
+        }
         let key = node.into();
         if let Some(parent) = self.parents[key] {
             if let Some(children) = self.children.get_mut(parent.into()) {
@@ -919,6 +1309,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             if self.config.subtree_keys {
                 self.note_changed(parent);
             }
+            self.mark_layout_changed(parent);
         }
 
         // Remove "parent" references to a node when removing that node
@@ -931,6 +1322,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let _ = self.children.remove(key);
         let _ = self.parents.remove(key);
         let _ = self.nodes.remove(key);
+        self.removed.push(node);
 
         Ok(node)
     }
@@ -938,6 +1330,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Sets the context data associated with the node
     #[inline]
     pub fn set_node_context(&mut self, node: NodeId, measure: Option<NodeContext>) -> TaffyResult<()> {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.broken = true;
+        }
         let key = node.into();
         if let Some(measure) = measure {
             self.nodes[key].has_context = true;
@@ -1008,6 +1403,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             source.nodes.get_mut(source_node.into()).ok_or(TaffyError::InvalidInputNode(source_node))?;
         let data = self.nodes.get_mut(node.into()).ok_or(TaffyError::InvalidInputNode(node))?;
         data.cache = core::mem::take(&mut source_data.cache);
+        data.last_perform = source_data.last_perform;
         data.unrounded_layout = source_data.unrounded_layout;
         data.final_layout = source_data.final_layout;
         data.round_stale = true;
@@ -1040,11 +1436,13 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     /// Adds a `child` node under the supplied `parent`
     pub fn add_child(&mut self, parent: NodeId, child: NodeId) -> TaffyResult<()> {
+        self.journal_children(parent);
         let parent_key = parent.into();
         let child_key = child.into();
         self.parents[child_key] = Some(parent);
         self.children[parent_key].push(child);
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
 
         Ok(())
     }
@@ -1058,15 +1456,18 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         self.parents[child.into()] = Some(parent);
         self.children[parent_key].insert(child_index, child);
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
 
         Ok(())
     }
 
     /// Directly sets the `children` of the supplied `parent`
     pub fn set_children(&mut self, parent: NodeId, children: &[NodeId]) -> TaffyResult<()> {
+        self.journal_children(parent);
         let parent_key = parent.into();
 
         // Remove node as parent from all its current children.
@@ -1088,6 +1489,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         children.iter().for_each(|child| parent_children.push(*child));
 
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
 
         Ok(())
     }
@@ -1110,10 +1512,12 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         let child = self.children[parent_key].remove(child_index);
         self.parents[child.into()] = None;
 
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
 
         Ok(child)
     }
@@ -1127,12 +1531,14 @@ impl<NodeContext> TaffyTree<NodeContext> {
     where
         R: core::ops::RangeBounds<usize>,
     {
+        self.journal_children(parent);
         let parent_key = parent.into();
         for child in self.children[parent_key].drain(range) {
             self.parents[child.into()] = None;
         }
 
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
         Ok(())
     }
 
@@ -1152,11 +1558,13 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         self.parents[new_child.into()] = Some(parent);
         let old_child = core::mem::replace(&mut self.children[parent_key][child_index], new_child);
         self.parents[old_child.into()] = None;
 
         self.note_changed(parent);
+        self.mark_layout_changed(parent);
 
         Ok(old_child)
     }
@@ -1188,6 +1596,26 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.parents[child_id.into()]
     }
 
+    /// Whether `node` is (still) a node of this tree
+    pub fn contains(&self, node: NodeId) -> bool {
+        self.nodes.contains_key(node.into())
+    }
+
+    /// Let the absolutely positioned `node` take the static position of each axis whose insets
+    /// are both auto from `probe`: a zero-sized absolutely positioned box with no margins left
+    /// where `node` was in its original parent, which keeps its static position for it. The
+    /// containing block `node` is then a child of reads where its layout placed the probe while
+    /// it places `node` (left-to-right only; the probe must be in the containing block's
+    /// subtree), so one layout pass places both.
+    pub fn set_static_probe(&mut self, node: NodeId, probe: Option<NodeId>) {
+        let data = &mut self.nodes[node.into()];
+        if data.static_probe != probe {
+            data.static_probe = probe;
+            self.note_changed(node);
+            self.mark_layout_changed(node);
+        }
+    }
+
     /// Returns a list of children that belong to the parent node
     pub fn children(&self, parent: NodeId) -> TaffyResult<Vec<NodeId>> {
         Ok(self.children[parent.into()].clone())
@@ -1197,11 +1625,22 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn set_style(&mut self, node: NodeId, style: Style) -> TaffyResult<()> {
         // With subtree keys the cached results stay: they carry the key of the subtree they were
-        // computed in, so they serve again when the old style comes back. A `calc()` handle
-        // can change value with the same style, so its results go.
-        let keep_cache = self.config.subtree_keys && !super::subtree_key::style_uses_calc(&style);
+        // computed in, so they serve again when the old style comes back. A `calc()` handle the
+        // node did not hold before can be a freed handle's address with another value, so a
+        // style that brings one empties the caches.
+        let keep_cache = self.config.subtree_keys
+            && super::subtree_key::calc_handles_kept(&self.nodes[node.into()].style, &style);
         let data = &mut self.nodes[node.into()];
-        data.style = style;
+        let old = core::mem::replace(&mut data.style, style);
+        let old_key = data.style_key;
+        // Only the style from before the first change matters: the rollback restores it.
+        if let Some(journal) = self.journal.as_mut() {
+            if data.journaled_style != journal.epoch {
+                data.journaled_style = journal.epoch;
+                journal.ops.push(JournalOp::Style(node, old, old_key));
+            }
+        }
+        let data = &mut self.nodes[node.into()];
         data.style_key = None;
         if keep_cache {
             self.note_changed(node);
@@ -1220,6 +1659,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Return this node layout relative to its parent
     #[inline]
     pub fn layout(&self, node: NodeId) -> TaffyResult<&Layout> {
+        self.dbg_check_read(node);
         if self.config.use_rounding {
             Ok(&self.nodes[node.into()].final_layout)
         } else {
@@ -1252,6 +1692,46 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
     }
 
+    /// Note that `node`'s layout or child list changed: it and its ancestors report it (see
+    /// [`Self::layout_changed_since`])
+    fn mark_layout_changed(&mut self, node: NodeId) {
+        let seq = self.layout_seq;
+        self.nodes[node.into()].layout_changed_at = seq;
+        let mut current = Some(node);
+        while let Some(id) = current {
+            let data = &mut self.nodes[id.into()];
+            if data.subtree_layout_changed_at == seq {
+                break;
+            }
+            data.subtree_layout_changed_at = seq;
+            current = self.parents[id.into()];
+        }
+    }
+
+    /// The current layout sequence number: [`Self::layout_changed_since`] with it reports the
+    /// changes made from now on, once [`Self::advance_layout_seq`] has been called
+    pub fn layout_seq(&self) -> u64 {
+        self.layout_seq
+    }
+
+    /// The nodes removed since the last call
+    pub fn take_removed(&mut self) -> Vec<NodeId> {
+        core::mem::take(&mut self.removed)
+    }
+
+    /// Start a new layout sequence number: changes from now on are newer than every earlier one
+    pub fn advance_layout_seq(&mut self) {
+        self.layout_seq += 1;
+    }
+
+    /// Whether `node`'s final layout, unrounded box, grid info or child list changed after
+    /// `seq` (a value [`Self::layout_seq`] returned before [`Self::advance_layout_seq`]), and
+    /// whether that or anything in its subtree did
+    pub fn layout_changed_since(&self, node: NodeId, seq: u64) -> (bool, bool) {
+        let data = &self.nodes[node.into()];
+        (data.layout_changed_at > seq, data.subtree_layout_changed_at > seq)
+    }
+
     /// Move a laid-out node by (dx, dy) relative to its parent, after layout
     /// (CSS fragmentation moves a box into a later column). The rounded
     /// layout moves by the rounded offset.
@@ -1262,11 +1742,13 @@ impl<NodeContext> TaffyTree<NodeContext> {
         data.final_layout.location.x += dx.round();
         data.final_layout.location.y += dy.round();
         self.note_layout_changed(node);
+        self.mark_layout_changed(node);
     }
 
     /// Returns this node layout with unrounded values relative to its parent.
     #[inline]
     pub fn unrounded_layout(&self, node: NodeId) -> &Layout {
+        self.dbg_check_read(node);
         &self.nodes[node.into()].unrounded_layout
     }
 
@@ -1300,6 +1782,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let node = &mut self.nodes[node_id.into()];
         if node.is_inline_root != is_inline_root {
             node.is_inline_root = is_inline_root;
+            if let Some(journal) = self.journal.as_mut() {
+                journal.ops.push(JournalOp::InlineRoot(node_id, !is_inline_root));
+            }
             self.mark_dirty(node_id)?;
         }
         Ok(())
@@ -1380,6 +1865,26 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
     }
 
+    /// A flag the embedder derived from `node`'s subtree, while the subtree is the one it was
+    /// derived from: its subtree key is the one [`Self::set_subtree_memo`] saw. Call
+    /// [`Self::subtree_key`] on an ancestor first so the keys are current.
+    pub fn subtree_memo(&self, node: NodeId) -> Option<bool> {
+        let data = &self.nodes[node.into()];
+        match data.subtree_memo {
+            Some((key, flag)) if !data.key_stale && key == data.subtree_key => Some(flag),
+            _ => None,
+        }
+    }
+
+    /// Note a flag derived from `node`'s subtree (see [`Self::subtree_memo`]); its subtree key
+    /// must be current
+    pub fn set_subtree_memo(&mut self, node: NodeId, flag: bool) {
+        let data = &mut self.nodes[node.into()];
+        if !data.key_stale {
+            data.subtree_memo = Some((data.subtree_key, flag));
+        }
+    }
+
     /// Compute the subtree key of every stale node under `root` (children first)
     fn refresh_subtree_keys(&mut self, root: NodeId) {
         if !self.nodes[root.into()].key_stale {
@@ -1409,7 +1914,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
             };
             hash.write(style_key);
             hash.write(data.content_key);
-            hash.write(u64::from(data.has_context) | u64::from(data.is_inline_root) << 1);
+            hash.write(
+                u64::from(data.has_context)
+                    | u64::from(data.is_inline_root) << 1
+                    | u64::from(data.static_probe.is_some()) << 2,
+            );
             let children = &self.children[node.into()];
             hash.write(children.len() as u64);
             for &child in children.iter() {
@@ -1418,6 +1927,16 @@ impl<NodeContext> TaffyTree<NodeContext> {
             let data = &mut self.nodes[node.into()];
             data.subtree_key = hash.finish();
             data.key_stale = false;
+        }
+    }
+
+    /// Forget every final layout `node` made, and keep its ancestors' only as earlier results:
+    /// state the embedder keeps for the node's layout (an inline formatting context's lines) is
+    /// gone, so the node must be laid out again before its layout is final
+    pub fn drop_final_layouts(&mut self, node: NodeId) {
+        self.nodes[node.into()].cache.drop_final_layouts();
+        if let Some(parent) = self.parents[node.into()] {
+            self.forget_final_layouts_to_root(parent);
         }
     }
 
@@ -1455,6 +1974,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
             }
         }
 
+        #[cfg(feature = "std")]
+        DIRTY_MARKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         mark_dirty_to_root(&mut self.nodes, &self.parents, node.into());
 
         Ok(())
@@ -1481,6 +2002,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         if self.config.subtree_keys {
             self.refresh_subtree_keys(node_id);
         }
+        self.last_root = Some(node_id);
         // Laying out a node that has a parent (a measuring pass over one subtree) treats it as a
         // root at the origin. Keep the location its parent gave it, and dirty it so the next
         // layout of the real root places it again instead of reusing a cached parent.
@@ -1501,6 +2023,360 @@ impl<NodeContext> TaffyTree<NodeContext> {
             }
         }
         Ok(())
+    }
+
+    /// Let a final layout be served from the node's earlier final results (the ones it made
+    /// before its subtree or its inputs last changed, kept like its size results), without
+    /// laying out its children again. A layout pass after a style change followed by a pass
+    /// after the style is restored, as an embedder's fix-up passes do, then only lays out what
+    /// the change reaches in both passes.
+    ///
+    /// The children of such a node keep the layouts of the node's last real layout until they
+    /// are placed: before reading the layout of a node that may lie under one, call
+    /// [`Self::place_deferred`], and [`Self::place_all_deferred`] before reading the results.
+    /// Only nodes laid out outside an inherited block formatting context are deferred.
+    pub fn enable_deferred_performs(&mut self) {
+        self.config.defer_performs = true;
+    }
+
+    /// Debug (`OBSCURA_TAFFY_DEFER_CHECK`): report a read of a layout under a deferred node
+    #[cfg(feature = "std")]
+    fn dbg_check_read(&self, node: NodeId) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if self.deferred_nodes.is_empty()
+            || self.last_root == Some(node)
+            || !*ON.get_or_init(|| std::env::var_os("OBSCURA_TAFFY_DEFER_CHECK").is_some())
+            || self.deferred_ancestor(node).is_none()
+        {
+            return;
+        }
+        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let trace = std::backtrace::Backtrace::force_capture().to_string();
+        let frames: Vec<&str> = trace
+            .lines()
+            .filter(|line| line.contains("obscura_render::"))
+            .map(|line| line.trim())
+            .take(3)
+            .collect();
+        let key = frames.join(" <- ");
+        let mut seen = SEEN.lock().unwrap();
+        if !seen.contains(&key) {
+            std::eprintln!("[defer-read] {key}");
+            seen.push(key);
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn dbg_check_read(&self, _node: NodeId) {}
+
+    /// The nearest ancestor of `node` (not `node` itself) whose children wait to be placed
+    pub fn deferred_ancestor(&self, node: NodeId) -> Option<NodeId> {
+        if self.deferred_nodes.is_empty() {
+            return None;
+        }
+        let mut current = self.parents.get(node.into()).copied().flatten();
+        while let Some(id) = current {
+            if self.nodes[id.into()].deferred {
+                return Some(id);
+            }
+            current = self.parents[id.into()];
+        }
+        None
+    }
+
+    /// Lay out the children of `node` again with the inputs its layout was served for
+    fn place_one<MeasureFunction>(&mut self, node: NodeId, measure_function: &mut MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        let data = &mut self.nodes[node.into()];
+        let (true, Some((inputs, in_block_context))) = (data.deferred, data.last_perform) else {
+            data.deferred = false;
+            return;
+        };
+        if self.restore_children(node, &inputs) {
+            return;
+        }
+        self.force_perform = Some(node);
+        let mut view = TaffyView { taffy: self, measure_function: &mut *measure_function };
+        #[cfg(feature = "block_layout")]
+        {
+            if in_block_context {
+                let mut bfc = crate::compute::BlockFormattingContext::new();
+                let mut root_context = bfc.root_block_context();
+                let mut context = root_context.sub_context(0.0, [0.0, 0.0]);
+                let _ = view.compute_child_layout(node, inputs, Some(&mut context));
+            } else {
+                let _ = view.compute_child_layout(node, inputs, None);
+            }
+        }
+        #[cfg(not(feature = "block_layout"))]
+        {
+            let _ = in_block_context;
+            let _ = view.compute_child_layout(node, inputs);
+        }
+        self.force_perform = None;
+        self.nodes[node.into()].deferred = false;
+        self.note_subtree_rounding_stale(node);
+    }
+
+    /// `node` and its ancestors round again
+    fn note_subtree_rounding_stale(&mut self, node: NodeId) {
+        let mut current = Some(node);
+        while let Some(id) = current {
+            let data = &mut self.nodes[id.into()];
+            if data.round_subtree_stale && id != node {
+                break;
+            }
+            data.round_subtree_stale = true;
+            current = self.parents[id.into()];
+        }
+    }
+
+    /// Whether a node's final layout only places its children's layouts, so the children's
+    /// layouts and inputs restore it: not an inline formatting context (its line layout lives
+    /// with the embedder), a measured leaf or a grid (its track sizes are layout details)
+    fn children_restore_layout(&self, node: NodeId) -> bool {
+        let data = &self.nodes[node.into()];
+        !data.is_inline_root
+            && !data.has_context
+            && data.style.display != Display::Grid
+            && !self.children[node.into()].is_empty()
+    }
+
+    /// The children's layouts and inputs as the node's current final layout placed them, if
+    /// they restore it (see `Self::children_restore_layout`)
+    pub(crate) fn snapshot_children(&self, node: NodeId) -> Option<Box<[super::cache::ChildSnapshot]>> {
+        if !self.children_restore_layout(node) {
+            return None;
+        }
+        self.children[node.into()]
+            .iter()
+            .map(|&child| {
+                let data = &self.nodes[child.into()];
+                let (input, in_block_context) = data.last_perform?;
+                Some(super::cache::ChildSnapshot { layout: data.unrounded_layout, input, in_block_context })
+            })
+            .collect()
+    }
+
+    /// Place `node`'s children at the layouts its earlier final layout for `inputs` placed them
+    /// at, when those are known; the children whose own final layout differs then wait to be
+    /// placed in turn
+    fn restore_children(&mut self, node: NodeId, inputs: &LayoutInput) -> bool {
+        if !self.children_restore_layout(node) {
+            return false;
+        }
+        let tag = self.entry_tag(&self.nodes[node.into()], 0);
+        let Some(children) = self.nodes[node.into()].cache.restore_final_history(inputs, tag) else {
+            return false;
+        };
+        let children: Vec<super::cache::ChildSnapshot> = children.to_vec();
+        let child_ids: Vec<NodeId> = self.children[node.into()].iter().copied().collect();
+        for (child, snapshot) in child_ids.into_iter().zip(children.iter()) {
+            self.store_unrounded_layout(child, &snapshot.layout);
+            let tag = self.entry_tag(&self.nodes[child.into()], 0);
+            let data = &mut self.nodes[child.into()];
+            data.last_perform = Some((snapshot.input, snapshot.in_block_context));
+            let placed = snapshot.input.run_mode != RunMode::PerformLayout
+                || data.cache.has_final_layout(&snapshot.input, tag);
+            if placed {
+                data.deferred = false;
+            } else {
+                if !data.deferred {
+                    self.deferred_nodes.push(child);
+                }
+                let data = &mut self.nodes[child.into()];
+                data.deferred = true;
+                data.round_subtree_stale = true;
+            }
+        }
+        self.nodes[node.into()].deferred = false;
+        self.note_subtree_rounding_stale(node);
+        true
+    }
+
+    /// Place every deferred ancestor of `node` from the root down, so `node`'s own layout is
+    /// the one its parent's current layout gave it. Returns the root the path ends at.
+    fn place_path<MeasureFunction>(&mut self, node: NodeId, measure_function: &mut MeasureFunction) -> NodeId
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        let mut path = Vec::new();
+        let mut current = self.parents[node.into()];
+        let mut root = node;
+        while let Some(id) = current {
+            path.push(id);
+            root = id;
+            current = self.parents[id.into()];
+        }
+        for &ancestor in path.iter().rev() {
+            if self.nodes[ancestor.into()].deferred {
+                self.place_one(ancestor, measure_function);
+            }
+        }
+        root
+    }
+
+    /// Place the deferred ancestors of each of `nodes` (and with `children` the node itself), then
+    /// round what changed, so reading their layouts (and their children's) reads the current ones
+    pub fn place_deferred<MeasureFunction>(
+        &mut self,
+        nodes: &[NodeId],
+        children: bool,
+        mut measure_function: MeasureFunction,
+    )
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() {
+            return;
+        }
+        let mut roots: Vec<NodeId> = Vec::new();
+        for &node in nodes {
+            if self.nodes.get(node.into()).is_none() {
+                continue;
+            }
+            let own = children && self.nodes[node.into()].deferred;
+            if !own && self.deferred_ancestor(node).is_none() {
+                continue;
+            }
+            let root = self.place_path(node, &mut measure_function);
+            if children {
+                self.place_one(node, &mut measure_function);
+            }
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        self.round_placed(&roots, &mut measure_function);
+    }
+
+    /// A fresh epoch for a call that places deferred nodes (never 0, the epoch of no call)
+    fn next_place_epoch(&mut self) -> u32 {
+        self.place_epoch = self.place_epoch.wrapping_add(1).max(1);
+        self.place_epoch
+    }
+
+    /// Whether the parent of `node` was placed by the call of `epoch`
+    fn parent_placed_in(&self, node: NodeId, epoch: u32) -> bool {
+        self.parents[node.into()].is_some_and(|parent| self.nodes[parent.into()].placed_in == epoch)
+    }
+
+    /// Place every deferred node under `root` and round the tree: afterwards every layout is
+    /// the one the last layout pass made
+    pub fn place_all_deferred<MeasureFunction>(&mut self, root: NodeId, mut measure_function: MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() {
+            return;
+        }
+        let epoch = self.next_place_epoch();
+        while !self.deferred_nodes.is_empty() {
+            let pending = core::mem::take(&mut self.deferred_nodes);
+            for node in pending {
+                if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
+                    continue;
+                }
+                // A node whose parent this call placed lies under `root`, and every deferred
+                // ancestor of it was placed before its parent was.
+                if !self.parent_placed_in(node, epoch) {
+                    // A node outside the tree under `root` keeps its layouts as they are.
+                    let mut top = node;
+                    while let Some(parent) = self.parents[top.into()] {
+                        top = parent;
+                    }
+                    if top != root {
+                        self.nodes[node.into()].deferred = false;
+                        continue;
+                    }
+                    self.place_path(node, &mut measure_function);
+                }
+                self.place_one(node, &mut measure_function);
+                self.nodes[node.into()].placed_in = epoch;
+            }
+        }
+        self.round_placed(&[root], &mut measure_function);
+    }
+
+    /// Place every deferred node in the subtrees of `roots` (and the paths to them), so every
+    /// layout in them is the one the last layout pass made
+    pub fn place_all_deferred_under<MeasureFunction>(&mut self, roots: &[NodeId], mut measure_function: MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() || roots.is_empty() {
+            return;
+        }
+        let mut tops: Vec<NodeId> = Vec::new();
+        for &root in roots {
+            if self.nodes.get(root.into()).is_none() {
+                continue;
+            }
+            let top = self.place_path(root, &mut measure_function);
+            if !tops.contains(&top) {
+                tops.push(top);
+            }
+        }
+        let epoch = self.next_place_epoch();
+        loop {
+            let mut placed_any = false;
+            let pending = core::mem::take(&mut self.deferred_nodes);
+            let mut keep = Vec::new();
+            for node in pending {
+                if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
+                    continue;
+                }
+                // A node whose parent this call placed lies in one of the subtrees, and every
+                // deferred ancestor of it was placed before its parent was.
+                if !self.parent_placed_in(node, epoch) {
+                    let mut current = Some(node);
+                    let mut inside = false;
+                    while let Some(id) = current {
+                        if roots.contains(&id) {
+                            inside = true;
+                            break;
+                        }
+                        current = self.parents[id.into()];
+                    }
+                    if !inside {
+                        keep.push(node);
+                        continue;
+                    }
+                    self.place_path(node, &mut measure_function);
+                }
+                self.place_one(node, &mut measure_function);
+                self.nodes[node.into()].placed_in = epoch;
+                placed_any = true;
+            }
+            keep.append(&mut self.deferred_nodes);
+            self.deferred_nodes = keep;
+            if !placed_any {
+                break;
+            }
+        }
+        self.round_placed(&tops, &mut measure_function);
+    }
+
+    /// Round the trees under `roots` again where placing changed layouts
+    fn round_placed<MeasureFunction>(&mut self, roots: &[NodeId], measure_function: &mut MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if !self.config.use_rounding {
+            return;
+        }
+        for &root in roots {
+            let mut view = TaffyView { taffy: self, measure_function: &mut *measure_function };
+            round_layout(&mut view, root);
+        }
     }
 
     /// Updates the stored layout of the provided `node` and its children

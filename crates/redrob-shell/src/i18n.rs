@@ -177,6 +177,37 @@ fn ko(en: &str) -> Option<&'static str> {
         "New window" => "새 창",
         "New incognito window" => "새 시크릿 창",
         "Move to new window" => "새 창으로 옮기기",
+        // Tab groups
+        "New tab to the right" => "오른쪽에 새 탭",
+        "Add tab to new group" => "새 그룹에 탭 추가",
+        "Add tab to group" => "그룹에 탭 추가",
+        "New group" => "새 그룹",
+        "Remove from group" => "그룹에서 삭제",
+        "Unnamed group" => "이름 없는 그룹",
+        "Name this group" => "그룹 이름 지정",
+        "Name group" => "그룹 이름 바꾸기",
+        "New tab in group" => "그룹에 새 탭",
+        "Ungroup" => "그룹 해제",
+        "Close group" => "그룹 닫기",
+        "Move group to new window" => "그룹을 새 창으로 옮기기",
+        "Expand group" => "그룹 펼치기",
+        "Collapse group" => "그룹 접기",
+        "Grey" => "회색",
+        "Blue" => "파란색",
+        "Red" => "빨간색",
+        "Yellow" => "노란색",
+        "Green" => "초록색",
+        "Pink" => "분홍색",
+        "Purple" => "보라색",
+        "Cyan" => "청록색",
+        "Orange" => "주황색",
+        // Bookmark folders and history
+        "Open in new window" => "새 창에서 열기",
+        "Open all ({0})" => "모두 열기({0})",
+        "Open all in new window" => "새 창에서 모두 열기",
+        "Open all in new group" => "새 그룹에서 모두 열기",
+        "Open all as group" => "그룹으로 모두 열기",
+        "(empty)" => "(비어 있음)",
         "Could not open a new window: {0}" => "새 창을 열지 못했어요: {0}",
         "Incognito" => "시크릿",
         "Incognito: this window keeps no history, cookies or passwords." => {
@@ -293,10 +324,12 @@ fn ko(en: &str) -> Option<&'static str> {
         "Search engine" => "검색엔진",
         "Files are saved to {0}" => "파일은 {0}에 저장해요",
         "Redrob Code" => "Redrob Code",
-        "Server address" => "서버 주소",
-        "Prompts typed after > in the address bar go here. Only this computer is allowed." => {
-            "주소창에 > 다음에 쓴 요청이 여기로 가요. 이 컴퓨터 안의 주소만 쓸 수 있어요."
+        "Automatic" => "자동",
+        "Leave it empty to use Redrob Code on this computer. It starts when needed." => {
+            "비워 두면 이 컴퓨터의 Redrob Code를 써요. 필요할 때 알아서 켜져요."
         }
+        "Logs" => "로그",
+        "Open logs folder" => "로그 폴더 열기",
         "Profile folder" => "프로필 폴더",
         "About Redrob Browser" => "레드롭 브라우저 정보",
         "Version {0}, with Chromium {1}" => "버전 {0}, Chromium {1} 기반",
@@ -350,6 +383,48 @@ fn ko(en: &str) -> Option<&'static str> {
         "Inline style" => "인라인 스타일",
         "No inline style" => "인라인 스타일이 없어요",
         "Computed" => "계산된 스타일",
+        // Extensions and page info
+        "Extensions" => "확장 프로그램",
+        "Reading mode" => "읽기 모드",
+        "Pin" => "고정",
+        "Unpin" => "고정 해제",
+        "Manage extensions" => "확장 프로그램 관리",
+        "Find more in the Chrome Web Store" => "Chrome 웹 스토어에서 더 찾기",
+        "View site information" => "사이트 정보 보기",
+        "Loading..." => "불러오고 있어요",
+        "Connection is secure" => "안전하게 연결됐어요",
+        "Connection is not secure" => "안전하지 않은 연결이에요",
+        "Your connection to this site is not private" => "이 사이트와의 연결은 비공개가 아니에요",
+        "Parts of this page are not secure" => "이 페이지의 일부는 안전하지 않아요",
+        "Passwords and card numbers you send to this site stay private." => {
+            "이 사이트로 보내는 비밀번호와 카드 번호는 다른 사람이 볼 수 없어요."
+        }
+        "Do not enter passwords or card numbers on this site." => {
+            "이 사이트에는 비밀번호나 카드 번호를 넣지 마세요."
+        }
+        "Certificate is valid" => "인증서가 유효해요",
+        "Certificate is not valid" => "인증서가 유효하지 않아요",
+        "Permissions" => "권한",
+        "Reset" => "초기화",
+        "Allowed" => "허용됨",
+        "Blocked" => "차단됨",
+        "Delete cookies and site data" => "쿠키와 사이트 데이터 삭제",
+        "Deleted cookies and site data for {0}" => "{0}의 쿠키와 사이트 데이터를 지웠어요",
+        "Site settings" => "사이트 설정",
+        "Certificate viewer" => "인증서 보기",
+        "Issued to" => "발급 대상",
+        "Issued by" => "발급자",
+        "Common name" => "일반 이름",
+        "Organization" => "조직",
+        "Country" => "국가",
+        "Validity period" => "유효 기간",
+        "Issued on" => "발급일",
+        "Expires on" => "만료일",
+        "Fingerprints" => "지문",
+        "Serial number" => "일련번호",
+        "Issued through {0} more certificates" => "인증서 {0}개를 거쳐 발급됐어요",
+        "Copy certificate" => "인증서 복사",
+        "Copied the certificate (PEM)." => "인증서(PEM)를 복사했어요.",
         _ => return None,
     })
 }

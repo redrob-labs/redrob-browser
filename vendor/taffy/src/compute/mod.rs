@@ -255,6 +255,9 @@ pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
         round_content_size(&mut layout, unrounded_layout.content_size, cumulative_x, cumulative_y);
 
         tree.set_final_layout(node_id, &layout);
+        if tree.is_deferred(node_id) {
+            return;
+        }
 
         let child_count = tree.child_count(node_id);
         for index in 0..child_count {

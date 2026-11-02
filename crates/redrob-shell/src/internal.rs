@@ -43,6 +43,9 @@ pub struct Actions {
     pub search_engine: Option<String>,
     /// The theme changed: "system", "light" or "dark".
     pub theme: Option<String>,
+    /// A day of history opened at once: its pages, and the group's name
+    /// when they open as a tab group.
+    pub open_all: Option<(Vec<String>, Option<String>)>,
 }
 
 pub fn ui(
@@ -142,18 +145,40 @@ fn history(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &mu
             return;
         }
         let mut day = String::new();
-        for h in &s.history {
+        for (k, h) in s.history.iter().enumerate() {
             let stamp = day_time(h.last_visit);
             let (d, time) = stamp.split_once(' ').unwrap_or((stamp.as_str(), ""));
             if d != day {
                 day = d.to_string();
                 ui.add_space(if day.is_empty() { 0.0 } else { size::SPACE_2 });
-                ui.label(
-                    egui::RichText::new(d)
-                        .size(12.0)
-                        .strong()
-                        .color(theme::palette(ui).ink_secondary),
+                let r = ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(d)
+                            .size(12.0)
+                            .strong()
+                            .color(theme::palette(ui).ink_secondary),
+                    )
+                    .sense(egui::Sense::click()),
                 );
+                // The day's pages at once, as tabs or as a tab group.
+                let urls: Vec<String> = s.history[k..]
+                    .iter()
+                    .take_while(|e| day_time(e.last_visit).split(' ').next() == Some(d))
+                    .map(|e| e.url.clone())
+                    .collect();
+                crate::popup::context_menu(&r, |ui| {
+                    if ui
+                        .button(crate::i18n::tf("Open all ({0})", &[&urls.len()]))
+                        .clicked()
+                    {
+                        act.open_all = Some((urls.clone(), None));
+                        ui.close();
+                    }
+                    if ui.button(t("Open all as group")).clicked() {
+                        act.open_all = Some((urls.clone(), Some(d.to_string())));
+                        ui.close();
+                    }
+                });
             }
             let host = url::Url::parse(&h.url)
                 .ok()
@@ -387,11 +412,20 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
         t("Redrob Code"),
         t("Prompts typed after / in the address bar go here. Only this computer is allowed."),
         |ui| {
+            // Empty (or the old default address) means: find the shared
+            // Redrob Code server on this computer, and start it when needed.
             let saved = profile
                 .and_then(|p| p.setting("agent_server"))
-                .unwrap_or_else(|| crate::agent_bridge::DEFAULT_SERVER.to_string());
+                .filter(|v| v.trim().trim_end_matches('/') != crate::agent_bridge::DEFAULT_SERVER)
+                .unwrap_or_default();
             let input = s.server_input.get_or_insert(saved);
-            let r = theme::text_field(ui, input, t("Server address"), 320.0, None);
+            let r = theme::text_field(ui, input, t("Automatic"), 320.0, None);
+            ui.label(
+                egui::RichText::new(t(
+                    "Leave it empty to use Redrob Code on this computer. It starts when needed.",
+                ))
+                .color(theme::palette(ui).ink_secondary),
+            );
             if r.lost_focus() {
                 if let Some(p) = profile {
                     let _ = p.set_setting("agent_server", input.trim());
@@ -408,6 +442,17 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
             );
         });
     }
+    theme::card(ui, t("Logs"), "", |ui| {
+        let dir = crate::startup::log_dir();
+        ui.label(
+            egui::RichText::new(dir.display().to_string())
+                .monospace()
+                .color(theme::palette(ui).ink_secondary),
+        );
+        if theme::button(ui, t("Open logs folder"), false).clicked() {
+            crate::startup::open_log_dir();
+        }
+    });
     about(ui, act);
 }
 

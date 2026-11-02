@@ -152,7 +152,7 @@ impl IfcReuseKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         fonts: &super::fonts::Fonts,
         root: NodeId,
         root_style: &LayoutStyle,
@@ -187,7 +187,7 @@ impl IfcReuseKey {
     fn matches(
         &self,
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         fonts: &super::fonts::Fonts,
         root: NodeId,
         root_style: &LayoutStyle,
@@ -293,6 +293,33 @@ pub(crate) fn retain_templates(templates: Vec<IfcTemplate>, laid: Vec<Option<Box
     });
 }
 
+/// Offer one template and its laid-out IFC to the IFCs built next on this
+/// thread (a retained store's IFC whose box is built again or gone).
+pub(crate) fn offer_template(template: IfcTemplate, laid: Box<Ifc>) {
+    if !crate::inline::layout_reuse_enabled() {
+        return;
+    }
+    let id = laid.template_id;
+    let _ = PREVIOUS_TEMPLATES.try_with(|previous| {
+        previous
+            .borrow_mut()
+            .entry(template.key.root)
+            .or_default()
+            .push(template);
+    });
+    if id != 0 {
+        let _ = PREVIOUS_LAID.try_with(|previous| {
+            previous.borrow_mut().insert(id, laid);
+        });
+    }
+}
+
+/// Forget every template and laid-out IFC offered to this thread so far.
+pub(crate) fn clear_offered_templates() {
+    let _ = PREVIOUS_TEMPLATES.try_with(|previous| previous.borrow_mut().clear());
+    let _ = PREVIOUS_LAID.try_with(|previous| previous.borrow_mut().clear());
+}
+
 /// Whether the previous layout left a laid-out IFC of template `id`.
 pub(crate) fn has_previous_laid(id: u64) -> bool {
     id != 0
@@ -313,7 +340,7 @@ pub(crate) fn take_previous_laid(id: u64) -> Option<Box<Ifc>> {
 #[allow(clippy::too_many_arguments)]
 fn take_template(
     tree: &DomTree,
-    styles: &HashMap<NodeId, LayoutStyle>,
+    styles: &crate::StyleTable,
     fonts: &super::fonts::Fonts,
     root: NodeId,
     root_style: &LayoutStyle,
@@ -341,10 +368,7 @@ fn take_template(
 }
 
 /// The style of a span owner.
-fn owner_style<'a>(
-    owner: SpanOwner,
-    styles: &'a HashMap<NodeId, LayoutStyle>,
-) -> Option<&'a LayoutStyle> {
+fn owner_style<'a>(owner: SpanOwner, styles: &'a crate::StyleTable) -> Option<&'a LayoutStyle> {
     match owner {
         SpanOwner::Element(node) => styles.get(&node),
         SpanOwner::Pseudo(host, GeneratedBoxKind::Before) => {
@@ -727,7 +751,7 @@ impl IfcStore {
     pub(crate) fn create(
         &mut self,
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         root: NodeId,
         root_style: &LayoutStyle,
         anonymous: bool,
@@ -770,7 +794,7 @@ impl IfcStore {
                 }
                 let index = self.ifcs.len();
                 self.ifcs.push(Some(ifc));
-                self.templates.push(template);
+                self.templates.insert(index, template);
                 return Some(index);
             }
         }
@@ -1279,6 +1303,9 @@ impl IfcStore {
             clip: None,
             marker,
             reused_laid: false,
+            epoch: 0,
+            fragments_cache: None,
+            relative_fragments: None,
             template_id: if key.is_some() {
                 NEXT_TEMPLATE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             } else {
@@ -1286,10 +1313,13 @@ impl IfcStore {
             },
         });
         if let Some(key) = key {
-            self.templates.push(IfcTemplate {
-                key: Box::new(key),
-                ifc: ifc.clone(),
-            });
+            self.templates.insert(
+                index,
+                IfcTemplate {
+                    key: Box::new(key),
+                    ifc: ifc.clone(),
+                },
+            );
         }
         self.ifcs.push(Some(ifc));
         Some(index)

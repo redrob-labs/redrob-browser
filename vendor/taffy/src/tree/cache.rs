@@ -11,6 +11,8 @@ use crate::RequestedAxis;
 const CACHE_SIZE: usize = 9;
 /// Most size results a node keeps beyond its nine slots. See `Cache::history`.
 const HISTORY_LIMIT: usize = 24;
+/// How many earlier final layout results a node keeps (see `Cache::final_history`)
+const FINAL_HISTORY: usize = 16;
 
 // Manually written-out results of float to u32 bit casts because
 // `f32::to_bits` is not yet const at our MSRV.
@@ -87,6 +89,28 @@ fn size_mixed_cache_key(kd: Size<Option<f32>>, avs: Size<AvailableSpace>) -> u64
 fn vertical_margin_context_key(input: &LayoutInput) -> u8 {
     u8::from(input.vertical_margins_are_collapsible.start)
         | (u8::from(input.vertical_margins_are_collapsible.end) << 1)
+}
+
+/// One child's layout as its parent's final layout placed it, and the inputs that layout gave
+/// the child (see `Cache::final_history`)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ChildSnapshot {
+    /// The child's unrounded layout
+    pub(crate) layout: crate::tree::Layout,
+    /// The inputs of the child's own final layout
+    pub(crate) input: LayoutInput,
+    /// Whether the child was laid out inside a block formatting context (one without floats)
+    pub(crate) in_block_context: bool,
+}
+
+/// An earlier final layout result, with the layouts it placed the children at when they are
+/// known
+#[derive(Debug, Clone, PartialEq)]
+struct FinalHistoryEntry {
+    /// The result
+    entry: CacheEntry<LayoutOutput>,
+    /// The children's layouts under it, in child order
+    children: Option<Box<[ChildSnapshot]>>,
 }
 
 /// Space-optimised cache key that packs bits into as small a size as possible
@@ -199,6 +223,14 @@ pub struct Cache {
     /// every earlier pass; they hit here. Results are pure sizes, so an older
     /// one stays valid until the node is dirtied.
     history: Vec<CacheEntry<MeasureOutput>>,
+    /// Earlier final layout results, oldest first, up to `FINAL_HISTORY`. Their outputs stay valid like the size
+    /// results, but the node's children no longer hold the layouts they placed: serving one
+    /// defers placing the children (see `TaffyTree::enable_deferred_performs`).
+    final_history: Vec<FinalHistoryEntry>,
+    /// The children's layouts the final layout entry placed them at, when known
+    final_children: Option<Box<[ChildSnapshot]>>,
+    /// The children's layouts of the final layout being stored (see `Self::set_pending_children`)
+    pending_children: Option<Box<[ChildSnapshot]>>,
     /// Tracks if all cache entries are empty
     is_empty: bool,
 }
@@ -212,7 +244,15 @@ impl Default for Cache {
 impl Cache {
     /// Create a new empty cache
     pub const fn new() -> Self {
-        Self { final_layout_entry: None, measure_entries: [None; CACHE_SIZE], history: Vec::new(), is_empty: true }
+        Self {
+            final_layout_entry: None,
+            measure_entries: [None; CACHE_SIZE],
+            history: Vec::new(),
+            final_history: Vec::new(),
+            final_children: None,
+            pending_children: None,
+            is_empty: true,
+        }
     }
 
     /// Return the cache slot to cache the current computed result in
@@ -321,6 +361,13 @@ impl Cache {
         match input.run_mode {
             RunMode::PerformLayout => {
                 self.is_empty = false;
+                let children = self.pending_children.take();
+                let previous_children = core::mem::replace(&mut self.final_children, children);
+                if let Some(previous) = self.final_layout_entry.take() {
+                    if previous.key != key {
+                        self.push_final_history(previous, previous_children);
+                    }
+                }
                 self.final_layout_entry = Some(CacheEntry { key, content: layout_output })
             }
             RunMode::ComputeSize => {
@@ -344,9 +391,66 @@ impl Cache {
         }
     }
 
-    /// Drop the final layout entry, keeping the size results
-    pub(crate) fn forget_final_layout(&mut self) {
+    /// Keep an earlier final layout result, replacing one under the same key
+    fn push_final_history(&mut self, entry: CacheEntry<LayoutOutput>, children: Option<Box<[ChildSnapshot]>>) {
+        if let Some(slot) = self.final_history.iter().position(|old| old.entry.key == entry.key) {
+            self.final_history.remove(slot);
+        } else if self.final_history.len() == FINAL_HISTORY {
+            self.final_history.remove(0);
+        }
+        self.final_history.push(FinalHistoryEntry { entry, children });
+    }
+
+    /// An earlier final layout result for `input` computed in the float context `float_key`
+    #[inline]
+    pub(crate) fn get_final_history(&self, input: &LayoutInput, float_key: u64) -> Option<LayoutOutput> {
+        let key = CacheKey { float_key, ..CacheKey::from(input) };
+        self.final_history.iter().rev().find(|old| old.entry.key == key).map(|old| old.entry.content)
+    }
+
+    /// The children's layouts of the final layout about to be stored, taken right after it
+    pub(crate) fn set_pending_children(&mut self, children: Option<Box<[ChildSnapshot]>>) {
+        self.pending_children = children;
+    }
+
+    /// Make the earlier result for `input` the final layout entry again, keeping the current one
+    /// as an earlier result, and return the children's layouts it placed. `None` (and no change)
+    /// when they are not known.
+    pub(crate) fn restore_final_history(&mut self, input: &LayoutInput, float_key: u64) -> Option<&[ChildSnapshot]> {
+        let key = CacheKey { float_key, ..CacheKey::from(input) };
+        let slot = self.final_history.iter().rposition(|old| old.entry.key == key && old.children.is_some())?;
+        let restored = self.final_history.remove(slot);
+        if let Some(previous) = self.final_layout_entry.take() {
+            let previous_children = self.final_children.take();
+            self.push_final_history(previous, previous_children);
+        }
+        self.final_layout_entry = Some(restored.entry);
+        self.final_children = restored.children;
+        self.final_children.as_deref()
+    }
+
+    /// Whether the final layout entry answers `input` in the float context `float_key`
+    #[inline]
+    pub(crate) fn has_final_layout(&self, input: &LayoutInput, float_key: u64) -> bool {
+        let key = CacheKey { float_key, ..CacheKey::from(input) };
+        self.final_layout_entry.is_some_and(|entry| entry.key == key)
+    }
+
+    /// Drop every final layout result, keeping the size results
+    pub(crate) fn drop_final_layouts(&mut self) {
         self.final_layout_entry = None;
+        self.final_children = None;
+        self.pending_children = None;
+        self.final_history.clear();
+    }
+
+    /// Drop the final layout entry, keeping the size results. Its output stays valid, so it
+    /// joins the earlier final results.
+    pub(crate) fn forget_final_layout(&mut self) {
+        if let Some(previous) = self.final_layout_entry.take() {
+            let children = self.final_children.take();
+            self.push_final_history(previous, children);
+        }
     }
 
     /// Clear all cache entries and reports clear operation outcome ([`ClearState`])
@@ -358,6 +462,9 @@ impl Cache {
         self.final_layout_entry = None;
         self.measure_entries = [None; CACHE_SIZE];
         self.history.clear();
+        self.final_history.clear();
+        self.final_children = None;
+        self.pending_children = None;
         ClearState::Cleared
     }
 

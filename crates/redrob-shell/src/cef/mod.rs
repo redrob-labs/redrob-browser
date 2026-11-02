@@ -11,12 +11,14 @@
 //! glib message loop, which [`pump`] runs until idle, and the window learns
 //! of its work from glib's descriptors (wake.rs): the external pump returns
 //! from every nested run loop (drag and drop) within 10 ms. Each tab's page
-//! is a native child window of its browser window (native.rs). Renderer, GPU and utility processes are this executable
+//! is a native child window of its browser window (native.rs); on Linux a
+//! Chrome browser of its own moved in there (host.rs). Renderer, GPU and utility processes are this executable
 //! started again with `--type=...`; [`subprocess`] runs them.
 
 pub mod app;
 pub mod client;
 pub mod handlers;
+pub mod host;
 pub mod keys;
 pub mod native;
 #[cfg(target_os = "linux")]
@@ -53,11 +55,13 @@ pub struct Sink {
 
 impl Sink {
     pub fn new(tx: Sender<Update>, wake: Wake) -> Self {
-        Sink {
+        let sink = Sink {
             tx,
             tabs: Arc::default(),
             wake,
-        }
+        };
+        let _ = GLOBAL_SINK.set(sink.clone());
+        sink
     }
 
     pub fn bind(&self, browser_id: i32, tab: TabId) {
@@ -98,12 +102,25 @@ impl Sink {
         }
     }
 
+    /// Have the window run its loop (work the engine queued for itself).
+    pub fn wake_window(&self) {
+        (self.wake)(None);
+    }
+
     /// Report an event that belongs to no tab (downloads use tab 0).
     #[allow(dead_code)]
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
     }
+}
+
+static GLOBAL_SINK: OnceLock<Sink> = OnceLock::new();
+
+/// The window's sink, for browsers that belong to no tab yet (client.rs
+/// `stray_client`).
+pub(crate) fn global_sink() -> Option<&'static Sink> {
+    GLOBAL_SINK.get()
 }
 
 /// Each tab's CDP target id and its browser, so the relay can reach what
@@ -130,6 +147,62 @@ pub fn forget_browser(browser_id: i32) {
 /// The browser behind a CDP target id, for a window tab.
 pub fn browser_of(target: &str) -> Option<i32> {
     targets().lock().ok()?.get(target).copied()
+}
+
+/// Browsers whose DevTools replies the window hears (`Created::observe`).
+fn observed() -> &'static Mutex<std::collections::HashSet<i32>> {
+    static O: OnceLock<Mutex<std::collections::HashSet<i32>>> = OnceLock::new();
+    O.get_or_init(Default::default)
+}
+
+/// The window listens to browser `id`'s DevTools replies.
+pub(crate) fn note_observed(id: i32) {
+    if let Ok(mut o) = observed().lock() {
+        o.insert(id);
+    }
+}
+
+/// An open browser the window listens to, the oldest: a DevTools session
+/// for questions about the whole profile (its extensions' workers).
+pub(crate) fn any_browser() -> Option<cef::Browser> {
+    let o = observed().lock().ok()?.clone();
+    let b = browsers().lock().ok()?;
+    b.iter()
+        .filter(|(id, _)| o.contains(id))
+        .min_by_key(|(id, _)| **id)
+        .map(|(_, b)| b.clone())
+}
+
+/// Every open browser by its id, so code off CEF's UI thread (the relay)
+/// can reach one through [`with_browser`].
+fn browsers() -> &'static Mutex<HashMap<i32, cef::Browser>> {
+    static BROWSERS: OnceLock<Mutex<HashMap<i32, cef::Browser>>> = OnceLock::new();
+    BROWSERS.get_or_init(Default::default)
+}
+
+/// `browser` was created; `None` once the browser `id` closed.
+pub(crate) fn keep_browser(id: i32, browser: Option<&cef::Browser>) {
+    if browser.is_none() {
+        if let Ok(mut o) = observed().lock() {
+            o.remove(&id);
+        }
+    }
+    if let Ok(mut b) = browsers().lock() {
+        match browser {
+            Some(browser) => b.insert(id, browser.clone()),
+            None => b.remove(&id),
+        };
+    }
+}
+
+/// Run `job` with the browser `id` on CEF's UI thread; false when no such
+/// browser is open.
+pub fn with_browser(id: i32, job: impl FnOnce(&cef::Browser) + Send + 'static) -> bool {
+    let Some(browser) = browsers().lock().ok().and_then(|b| b.get(&id).cloned()) else {
+        return false;
+    };
+    handlers::on_ui(move || job(&browser));
+    true
 }
 
 /// Run a CEF subprocess (renderer, GPU, utility, zygote) when this process
@@ -454,6 +527,12 @@ pub fn take_devtools() -> Option<DevTools> {
     }
 }
 
+/// The profile's Chromium folder (its extensions, preferences); `None` for
+/// an incognito window, which keeps nothing.
+pub(crate) fn profile_dir() -> Option<PathBuf> {
+    CACHE.get().cloned().flatten()
+}
+
 /// The request context for the window's tabs: the profile's cookies,
 /// storage and cache, or memory only for incognito.
 pub fn request_context() -> Option<cef::RequestContext> {
@@ -507,13 +586,41 @@ pub(crate) fn write_languages() {
 /// Set the profile's string preference `name` (Chromium's own settings).
 /// Call on CEF's UI thread.
 pub(crate) fn set_pref(name: &str, value: &str) {
-    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    set_pref_to(name, Pref::Str(value));
+}
+
+/// A preference value.
+pub(crate) enum Pref<'a> {
+    Str(&'a str),
+    Bool(bool),
+    List(&'a [&'a str]),
+}
+
+/// Set the profile's preference `name` to `value`. Call on CEF's UI thread.
+pub(crate) fn set_pref_to(name: &str, value: Pref) {
+    use cef::{ImplListValue as _, ImplPreferenceManager as _, ImplValue as _};
     let contexts = [request_context(), cef::request_context_get_global_context()];
     for c in contexts.iter().flatten() {
         let Some(mut v) = cef::value_create() else {
             continue;
         };
-        v.set_string(Some(&CefString::from(value)));
+        match &value {
+            Pref::Str(s) => {
+                v.set_string(Some(&CefString::from(*s)));
+            }
+            Pref::Bool(b) => {
+                v.set_bool(*b as _);
+            }
+            Pref::List(items) => {
+                let Some(mut list) = cef::list_value_create() else {
+                    continue;
+                };
+                for (i, s) in items.iter().enumerate() {
+                    list.set_string(i, Some(&CefString::from(*s)));
+                }
+                v.set_list(Some(&mut list));
+            }
+        }
         // Not empty: CEF refuses a null error string, and an empty
         // CefString has no buffer.
         let mut error = CefString::from(" ");
@@ -521,6 +628,23 @@ pub(crate) fn set_pref(name: &str, value: &str) {
             eprintln!("redrob-browser: {name} not set: {error}");
         }
     }
+}
+
+/// Chrome's own features the window relies on (docs/CHROME-FEATURES.md): spell
+/// check in English and Korean, and no second password manager next to the
+/// window's vault. Run once Chromium's context is ready (cef/app.rs).
+pub(crate) fn write_feature_prefs() {
+    set_pref_to("browser.enable_spellchecking", Pref::Bool(true));
+    set_pref_to(
+        "spellcheck.dictionaries",
+        Pref::List(handlers::spelling::DICTIONARIES),
+    );
+    // The window's vault saves and fills passwords (vault.rs); Chrome's
+    // password manager would ask a second time.
+    set_pref_to("credentials_enable_service", Pref::Bool(false));
+    // Offer to translate pages in other languages, as Chrome does (it can
+    // only with Google's API keys, context_menu.rs).
+    set_pref_to("translate.enabled", Pref::Bool(true));
 }
 
 /// Whether the profile holds its own value for the preference `name` (not

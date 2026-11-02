@@ -196,6 +196,10 @@ wrap_keyboard_handler! {
             let Some(s) = shortcut(e.windows_key_code, e.modifiers) else {
                 return edit(browser, e);
             };
+            if s == Shortcut::Escape && crate::cef::client::popup_escape(browser.identifier()) {
+                self.sink.wake_window();
+                return 1;
+            }
             self.sink.send(browser.identifier(), Event::Shortcut(s));
             // Escape stays the page's as well (it closes the page's own popups).
             (s != Shortcut::Escape) as _
