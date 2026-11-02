@@ -27,6 +27,7 @@ mod profile;
 mod relay;
 mod self_update;
 mod startup;
+mod strip;
 mod theme;
 mod updater;
 mod vault;
@@ -328,8 +329,18 @@ struct Window {
     maximized: bool,
     /// Something the saved session should catch up with.
     session_dirty: bool,
-    /// The tab being dragged in the strip, and where on it the pointer took hold.
-    tab_drag: Option<(TabId, f32)>,
+    /// A tab or group drag that began in this strip, for the browser to run.
+    drag_start: Option<browser::DragStart>,
+    /// The drag going on in this strip (browser.rs sets it every pass).
+    drag_view: Option<browser::DragView>,
+    /// Where the strip and its tabs were drawn last.
+    strip_layout: browser::StripLayout,
+    /// The window's inner area on screen, in points.
+    screen_inner: Option<Rect>,
+    /// The group whose name is being typed in its chip, and the text.
+    renaming: Option<(model::GroupId, String)>,
+    /// The chrome takes the keyboard from the page on the next pass.
+    take_keyboard: bool,
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
@@ -345,11 +356,23 @@ impl Window {
     }
 
     /// Reopen the tabs from the last session in their order.
-    fn restore(&mut self, tabs: Vec<profile::SavedTab>, active: usize) {
+    fn restore(&mut self, tabs: Vec<profile::SavedTab>, active: usize, groups: Vec<model::Group>) {
+        // Saved group ids are the last run's: give each a fresh one.
+        let ids: std::collections::HashMap<u64, model::GroupId> = groups
+            .iter()
+            .map(|g| (g.id, model::alloc_group_id()))
+            .collect();
+        for g in groups {
+            self.model.groups.push(model::Group {
+                id: ids[&g.id],
+                ..g
+            });
+        }
         for saved in tabs {
             let id = self.model.alloc_id();
             let mut tab = Tab::new(id, &saved.url);
             tab.title = saved.title;
+            tab.group = saved.group.and_then(|g| ids.get(&g).copied());
             // Our own pages are drawn here; their Chromium tab waits on about:blank.
             let internal = internal::is_internal(&saved.url);
             tab.loading = !internal && saved.url != NEW_TAB;
@@ -366,8 +389,15 @@ impl Window {
                 }),
             );
         }
+        self.model.prune_groups();
         if !self.model.tabs.is_empty() {
             self.model.active = active.min(self.model.tabs.len() - 1);
+            // The tab on screen never hides in a collapsed group.
+            if let Some(g) = self.model.tabs[self.model.active].group {
+                if let Some(g) = self.model.group_mut(g) {
+                    g.collapsed = false;
+                }
+            }
             self.activated();
         }
     }
@@ -386,7 +416,13 @@ impl Window {
         self.session_dirty = true;
     }
 
+    /// A new tab next to the active one. A page opened from a grouped tab
+    /// joins its group; a new tab page (Ctrl+T, +) goes after the group.
     fn open_tab(&mut self, url: &str, activate: bool) -> TabId {
+        self.open_tab_with(url, activate, url != NEW_TAB)
+    }
+
+    fn open_tab_with(&mut self, url: &str, activate: bool, in_group: bool) -> TabId {
         let id = self.model.alloc_id();
         let mut tab = Tab::new(id, url);
         // Our own pages are drawn by the window; the Chromium tab waits on about:blank.
@@ -398,6 +434,15 @@ impl Window {
             url.to_string()
         };
         self.model.insert_tab(tab, activate);
+        if !in_group {
+            if let Some(i) = self
+                .model
+                .index_of(id)
+                .filter(|i| self.model.tabs[*i].group.is_some())
+            {
+                self.model.remove_from_group(i);
+            }
+        }
         self.op(id, Op::Open(engine_url));
         if url == NEW_TAB {
             self.top_sites = None;
@@ -411,6 +456,94 @@ impl Window {
             }
         }
         id
+    }
+
+    /// Open `urls` at the strip's end, the first on screen: Chrome's "Open
+    /// all" for a bookmarks folder. Returns the new tabs.
+    fn open_all(&mut self, urls: &[String]) -> Vec<TabId> {
+        let mut ids = Vec::new();
+        for (k, url) in urls.iter().enumerate() {
+            let id = self.model.alloc_id();
+            let mut tab = Tab::new(id, url);
+            let engine_url = if internal::is_internal(url) {
+                tab.loading = false;
+                tab.title = internal::title(url).to_string();
+                NEW_TAB.to_string()
+            } else {
+                url.clone()
+            };
+            self.model.tabs.push(tab);
+            self.op(id, Op::Open(engine_url));
+            if k == 0 {
+                self.model.active = self.model.tabs.len() - 1;
+            }
+            ids.push(id);
+        }
+        if !ids.is_empty() {
+            self.activated();
+        }
+        self.save_session();
+        ids
+    }
+
+    /// "Open all in new group": the tabs at the strip's end, in a group
+    /// named `title`.
+    fn open_all_in_group(&mut self, urls: &[String], title: &str) -> Option<model::GroupId> {
+        let ids = self.open_all(urls);
+        self.model.group_tabs(&ids, title)
+    }
+
+    /// "Close group": its tabs close, and Ctrl+Shift+T brings the group back.
+    fn close_group(&mut self, g: model::GroupId) {
+        let Some(group) = self.model.group(g).cloned() else {
+            return;
+        };
+        let Some(r) = self.model.group_range(g) else {
+            return;
+        };
+        let mut tabs = Vec::new();
+        for i in r.rev() {
+            let (url, title) = {
+                let t = &self.model.tabs[i];
+                (t.url.clone(), t.title.clone())
+            };
+            if let Some(t) = self.model.take_tab(i) {
+                self.prompts.close_tab(t.id);
+                self.agent_logins.remove(&t.id);
+                self.op(t.id, Op::Close);
+            }
+            tabs.push((url, title));
+        }
+        tabs.reverse();
+        self.model.remember_closed(model::Closed::Group {
+            title: group.title,
+            color: group.color,
+            tabs,
+        });
+        if self.model.tabs.is_empty() {
+            self.open_tab(NEW_TAB, true);
+        } else {
+            self.activated();
+        }
+        self.save_session();
+    }
+
+    /// Click on a group's chip: collapse or expand it.
+    fn toggle_group(&mut self, g: model::GroupId) {
+        let collapsed = self.model.group(g).is_some_and(|x| x.collapsed);
+        let had = self.active_id();
+        if !self.model.set_collapsed(g, !collapsed) {
+            // Every tab is in the group: Chrome opens a new tab beside it.
+            let id = self.model.alloc_id();
+            self.model.tabs.push(Tab::new(id, NEW_TAB));
+            self.model.active = self.model.tabs.len() - 1;
+            self.op(id, Op::Open(NEW_TAB.to_string()));
+            self.top_sites = None;
+        }
+        if self.active_id() != had {
+            self.activated();
+        }
+        self.save_session();
     }
 
     fn close_tab(&mut self, index: usize) {
@@ -435,6 +568,12 @@ impl Window {
     /// The active tab changed: follow it in the address field and the engine.
     fn activated(&mut self) {
         self.editing = false;
+        // The tab on screen never hides in a collapsed group.
+        if let Some(g) = self.model.active_tab().and_then(|t| t.group) {
+            if let Some(g) = self.model.group_mut(g) {
+                g.collapsed = false;
+            }
+        }
         if let Some(t) = self.model.active_tab() {
             self.address = if t.url == NEW_TAB {
                 String::new()
@@ -731,11 +870,20 @@ impl Window {
                 self.open_tab(NEW_TAB, true);
             }
             Shortcut::CloseTab => self.close_tab(a),
-            Shortcut::ReopenTab => {
-                if let Some((url, _)) = self.model.closed.pop() {
+            Shortcut::ReopenTab => match self.model.closed.pop() {
+                Some(model::Closed::Tab { url, .. }) => {
                     self.open_tab(&url, true);
                 }
-            }
+                Some(model::Closed::Group { title, color, tabs }) => {
+                    let urls: Vec<String> = tabs.into_iter().map(|(u, _)| u).collect();
+                    if let Some(g) = self.open_all_in_group(&urls, &title) {
+                        if let Some(g) = self.model.group_mut(g) {
+                            g.color = color;
+                        }
+                    }
+                }
+                None => {}
+            },
             Shortcut::NewWindow => self.requests.push(browser::Request::NewWindow),
             Shortcut::NewIncognito => self.open_incognito(),
             Shortcut::Address => self.focus_address = true,
@@ -745,8 +893,17 @@ impl Window {
                     self.op(id, Op::Reload);
                 }
             }
-            Shortcut::NextTab if n > 1 => self.select_tab((a + 1) % n),
-            Shortcut::PrevTab if n > 1 => self.select_tab((a + n - 1) % n),
+            // Tabs in a collapsed group are skipped, as in Chrome.
+            Shortcut::NextTab if n > 1 => {
+                if let Some(i) = self.model.next_shown(false) {
+                    self.select_tab(i);
+                }
+            }
+            Shortcut::PrevTab if n > 1 => {
+                if let Some(i) = self.model.next_shown(true) {
+                    self.select_tab(i);
+                }
+            }
             Shortcut::Back | Shortcut::Forward => {
                 if let Some(id) = self.active_id() {
                     self.op(
@@ -763,8 +920,8 @@ impl Window {
                 self.open_tab(internal::HISTORY, true);
             }
             Shortcut::DevTools => self.devtools(),
-            Shortcut::MoveTabLeft if a > 0 => self.model.move_tab(a, a - 1),
-            Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab(a, a + 1),
+            Shortcut::MoveTabLeft if a > 0 => self.model.move_tab_regroup(a, a - 1),
+            Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab_regroup(a, a + 1),
             Shortcut::Escape => {
                 popup::close_menus(ctx);
                 // Escape in the address bar: its text goes back to the
@@ -1355,8 +1512,35 @@ impl Window {
             tab,
         };
         self.requests.push(browser::Request::Detach {
-            moved: Box::new(moved),
+            moved: Box::new(browser::Payload::Tab(moved)),
             at,
+        });
+        self.activated();
+        self.save_session();
+    }
+
+    /// "Move group to new window": the group and its tabs, live.
+    fn move_group_to_new_window(&mut self, g: model::GroupId) {
+        let all = self
+            .model
+            .group_range(g)
+            .is_some_and(|r| r.len() == self.model.tabs.len());
+        if all {
+            return;
+        }
+        let Some((group, tabs)) = self.model.take_group(g) else {
+            return;
+        };
+        let moved = tabs
+            .into_iter()
+            .map(|tab| browser::Moved {
+                login: self.agent_logins.remove(&tab.id),
+                tab,
+            })
+            .collect();
+        self.requests.push(browser::Request::Detach {
+            moved: Box::new(browser::Payload::Group(group, moved)),
+            at: None,
         });
         self.activated();
         self.save_session();
@@ -1384,311 +1568,6 @@ impl Window {
         {
             self.model.toggle_bookmark(&url, &title);
             self.save_bookmarks();
-        }
-    }
-
-    /// The tab strip: tabs share the width up to 220pt each; the active one
-    /// joins the toolbar below it.
-    fn tab_bar(&mut self, ui: &mut egui::Ui) {
-        let p = *theme::palette(ui);
-        let height = 40.0;
-        // The strip is the title bar: drag it to move the window, double-click to maximize.
-        let (strip, drag) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), height),
-            Sense::click_and_drag(),
-        );
-        let strip_fill = if self.incognito {
-            p.surface_raised
-        } else {
-            p.surface_sunken
-        };
-        ui.painter().rect_filled(strip, 0.0, strip_fill);
-        if drag.drag_started_by(egui::PointerButton::Primary) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
-        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-        if drag.double_clicked() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-        }
-        let mut select = None;
-        let mut close = None;
-        let plus_side = 28.0;
-        // macOS draws its traffic lights over the strip's left end.
-        let left_pad = if cfg!(target_os = "macos") {
-            76.0
-        } else {
-            size::SPACE_2
-        };
-        let captions = if cfg!(target_os = "macos") {
-            0.0
-        } else {
-            self.caption_buttons(ui, strip, maximized)
-        };
-        let badge = if self.incognito {
-            self.incognito_badge(ui, strip, captions)
-        } else {
-            0.0
-        };
-        let strip = Rect::from_min_max(
-            strip.min,
-            egui::pos2(strip.right() - captions - badge, strip.bottom()),
-        );
-        let left = strip.left() + left_pad;
-        let room = (strip.width() - left_pad - size::SPACE_2 - plus_side - size::SPACE_1).max(0.0);
-        let n = self.model.tabs.len().max(1) as f32;
-        let width = (room / n).clamp(48.0, 220.0);
-        let top = strip.top() + 6.0;
-        let count = self.model.tabs.len();
-        let pointer = ui.ctx().pointer_latest_pos();
-        let mut drag_state = self.tab_drag;
-        let mut reorder = None;
-        let mut move_out = None;
-        // Where a tab dragged out of the strip was let go, on screen.
-        let mut drop_at: Option<egui::Pos2> = None;
-        // Pulled this far above or below the strip, a tab leaves the window.
-        let detach_at = 40.0;
-        let detached = |y: f32| y > strip.bottom() + detach_at || y < strip.top() - detach_at;
-        // The dragged tab is painted last, over the tabs it slides across.
-        let mut order: Vec<usize> = (0..count).collect();
-        if let Some(d) = drag_state.and_then(|(id, _)| self.model.index_of(id)) {
-            order.retain(|&i| i != d);
-            order.push(d);
-        }
-        for i in order {
-            let tab = &self.model.tabs[i];
-            // Every window is on the one relay, so agent tabs move too.
-            let detachable = count > 1;
-            let out = |y: f32| detachable && detached(y);
-            let slot = left + i as f32 * width;
-            if slot > strip.right() - plus_side {
-                continue;
-            }
-            let id = ui.id().with(("tab", tab.id));
-            let dragging = drag_state.filter(|(d, _)| *d == tab.id);
-            // Other tabs slide to their new places; the dragged one follows the pointer.
-            let x = match (dragging, pointer) {
-                (Some((_, grab)), Some(pos)) if !out(pos.y) => {
-                    let max = left + count.saturating_sub(1) as f32 * width;
-                    let x = (pos.x - grab).clamp(left, max.max(left));
-                    ui.ctx().animate_value_with_time(id.with("x"), x, 0.0)
-                }
-                _ => ui.ctx().animate_value_with_time(id.with("x"), slot, 0.12),
-            };
-            let rect =
-                Rect::from_min_size(egui::pos2(x, top), Vec2::new(width, strip.bottom() - top));
-            let r = ui.interact(rect, id, Sense::click_and_drag());
-            if r.drag_started_by(egui::PointerButton::Primary) {
-                let grab = r.interact_pointer_pos().map_or(0.0, |p| p.x - x);
-                drag_state = Some((tab.id, grab));
-                select = Some(i);
-            }
-            if let (Some((_, grab)), Some(pos)) = (dragging, pointer) {
-                if r.drag_stopped() {
-                    drag_state = None;
-                    if out(pos.y) {
-                        move_out = Some(i);
-                        // The new window's first tab sits where this one was
-                        // held: its strip starts at the left pad, 6 points down.
-                        let origin = ui
-                            .ctx()
-                            .input(|i| i.viewport().inner_rect.map(|r| r.min))
-                            .unwrap_or_default();
-                        drop_at =
-                            Some(origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0));
-                    }
-                } else if !out(pos.y) {
-                    let to = ((pos.x - grab - left) / width + 0.5).floor();
-                    let to = (to.max(0.0) as usize).min(count.saturating_sub(1));
-                    if to != i {
-                        reorder = Some((i, to));
-                    }
-                } else {
-                    // Out of the strip: a copy of the tab rides under the
-                    // pointer, in a window of its own (it crosses the page).
-                    let size = rect.size();
-                    let label = tab.label().to_string();
-                    popup::ghost(
-                        ui.ctx(),
-                        id.with("ghost"),
-                        pos - Vec2::new(grab, 12.0),
-                        |ui| {
-                            let (r, _) =
-                                ui.allocate_exact_size(size - Vec2::splat(12.0), Sense::hover());
-                            ui.painter().text(
-                                egui::pos2(r.left() + 6.0, r.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                label,
-                                egui::FontId::proportional(12.5),
-                                p.ink_primary,
-                            );
-                        },
-                    );
-                }
-            }
-            let active = i == self.model.active;
-            let painter = ui.painter_at(rect.expand2(Vec2::new(8.0, 0.0)));
-            let top_round = CornerRadius {
-                nw: size::RADIUS_MD,
-                ne: size::RADIUS_MD,
-                sw: 0,
-                se: 0,
-            };
-            if active {
-                painter.rect_filled(rect, top_round, p.surface_base);
-            } else if r.hovered() {
-                painter.rect_filled(
-                    rect.shrink2(Vec2::new(2.0, 3.0)),
-                    CornerRadius::same(size::RADIUS_SM),
-                    p.surface_raised,
-                );
-            } else if i + 1 != self.model.active && i + 1 < self.model.tabs.len() {
-                painter.vline(
-                    rect.right(),
-                    rect.y_range().shrink(9.0),
-                    Stroke::new(1.0, p.border_subtle),
-                );
-            }
-            // Icon: a spinner while loading, the sparkle for agent tabs, else a globe.
-            let icon_rect = Rect::from_center_size(
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                Vec2::splat(16.0),
-            );
-            if tab.loading {
-                egui::Spinner::new()
-                    .size(14.0)
-                    .color(p.ink_brand)
-                    .paint_at(ui, icon_rect);
-            } else if tab.agent {
-                Icon::Sparkle.paint(ui, icon_rect, p.ink_brand);
-            } else if internal::is_internal(&tab.url) || tab.url == NEW_TAB {
-                Icon::Sparkle.paint(ui, icon_rect, p.ink_secondary);
-            } else {
-                Icon::Globe.paint(ui, icon_rect, p.ink_muted);
-            }
-            let show_close = active || r.hovered();
-            let close_rect = Rect::from_center_size(
-                egui::pos2(rect.right() - 16.0, rect.center().y),
-                Vec2::splat(20.0),
-            );
-            let mut label = tab.label().to_string();
-            if label.is_empty() {
-                label = t("New tab").to_string();
-            }
-            let text_left = icon_rect.right() + 8.0;
-            let text_right = if show_close {
-                close_rect.left() - 4.0
-            } else {
-                rect.right() - 10.0
-            };
-            if text_right - text_left > 12.0 {
-                let ink = if active {
-                    p.ink_primary
-                } else {
-                    p.ink_secondary
-                };
-                let galley = ui.painter().layout(
-                    label,
-                    egui::FontId::proportional(12.5),
-                    ink,
-                    f32::INFINITY,
-                );
-                let clip = Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
-                let tp = ui.painter_at(clip);
-                tp.galley(
-                    egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
-                    galley.clone(),
-                    ink,
-                );
-                if galley.size().x > clip.width() {
-                    // Fade the cut end into the tab instead of an ellipsis.
-                    let bg = if active {
-                        p.surface_base
-                    } else if r.hovered() {
-                        p.surface_raised
-                    } else {
-                        p.surface_sunken
-                    };
-                    let fade = Rect::from_x_y_ranges(
-                        (text_right - 18.0)..=text_right,
-                        rect.y_range().shrink(6.0),
-                    );
-                    let mut mesh = egui::Mesh::default();
-                    mesh.colored_vertex(fade.left_top(), bg.gamma_multiply(0.0));
-                    mesh.colored_vertex(fade.right_top(), bg);
-                    mesh.colored_vertex(fade.right_bottom(), bg);
-                    mesh.colored_vertex(fade.left_bottom(), bg.gamma_multiply(0.0));
-                    mesh.add_triangle(0, 1, 2);
-                    mesh.add_triangle(0, 2, 3);
-                    tp.add(mesh);
-                }
-            }
-            if show_close {
-                let cr = ui.interact(close_rect, id.with("close"), Sense::click());
-                if cr.hovered() {
-                    painter.rect_filled(
-                        close_rect,
-                        CornerRadius::same(size::RADIUS_XS),
-                        p.border_subtle,
-                    );
-                }
-                Icon::Close.paint(
-                    ui,
-                    close_rect.shrink(4.0),
-                    if cr.hovered() {
-                        p.ink_primary
-                    } else {
-                        p.ink_secondary
-                    },
-                );
-                if popup::tip(cr, t("Close tab")).clicked() {
-                    close = Some(i);
-                }
-            }
-            let r = popup::tip(r, &tab.url);
-            if r.clicked() {
-                select = Some(i);
-            }
-            if r.middle_clicked() {
-                close = Some(i);
-            }
-            popup::context_menu(&r, |ui| {
-                if ui
-                    .add_enabled(detachable, egui::Button::new(t("Move to new window")))
-                    .clicked()
-                {
-                    move_out = Some(i);
-                    ui.close();
-                }
-            });
-        }
-        if drag_state.is_some() && !ui.ctx().input(|i| i.pointer.primary_down()) {
-            // The press ended somewhere the tab never heard of it.
-            drag_state = None;
-        }
-        self.tab_drag = drag_state;
-        let shown = self.model.tabs.len() as f32;
-        let plus_x =
-            (left + shown * width + size::SPACE_1).min(strip.right() - plus_side - size::SPACE_1);
-        let plus_rect = Rect::from_min_size(
-            egui::pos2(plus_x, strip.center().y - plus_side / 2.0 + 3.0),
-            Vec2::splat(plus_side),
-        );
-        let mut plus_ui = ui.new_child(egui::UiBuilder::new().max_rect(plus_rect));
-        let new_tab =
-            theme::icon_button_sized(&mut plus_ui, Icon::Plus, t("New tab"), plus_side, true)
-                .clicked();
-        if let Some(i) = move_out {
-            self.move_to_new_window(i, drop_at);
-        } else if new_tab {
-            self.open_tab(NEW_TAB, true);
-        } else if let Some(i) = close {
-            self.close_tab(i);
-        } else if let Some(i) = select {
-            self.select_tab(i);
-        }
-        if let Some((from, to)) = reorder {
-            self.model.move_tab(from, to);
         }
     }
 
@@ -2297,9 +2176,21 @@ impl Window {
             .enumerate()
             .filter(|(_, b)| b.folder.is_empty())
             .collect();
+        // The bar's folders: the first part of each folder path, in order.
+        let mut folders: Vec<String> = Vec::new();
+        for b in &self.model.bookmarks {
+            if let Some(top) = b.folder.split('/').next().filter(|f| !f.is_empty()) {
+                if !folders.iter().any(|f| f == top) {
+                    folders.push(top.to_string());
+                }
+            }
+        }
+        let bookmarks = self.model.bookmarks.clone();
         let mut go = None;
         let mut go_new_tab = None;
         let mut remove = None;
+        // A folder's "Open all": (addresses, folder name, where).
+        let mut open_all: Option<(Vec<String>, String, OpenAll)> = None;
         let r = egui::Frame::new()
             .fill(p.surface_base)
             .inner_margin(egui::Margin {
@@ -2310,7 +2201,7 @@ impl Window {
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                if top_level.is_empty() {
+                if top_level.is_empty() && folders.is_empty() {
                     return;
                 }
                 ui.horizontal(|ui| {
@@ -2360,10 +2251,57 @@ impl Window {
                                 go_new_tab = Some(b.url.clone());
                                 ui.close();
                             }
+                            if ui.button(t("Open in new window")).clicked() {
+                                open_all =
+                                    Some((vec![b.url.clone()], String::new(), OpenAll::Window));
+                                ui.close();
+                            }
                             if ui.button(t("Remove")).clicked() {
                                 remove = Some(*i);
                                 ui.close();
                             }
+                        });
+                    }
+                    for folder in &folders {
+                        let label = theme::elide(folder, 22);
+                        let g = ui.painter().layout_no_wrap(
+                            label,
+                            egui::FontId::proportional(12.0),
+                            p.ink_secondary,
+                        );
+                        let w = g.size().x + 34.0;
+                        if ui.available_width() < w {
+                            break;
+                        }
+                        let (rect, r) = ui.allocate_exact_size(Vec2::new(w, 26.0), Sense::click());
+                        if r.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::same(size::RADIUS_SM),
+                                p.surface_sunken,
+                            );
+                        }
+                        Icon::Folder.paint(
+                            ui,
+                            Rect::from_center_size(
+                                egui::pos2(rect.left() + 14.0, rect.center().y),
+                                Vec2::splat(13.0),
+                            ),
+                            p.ink_muted,
+                        );
+                        ui.painter().galley(
+                            egui::pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0),
+                            g,
+                            p.ink_secondary,
+                        );
+                        // Click: the folder's bookmarks; right-click: open them all.
+                        popup::menu(&r, 280.0, false, |ui| {
+                            if let Some(u) = folder_menu(ui, &bookmarks, folder, &mut open_all) {
+                                go = Some(u);
+                            }
+                        });
+                        popup::context_menu(&r, |ui| {
+                            open_all_items(ui, &bookmarks, folder, &mut open_all);
                         });
                     }
                 });
@@ -2377,6 +2315,17 @@ impl Window {
         if let Some(i) = remove {
             self.model.bookmarks.remove(i);
             self.save_bookmarks();
+        }
+        if let Some((urls, name, how)) = open_all {
+            match how {
+                OpenAll::Tabs => {
+                    self.open_all(&urls);
+                }
+                OpenAll::Window => self.requests.push(browser::Request::OpenWindow(urls)),
+                OpenAll::Group => {
+                    self.open_all_in_group(&urls, &name);
+                }
+            }
         }
         if let Some(url) = go_new_tab {
             self.open_tab(&url, false);
@@ -2631,8 +2580,9 @@ impl Window {
         let bar = self
             .active_id()
             .is_some_and(|id| self.prompts.wants_keyboard(id));
+        let take = std::mem::take(&mut self.take_keyboard);
         if self.page_focused
-            && (self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
+            && (take || self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
         {
             cdp::trace(format_args!("window {} takes the keyboard", self.wid));
             self.page_focused = false;
@@ -2774,6 +2724,15 @@ impl Window {
                     if let Some(u) = act.open_new_tab {
                         self.open_tab(&u, false);
                     }
+                    match act.open_all {
+                        Some((urls, Some(name))) => {
+                            self.open_all_in_group(&urls, &name);
+                        }
+                        Some((urls, None)) => {
+                            self.open_all(&urls);
+                        }
+                        None => {}
+                    }
                     if let Some(u) = act.open {
                         self.navigate(u);
                     }
@@ -2853,6 +2812,98 @@ impl Window {
             ctx.request_repaint();
         }
     }
+}
+
+/// Where a bookmarks folder's "Open all" opens its bookmarks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum OpenAll {
+    Tabs,
+    Window,
+    Group,
+}
+
+/// Every bookmark in folder `path` and the folders inside it, as Chrome's
+/// "Open all" takes them.
+fn folder_urls(bookmarks: &[model::Bookmark], path: &str) -> Vec<String> {
+    let inside = format!("{path}/");
+    bookmarks
+        .iter()
+        .filter(|b| b.folder == path || b.folder.starts_with(&inside))
+        .map(|b| b.url.clone())
+        .collect()
+}
+
+/// A folder's "Open all (N)", "Open all in new window" and "Open all in
+/// new group", as in Chrome's bookmark folder menu.
+fn open_all_items(
+    ui: &mut egui::Ui,
+    bookmarks: &[model::Bookmark],
+    path: &str,
+    out: &mut Option<(Vec<String>, String, OpenAll)>,
+) {
+    let urls = folder_urls(bookmarks, path);
+    let n = urls.len();
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    for (label, how) in [
+        (tf("Open all ({0})", &[&n]), OpenAll::Tabs),
+        (t("Open all in new window").to_string(), OpenAll::Window),
+        (t("Open all in new group").to_string(), OpenAll::Group),
+    ] {
+        if ui.add_enabled(n > 0, egui::Button::new(label)).clicked() {
+            *out = Some((urls.clone(), name.clone(), how));
+            ui.close();
+        }
+    }
+}
+
+/// A bookmarks folder's menu: its bookmarks, its folders (one level
+/// open at a time) and "Open all". Returns the bookmark clicked.
+fn folder_menu(
+    ui: &mut egui::Ui,
+    bookmarks: &[model::Bookmark],
+    path: &str,
+    out: &mut Option<(Vec<String>, String, OpenAll)>,
+) -> Option<String> {
+    let mut go = None;
+    let inside = format!("{path}/");
+    let mut subs: Vec<String> = Vec::new();
+    for b in bookmarks {
+        if let Some(rest) = b.folder.strip_prefix(&inside) {
+            let sub = format!("{inside}{}", rest.split('/').next().unwrap_or(rest));
+            if !subs.contains(&sub) {
+                subs.push(sub);
+            }
+        }
+    }
+    for sub in &subs {
+        let name = sub.rsplit('/').next().unwrap_or(sub);
+        popup::submenu(ui, name, |ui| {
+            for b in bookmarks.iter().filter(|b| &b.folder == sub) {
+                let label = theme::elide(if b.title.is_empty() { &b.url } else { &b.title }, 40);
+                if ui.button(label).clicked() {
+                    go = Some(b.url.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            open_all_items(ui, bookmarks, sub, out);
+        });
+    }
+    let mut any = !subs.is_empty();
+    for b in bookmarks.iter().filter(|b| b.folder == path) {
+        any = true;
+        let label = theme::elide(if b.title.is_empty() { &b.url } else { &b.title }, 40);
+        if ui.button(label).clicked() {
+            go = Some(b.url.clone());
+            ui.close();
+        }
+    }
+    if !any {
+        ui.label(t("(empty)"));
+    }
+    ui.separator();
+    open_all_items(ui, bookmarks, path, out);
+    go
 }
 
 /// A download size the way Chrome's download list shows it: B, KB, MB, GB.
