@@ -336,7 +336,99 @@ fn relational_key_may_match(
     }
 }
 
+/// What `relational_key_may_match` reads of a set of elements, so many
+/// keys can be tested against one subtree without walking it for each.
+pub(crate) struct RelationalKeySummary {
+    ids: crate::HashSet<String>,
+    classes: crate::HashSet<String>,
+    attributes: crate::HashSet<String>,
+    locals: crate::HashSet<String>,
+    quirks: bool,
+}
+
+impl RelationalKeySummary {
+    pub(crate) fn of(tree: &DomTree, nodes: &[NodeId]) -> Self {
+        let quirks = tree.is_quirks();
+        let fold = |value: &str| {
+            if quirks {
+                value.to_ascii_lowercase()
+            } else {
+                value.to_owned()
+            }
+        };
+        let mut summary = Self {
+            ids: crate::HashSet::default(),
+            classes: crate::HashSet::default(),
+            attributes: crate::HashSet::default(),
+            locals: crate::HashSet::default(),
+            quirks,
+        };
+        for &node in nodes {
+            let Some(dom_node) = tree.borrow_node(node) else {
+                continue;
+            };
+            let Some(element) = dom_node.as_element() else {
+                continue;
+            };
+            summary
+                .locals
+                .insert(element.local.as_ref().to_ascii_lowercase());
+            if let Some(id) = dom_node.get_attribute("id") {
+                summary.ids.insert(fold(id));
+            }
+            if let Some(classes) = dom_node.get_attribute("class") {
+                summary.classes.extend(classes.split_whitespace().map(fold));
+            }
+            if let Some(attributes) = dom_node.attrs() {
+                for attribute in attributes {
+                    if !summary.attributes.contains(attribute.name.local.as_ref()) {
+                        summary
+                            .attributes
+                            .insert(attribute.name.local.as_ref().to_owned());
+                    }
+                }
+            }
+        }
+        summary
+    }
+
+    /// `relational_key_may_match` for some element of the set.
+    fn may_match(&self, key: &RelationalSelectorKey) -> bool {
+        let contains = |set: &crate::HashSet<String>, value: &str| {
+            if self.quirks {
+                set.contains(&value.to_ascii_lowercase())
+            } else {
+                set.contains(value)
+            }
+        };
+        match key {
+            RelationalSelectorKey::Id(expected) => contains(&self.ids, expected),
+            RelationalSelectorKey::Class(expected) => contains(&self.classes, expected),
+            RelationalSelectorKey::Attribute(expected) => self.attributes.contains(expected),
+            RelationalSelectorKey::LocalName(expected) => {
+                self.locals.contains(&expected.to_ascii_lowercase())
+            }
+        }
+    }
+}
+
 impl RelationalInvalidation {
+    /// `subject_may_match` for some element of `nodes`, whose keys
+    /// `summary` holds.
+    pub(crate) fn subject_may_match_any(
+        &self,
+        tree: &DomTree,
+        nodes: &[NodeId],
+        summary: &RelationalKeySummary,
+    ) -> bool {
+        match &self.subject_keys {
+            Some(keys) => keys.iter().any(|key| summary.may_match(key)),
+            None => nodes
+                .iter()
+                .any(|&node| self.relative_path_may_match(tree, node)),
+        }
+    }
+
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
             && self.anchor_ancestor_keys.iter().all(|key| {

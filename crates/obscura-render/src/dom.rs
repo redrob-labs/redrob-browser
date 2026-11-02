@@ -5552,35 +5552,6 @@ fn subtree_may_match_relational_path(
         .any(|id| invalidation.subject_may_match(tree, id))
 }
 
-/// `subtree_may_match_relational_path` for an inserted or removed subtree
-/// whose anchors outside it are reachable only through a child chain of
-/// `depth` levels (`:has(> a > b)` is 2). A chain element in the subtree is
-/// then at most `depth - 1` levels below its root: deeper matches can only
-/// change anchors inside the subtree, which is restyled as a whole anyway.
-fn shallow_subtree_may_match_relational_path(
-    tree: &DomTree,
-    invalidation: &crate::css::RelationalInvalidation,
-    root: NodeId,
-) -> bool {
-    let Some(depth) = invalidation.child_chain_depth else {
-        return subtree_may_match_relational_path(tree, invalidation, root);
-    };
-    let mut level = vec![root];
-    for _ in 0..depth {
-        if level
-            .iter()
-            .any(|id| invalidation.subject_may_match(tree, *id))
-        {
-            return true;
-        }
-        level = level.iter().flat_map(|id| tree.children(*id)).collect();
-        if level.is_empty() {
-            break;
-        }
-    }
-    false
-}
-
 /// Candidate anchors after an insertion. Relative selectors search from the
 /// changed subtree toward ancestors and earlier siblings; only the boundary
 /// can connect the already-fresh inserted subtree to retained elements.
@@ -5693,24 +5664,63 @@ fn add_relational_tree_invalidation(
         }
     }
 
+    // The moved subtree's nodes by depth below its root, and the keys of
+    // those down to each depth an invalidation asks for (`None`: all). An
+    // invalidation whose anchors outside the subtree are reachable only
+    // through a child chain of `depth` levels (`:has(> a > b)` is 2) needs
+    // only the top `depth` levels: deeper matches can only change anchors
+    // inside the subtree, which is restyled as a whole anyway.
+    let moved_root = match *mutation {
+        TreeStyleMutation::Remove { node, .. } | TreeStyleMutation::Insert { node, .. } => {
+            Some(node)
+        }
+        TreeStyleMutation::Text { .. } => None,
+    };
+    let mut moved_levels: Vec<Vec<NodeId>> = Vec::new();
+    let mut summaries: HashMap<Option<usize>, (Vec<NodeId>, crate::css::RelationalKeySummary)> =
+        HashMap::default();
+    let mut subtree_may_match = |invalidation: &crate::css::RelationalInvalidation,
+                                 root: NodeId| {
+        let depth = invalidation.child_chain_depth;
+        if !summaries.contains_key(&depth) {
+            if moved_levels.is_empty() {
+                let mut level = vec![root];
+                while !level.is_empty() {
+                    let next = level.iter().flat_map(|id| tree.children(*id)).collect();
+                    moved_levels.push(level);
+                    level = next;
+                }
+            }
+            let nodes: Vec<NodeId> = moved_levels
+                .iter()
+                .take(depth.unwrap_or(usize::MAX))
+                .flatten()
+                .copied()
+                .collect();
+            let summary = crate::css::RelationalKeySummary::of(tree, &nodes);
+            summaries.insert(depth, (nodes, summary));
+        }
+        let (nodes, summary) = &summaries[&depth];
+        invalidation.subject_may_match_any(tree, nodes, summary)
+    };
     for invalidation in map.relational_invalidations() {
         let triggered = match mutation {
             // A detached subtree keeps its attributes, so it can be tested the
             // same way an inserted one is: removal changes a `:has()` match
             // only if the subtree held an element of the relative selector, or
             // through the sibling and structural effects tested here.
-            TreeStyleMutation::Remove { node, .. } => {
-                shallow_subtree_may_match_relational_path(tree, invalidation, *node)
-                    || invalidation.unkeyed_subject
+            TreeStyleMutation::Remove { .. } => {
+                invalidation.unkeyed_subject
                     || invalidation.sibling_side_effect
                     || invalidation.structural_side_effect
                     || invalidation.text_side_effect
+                    || moved_root.is_some_and(|root| subtree_may_match(invalidation, root))
             }
-            TreeStyleMutation::Insert { node, .. } => {
-                shallow_subtree_may_match_relational_path(tree, invalidation, *node)
-                    || invalidation.unkeyed_subject
+            TreeStyleMutation::Insert { .. } => {
+                invalidation.unkeyed_subject
                     || invalidation.sibling_side_effect
                     || invalidation.structural_side_effect
+                    || moved_root.is_some_and(|root| subtree_may_match(invalidation, root))
             }
             TreeStyleMutation::Text { .. } => invalidation.text_side_effect,
         };
@@ -7757,10 +7767,9 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
         }
     });
     let retained_fresh = retained.as_ref().map_or(0, |(retained, fresh)| {
-        retained
-            .styles
-            .keys()
-            .filter(|node| fresh.contains(node))
+        fresh
+            .iter()
+            .filter(|node| retained.styles.contains_key(node))
             .count()
     });
     let retained_reused = retained
@@ -15463,6 +15472,37 @@ pub(crate) fn patch_flat_tree(
         return;
     }
     let slots = tree.node_slot_count();
+    // No subtree moved: every rendered child list, and so the walk, the
+    // parents and the kinds, are the previous ones.
+    if mutations.iter().all(|mutation| {
+        !matches!(
+            mutation,
+            RetainedStyleMutation::Tree(
+                TreeStyleMutation::Insert { .. } | TreeStyleMutation::Remove { .. }
+            )
+        )
+    }) {
+        let mut spans = previous.spans.clone();
+        spans.resize(slots, (u32::MAX, 0));
+        let mut parents = previous.parents.clone();
+        parents.resize(slots, None);
+        let mut kinds = previous.kinds.clone();
+        kinds.resize(slots, ElementKind::UNKNOWN);
+        let flat = std::rc::Rc::new(FlatTree {
+            generation,
+            walk: previous.walk.clone(),
+            spans,
+            kids: previous.kids.clone(),
+            parents,
+            kinds,
+            kinds_present: previous.kinds_present,
+        });
+        if layout_verify_enabled() {
+            verify_flat_tree(tree, &flat);
+        }
+        let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
+        return;
+    }
     let mut spans = previous.spans.clone();
     spans.resize(slots, (u32::MAX, 0));
     let mut kids = previous.kids.clone();
@@ -15583,36 +15623,42 @@ pub(crate) fn patch_flat_tree(
         kinds_present,
     });
     if layout_verify_enabled() {
-        let scratch = build_flat_tree(tree);
-        assert!(
-            flat.walk == scratch.walk,
-            "OBSCURA_LAYOUT_VERIFY: patched flat tree walk differs from scratch"
-        );
-        assert_eq!(
-            flat.kinds_present, scratch.kinds_present,
-            "OBSCURA_LAYOUT_VERIFY: patched flat tree element kinds differ"
-        );
-        for &id in scratch.walk.iter() {
-            assert_eq!(
-                flat.kinds.get(id.index()),
-                scratch.kinds.get(id.index()),
-                "OBSCURA_LAYOUT_VERIFY: patched flat tree kind of {id:?} differs"
-            );
-        }
-        for &id in scratch.walk.iter().chain(std::iter::once(&root)) {
-            assert_eq!(
-                flat.children(id),
-                scratch.children(id),
-                "OBSCURA_LAYOUT_VERIFY: patched flat tree children of {id:?} differ"
-            );
-            assert_eq!(
-                flat.parent(id),
-                scratch.parent(id),
-                "OBSCURA_LAYOUT_VERIFY: patched flat tree parent of {id:?} differs"
-            );
-        }
+        verify_flat_tree(tree, &flat);
     }
     let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
+}
+
+/// `OBSCURA_LAYOUT_VERIFY`: a patched flat tree equals one built from scratch.
+fn verify_flat_tree(tree: &DomTree, flat: &FlatTree) {
+    let root = tree.document();
+    let scratch = build_flat_tree(tree);
+    assert!(
+        flat.walk == scratch.walk,
+        "OBSCURA_LAYOUT_VERIFY: patched flat tree walk differs from scratch"
+    );
+    assert_eq!(
+        flat.kinds_present, scratch.kinds_present,
+        "OBSCURA_LAYOUT_VERIFY: patched flat tree element kinds differ"
+    );
+    for &id in scratch.walk.iter() {
+        assert_eq!(
+            flat.kinds.get(id.index()),
+            scratch.kinds.get(id.index()),
+            "OBSCURA_LAYOUT_VERIFY: patched flat tree kind of {id:?} differs"
+        );
+    }
+    for &id in scratch.walk.iter().chain(std::iter::once(&root)) {
+        assert_eq!(
+            flat.children(id),
+            scratch.children(id),
+            "OBSCURA_LAYOUT_VERIFY: patched flat tree children of {id:?} differ"
+        );
+        assert_eq!(
+            flat.parent(id),
+            scratch.parent(id),
+            "OBSCURA_LAYOUT_VERIFY: patched flat tree parent of {id:?} differs"
+        );
+    }
 }
 
 /// Run `f` on the flat tree of `tree`'s current state, if one was built.
