@@ -57,9 +57,7 @@ fn glib() -> Option<&'static Glib> {
                 prepare: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_prepare")?),
                 query: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_query")?),
                 check: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_check")?),
-                iteration: std::mem::transmute::<*mut c_void, _>(sym(
-                    "g_main_context_iteration",
-                )?),
+                iteration: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_iteration")?),
             })
         }
     })
@@ -134,9 +132,12 @@ pub fn after_pump() {
         }
     };
     fds.truncate(n);
+    // Chromium's own work source always asks for a zero timeout, and its
+    // work reaches the window through `on_schedule_message_pump_work`:
+    // only a real wait (a GTK timer) is worth a pass.
     if ready {
         super::schedule(Duration::ZERO);
-    } else if timeout >= 0 {
+    } else if timeout > 0 {
         super::schedule(Duration::from_millis(timeout as u64));
     }
     let changed = {
@@ -207,6 +208,14 @@ fn watch(nudge: c_int) {
             while unsafe { libc::read(nudge, buf.as_mut_ptr().cast(), buf.len()) } > 0 {}
         }
         if fds[..last].iter().any(|f| f.revents != 0) {
+            crate::cdp::trace(format_args!(
+                "glib wake: {:?}",
+                fds[..last]
+                    .iter()
+                    .filter(|f| f.revents != 0)
+                    .map(|f| (f.fd, f.revents))
+                    .collect::<Vec<_>>()
+            ));
             super::schedule(Duration::ZERO);
             // Until the window has pumped: what woke us is Chromium's to read.
             let s = SHARED.lock().unwrap_or_else(|e| e.into_inner());

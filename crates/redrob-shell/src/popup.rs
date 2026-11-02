@@ -36,6 +36,18 @@ pub fn show<R>(
     let size: Vec2 = ctx
         .data(|d| d.get_temp(size_id))
         .unwrap_or(Vec2::new(max_width.min(200.0), 24.0));
+    // On the screen: moved left or up where it would leave it.
+    let at = match ctx.input(|i| i.viewport().monitor_size) {
+        Some(m) => egui::pos2(
+            at.x.min(m.x - size.x).max(0.0),
+            if at.y + size.y > m.y {
+                (at.y - size.y).max(0.0)
+            } else {
+                at.y
+            },
+        ),
+        None => at,
+    };
     let builder = ViewportBuilder::default()
         .with_title("Redrob Browser")
         .with_decorations(false)
@@ -140,9 +152,12 @@ pub fn end_frame(ctx: &Context, page_focused: bool) {
 
 /// Run `add` inside a Ui whose `ui.close()` closes the menu.
 fn closable<R>(ctx: &Context, ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    let mut inner = ui.new_child(UiBuilder::new().closable());
-    let r = add(&mut inner);
-    if inner.should_close() {
+    let r = ui.scope_builder(UiBuilder::new().closable(), |ui| {
+        let r = add(ui);
+        (r, ui.should_close())
+    });
+    let (r, close) = r.inner;
+    if close {
         close_menus(ctx);
     }
     r
@@ -205,41 +220,37 @@ pub fn menu_at<R>(ctx: &Context, id: Id, at: Pos2, add: impl FnOnce(&mut Ui) -> 
     })
 }
 
-/// An item of a menu that opens `add` beside it while the pointer is on it
-/// or in it.
+/// An item of a menu that opens `add` under it, inside the same menu: a
+/// menu window cannot open another one beside it (eframe draws a window
+/// opened from a popup's pass, but never hands it its clicks).
 pub fn submenu(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     let ctx = ui.ctx().clone();
     let sub_id = Id::new("redrob-open-submenu");
     let id = ui.id().with(("submenu", label));
+    let open = ctx.data(|d| d.get_temp::<Id>(sub_id)) == Some(id);
     let r = ui.add(
-        egui::Button::new(format!("{label}  ›"))
+        egui::Button::new(format!("{label}  {}", if open { "⌄" } else { "›" }))
             .frame(false)
             .min_size(Vec2::new(ui.available_width(), 28.0)),
     );
-    if r.hovered() || r.clicked() {
-        ctx.data_mut(|d| d.insert_temp(sub_id, id));
+    if r.clicked() || (r.hovered() && !open) {
+        ctx.data_mut(|d| {
+            if open && r.clicked() {
+                d.remove::<Id>(sub_id);
+            } else {
+                d.insert_temp(sub_id, id);
+            }
+        });
+        ctx.request_repaint();
     }
-    if ctx.data(|d| d.get_temp::<Id>(sub_id)) != Some(id) {
-        return;
+    if open {
+        ui.indent(id, add);
     }
-    // The menu's own window is where `ui` draws; its top-left on screen is
-    // where the menu was put.
-    let origin = ui
-        .ctx()
-        .input(|i| i.viewport().inner_rect.map(|r| r.min))
-        .unwrap_or_default();
-    let at = origin + r.rect.right_top().to_vec2() + Vec2::new(4.0, -6.0);
-    let c = ctx.clone();
-    // Shown from the menu's own pass: a window of its own beside it.
-    show(&ctx, id, at, 320.0, false, |ui| {
-        ui.set_min_width(200.0);
-        closable(&c, ui, add)
-    });
 }
 
 /// Hover text for `r` in a window of its own (it may reach over the page).
 pub fn tip(r: Response, text: &str) -> Response {
-    if text.is_empty() || !r.hovered() {
+    if text.is_empty() || !r.hovered() || any_open(&r.ctx) {
         return r;
     }
     let ctx = r.ctx.clone();

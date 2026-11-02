@@ -251,6 +251,8 @@ struct Window {
     page_focused: bool,
     /// The page took the keyboard this frame: this window is the one in front.
     took_focus: bool,
+    /// Whether the window itself had the keyboard last frame.
+    window_focused: bool,
     /// Window shortcuts pressed while the page had the keyboard.
     page_shortcuts: Vec<Shortcut>,
     /// The link under the pointer in the page.
@@ -417,6 +419,15 @@ impl Window {
                 }
                 return;
             }
+            // The page shows at once (a new tab page or settings make way
+            // for it) and gets the keyboard, as in Chrome.
+            if let Some(t) = self.model.active_tab_mut() {
+                if t.url == NEW_TAB || internal::is_internal(&t.url) {
+                    t.url = url.clone();
+                    t.loading = true;
+                }
+            }
+            self.focus_page = true;
             self.op(id, Op::Navigate(url));
         }
     }
@@ -496,6 +507,7 @@ impl Window {
             let on_screen = self.active_id() == Some(tab);
             let event = match event {
                 Event::Shortcut(s) => {
+                    cdp::trace(format_args!("page {tab}: shortcut {s:?}"));
                     if on_screen {
                         self.page_shortcuts.push(s);
                     }
@@ -1824,6 +1836,10 @@ impl Window {
                     }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
                         self.editing = false;
+                        // Back to the page, as in Chrome.
+                        if url != NEW_TAB && !internal::is_internal(&url) {
+                            self.focus_page = true;
+                        }
                         self.address = if url == NEW_TAB {
                             String::new()
                         } else {
@@ -2244,15 +2260,15 @@ impl Window {
         let ctx = ui.ctx().clone();
         self.drain_updates(&ctx);
         self.find_native(&ctx);
+        // Back from another program (the window manager focused the
+        // window): the page gets the keyboard back if it had it.
+        let focused = ctx.input(|i| i.viewport().focused == Some(true));
+        if focused && !self.window_focused && self.page_focused {
+            self.focus_page = true;
+        }
+        self.window_focused = focused;
         // A click in the chrome, or Ctrl+L from the page: the chrome takes
         // the keyboard back from the page.
-        if ctx.input(|i| i.pointer.any_pressed()) {
-            self.prompts.close_menu();
-        }
-        if self.page_focused && (self.focus_address || ctx.input(|i| i.pointer.any_pressed())) {
-            self.page_focused = false;
-            let _ = self.commands.send(Command::FocusWindow);
-        }
         while let Ok(msg) = self.agent_rx.try_recv() {
             self.notice = Some(msg);
         }
@@ -2286,6 +2302,20 @@ impl Window {
             }
         }
         self.shortcuts(&ctx);
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            self.prompts.close_menu();
+        }
+        // A page dialog or the find bar opened: the chrome types there.
+        let bar = self
+            .active_id()
+            .is_some_and(|id| self.prompts.wants_keyboard(id));
+        if self.page_focused
+            && (self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
+        {
+            cdp::trace(format_args!("window {} takes the keyboard", self.wid));
+            self.page_focused = false;
+            let _ = self.commands.send(Command::FocusWindow);
+        }
         self.resize_edges(ui);
         // A crash must not lose the open tabs.
         if self.last_session_save.elapsed() > std::time::Duration::from_secs(30) {
@@ -2485,11 +2515,6 @@ impl Window {
     /// The page area of web tab `tab`: the keyboard between the page and
     /// the chrome, and what floats over the page.
     fn page(&mut self, ctx: &egui::Context, rect: Rect, tab: TabId) {
-        if self.prompts.wants_keyboard(tab) && self.page_focused {
-            // A page dialog or the find bar opened: the chrome types.
-            self.page_focused = false;
-            let _ = self.commands.send(Command::FocusWindow);
-        }
         if self.focus_page {
             self.focus_page = false;
             self.editing = false;
