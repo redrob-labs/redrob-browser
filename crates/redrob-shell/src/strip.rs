@@ -380,7 +380,6 @@ impl Window {
                                 // Out of its group at its end.
                                 self.model.tabs[i].group = None;
                                 self.model.prune_groups();
-                                return;
                             }
                         }
                         Some(Item::Chip(g)) => {
@@ -400,7 +399,6 @@ impl Window {
                                     // Into the group, as its first tab.
                                     self.model.tabs[i].group = Some(g);
                                 }
-                                return;
                             }
                         }
                         None => {}
@@ -848,8 +846,9 @@ impl Window {
             self.select_tab(i);
         }
         if let Some(i) = a.new_tab_right {
+            // Right of that tab, in its group if it has one (Chrome).
             self.model.active = i;
-            self.open_tab(NEW_TAB, true);
+            self.open_tab_with(NEW_TAB, true, true);
         }
         if let Some(i) = a.new_group {
             if let Some(g) = self.model.new_group(&[i]) {
@@ -899,7 +898,7 @@ impl Window {
             if let Some(r) = self.model.group_range(g) {
                 // After the group's last tab, which it then joins.
                 self.model.active = r.end - 1;
-                self.open_tab(NEW_TAB, true);
+                self.open_tab_with(NEW_TAB, true, true);
             }
         }
         if let Some(g) = a.group_out {

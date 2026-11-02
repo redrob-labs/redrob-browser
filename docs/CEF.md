@@ -40,6 +40,12 @@ redrob-browser-window (one process per profile, CEF browser process)
   │   └ events: display / load / life-span / focus / download / ... -> cdp::Update
   ├ popup.rs: menus, address-bar suggestions, the page's context menu,
   │  tooltips, the status bubble: small borderless windows above the page
+  ├ strip.rs: the tab strip and tab groups (chip, color line, collapse)
+  ├ browser.rs: tab drags between windows, read from the global pointer
+  │  (X11 query_pointer, GetCursorPos; macOS: the window that took the
+  │  press): pulled out, a tab is a window of its own following the
+  │  pointer with its page re-parented; over any strip it goes in there,
+  │  and a window left without tabs closes
   ├ DevTools protocol on a pipe (fds 3/4, `--remote-debugging-pipe`), no port
   │   held by the relay only; agents (`redrob-browser tab`, MCP) reach it there
   └ CEF subprocesses: renderer, GPU, utility = the same executable

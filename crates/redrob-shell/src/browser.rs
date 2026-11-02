@@ -1052,6 +1052,14 @@ impl Browser {
             }
         };
         match target {
+            // A window's only tab (or group) moves the window at once, as in Chrome.
+            Some(i) if i == holder && n_items(&self.windows[i]) <= 1 => {
+                d.following = Some(self.windows[i].wid);
+                let at = self.origin_for(p, d.grab);
+                let w = &self.windows[i];
+                ctx.send_viewport_cmd_to(w.viewport, egui::ViewportCommand::OuterPosition(at));
+                cdp::trace(format_args!("drag {:?}: its window follows", d.item));
+            }
             Some(i) if i == holder => {
                 let w = &mut self.windows[i];
                 let x = p.x - w.screen_inner.map_or(0.0, |r| r.min.x);

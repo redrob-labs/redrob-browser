@@ -376,7 +376,13 @@ impl Window {
         self.session_dirty = true;
     }
 
+    /// A new tab next to the active one. A page opened from a grouped tab
+    /// joins its group; a new tab page (Ctrl+T, +) goes after the group.
     fn open_tab(&mut self, url: &str, activate: bool) -> TabId {
+        self.open_tab_with(url, activate, url != NEW_TAB)
+    }
+
+    fn open_tab_with(&mut self, url: &str, activate: bool, in_group: bool) -> TabId {
         let id = self.model.alloc_id();
         let mut tab = Tab::new(id, url);
         // Our own pages are drawn by the window; the Chromium tab waits on about:blank.
@@ -388,6 +394,15 @@ impl Window {
             url.to_string()
         };
         self.model.insert_tab(tab, activate);
+        if !in_group {
+            if let Some(i) = self
+                .model
+                .index_of(id)
+                .filter(|i| self.model.tabs[*i].group.is_some())
+            {
+                self.model.remove_from_group(i);
+            }
+        }
         self.op(id, Op::Open(engine_url));
         if url == NEW_TAB {
             self.top_sites = None;
