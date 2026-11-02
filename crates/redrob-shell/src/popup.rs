@@ -48,6 +48,26 @@ pub fn show<R>(
         ),
         None => at,
     };
+    // A new popup window spends its first two frames off screen: the first
+    // measures what it draws, the second draws it at that size. Shown in
+    // place at once, it came up at a guessed size and grew a frame later
+    // (eframe resizes a window after drawing it), its unpainted part
+    // flashing over the page: the address bar's suggestions on the first
+    // letter typed. Off screen rather than hidden: showing a window on
+    // Windows and macOS gives it the keyboard.
+    let age_id = id.with("age");
+    let pass = ctx.cumulative_pass_nr();
+    let age = match ctx.data(|d| d.get_temp::<(u64, u32)>(age_id)) {
+        Some((last, age)) if last + 1 >= pass => age.saturating_add(u32::from(last != pass)),
+        _ => 0,
+    };
+    ctx.data_mut(|d| d.insert_temp(age_id, (pass, age)));
+    let at = if age < 2 {
+        ctx.request_repaint();
+        egui::pos2(-30000.0, -30000.0)
+    } else {
+        at
+    };
     let builder = ViewportBuilder::default()
         .with_title("Redrob Browser")
         .with_decorations(false)

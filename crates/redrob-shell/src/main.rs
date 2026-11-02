@@ -41,6 +41,20 @@ use model::{Model, SuggestionKind, Tab, TabId};
 use theme::{size, Bar, Icon};
 
 const NEW_TAB: &str = "about:blank";
+/// Rows in the address bar's suggestion list, and each row's height.
+const SUGGESTIONS: usize = 8;
+const SUGGESTION_ROW: f32 = 34.0;
+
+/// Put the caret of text field `id` at the end of `text`.
+fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        let end = egui::text::CCursor::new(text.chars().count());
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        state.store(ctx, id);
+    }
+}
 
 /// `--incognito`: a private window. Its settings live in a temporary folder
 /// deleted when the browser closes, and Chromium keeps its cookies and
@@ -172,6 +186,30 @@ fn agent_prompt(text: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+/// The address bar's suggestion list, as Chrome's omnibox shows it: open
+/// while the person types, closed by Escape, a pick, a click elsewhere, a
+/// tab switch, or the window losing the keyboard, moving or minimizing.
+#[derive(Default)]
+struct Suggest {
+    open: bool,
+    /// What the person typed: the list follows it, not the row the arrow
+    /// keys put in the field.
+    typed: String,
+    /// The highlighted row; Enter opens it. The first row unless the arrow
+    /// keys moved.
+    sel: usize,
+    /// The arrow keys moved the highlight (the field shows that row).
+    arrowed: bool,
+    /// The window's place on screen when the list opened.
+    origin: Option<egui::Pos2>,
+}
+
+impl Suggest {
+    fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// The window and taskbar icon, from the design system's app icon.
 fn app_icon() -> egui::IconData {
     let png = include_bytes!("../assets/redrob-browser-256.png");
@@ -233,6 +271,8 @@ struct Window {
     /// Address field text; follows the active tab's URL unless the person is typing.
     address: String,
     editing: bool,
+    /// The address bar's suggestion list.
+    suggest: Suggest,
     focus_address: bool,
     /// Give the page area keyboard focus on the next frame: after the
     /// address bar navigates, and for a tab opened on a page, as Chrome
@@ -1873,9 +1913,22 @@ impl Window {
                             .max_rect(text_rect)
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     );
+                    // The suggestion list's keys, before the field sees them.
+                    let list_open = self.suggestions_shown(ui.ctx());
+                    if list_open {
+                        self.suggestion_keys(ui.ctx());
+                    } else if focused
+                        && !self.address.trim().is_empty()
+                        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown))
+                    {
+                        // Down opens the list for the text in the field.
+                        self.open_suggestions(ui.ctx());
+                    }
                     let field = field_ui.add(
                         egui::TextEdit::singleline(&mut self.address)
                             .id(self.address_id)
+                            // Tab completes from the list while it is open.
+                            .lock_focus(list_open)
                             .frame(egui::Frame::NONE)
                             .font(egui::FontId::proportional(14.0))
                             .text_color(p.ink_primary)
@@ -1910,10 +1963,17 @@ impl Window {
                         }
                     }
                     if field.changed() {
-                        self.editing = true;
+                        self.open_suggestions(ui.ctx());
                     }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        if let Some(prompt) = agent_prompt(&self.address) {
+                        // The row the arrow keys picked, else what was typed
+                        // (the first row).
+                        let picked = (list_open && self.suggest.arrowed)
+                            .then(|| self.model.suggest(&self.suggest.typed, SUGGESTIONS))
+                            .and_then(|l| l.into_iter().nth(self.suggest.sel));
+                        if let Some(s) = picked {
+                            go = Some(s.url);
+                        } else if let Some(prompt) = agent_prompt(&self.address) {
                             self.ask_agent(prompt.trim().to_string());
                         } else if !self.address.trim().is_empty() {
                             go = Some(model::to_url(&self.address));
@@ -1959,87 +2019,265 @@ impl Window {
             });
 
         // Suggestions float under the address field while the person types.
-        if self.editing && ui.memory(|m| m.has_focus(self.address_id)) {
-            let list = self.model.suggest(&self.address, 8);
-            if !list.is_empty() {
-                // A window of its own, as Chrome's: the list covers the page.
-                let at = popup::to_screen(
-                    ui.ctx(),
-                    egui::pos2(field_rect.left(), field_rect.bottom() + 4.0),
-                );
-                popup::show(
-                    ui.ctx(),
-                    egui::Id::new("suggestions"),
-                    at,
-                    field_rect.width(),
-                    false,
-                    |ui| {
-                        ui.set_width(field_rect.width() - 12.0);
-                        for s in list {
-                            let icon = match s.kind {
-                                SuggestionKind::Bookmark => Icon::Star,
-                                SuggestionKind::History => Icon::History,
-                                SuggestionKind::Search => Icon::Search,
-                            };
-                            let (row, r) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), 34.0),
-                                Sense::click(),
-                            );
-                            if r.hovered() {
-                                ui.painter().rect_filled(
-                                    row,
-                                    CornerRadius::same(size::RADIUS_MD),
-                                    p.surface_sunken,
-                                );
-                            }
-                            icon.paint(
-                                ui,
-                                Rect::from_center_size(
-                                    egui::pos2(row.left() + 18.0, row.center().y),
-                                    Vec2::splat(16.0),
-                                ),
-                                p.ink_muted,
-                            );
-                            let title = if s.title.is_empty() {
-                                s.url.clone()
-                            } else {
-                                s.title.clone()
-                            };
-                            let painter = ui.painter_at(row.shrink2(Vec2::new(4.0, 0.0)));
-                            let g = painter.layout_no_wrap(
-                                theme::elide(&title, 60),
-                                egui::FontId::proportional(13.0),
-                                p.ink_primary,
-                            );
-                            let tw = g.size().x;
-                            painter.galley(
-                                egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0),
-                                g,
-                                p.ink_primary,
-                            );
-                            if !s.title.is_empty() {
-                                painter.text(
-                                    egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    theme::elide(&s.url, 70),
-                                    egui::FontId::proportional(12.0),
-                                    p.ink_muted,
-                                );
-                            }
-                            if r.clicked() {
-                                go = Some(s.url.clone());
-                            }
-                        }
-                    },
-                );
+        if self.suggestions_shown(ui.ctx()) {
+            if let Some(url) = self.suggestion_list(ui.ctx(), p, field_rect) {
+                go = Some(url);
             }
         }
         if let Some(url) = go {
             self.editing = false;
+            self.suggest.close();
             ui.memory_mut(|m| m.surrender_focus(self.address_id));
             self.focus_page = true;
             self.navigate(url);
         }
+    }
+
+    /// The person typed (or pressed Down): the list opens for the text in
+    /// the field, its first row highlighted.
+    fn open_suggestions(&mut self, ctx: &egui::Context) {
+        self.editing = true;
+        self.suggest = Suggest {
+            open: true,
+            typed: self.address.clone(),
+            sel: 0,
+            arrowed: false,
+            origin: Some(popup::screen_origin(ctx)),
+        };
+    }
+
+    /// Whether the suggestion list is on screen. It closes, as Chrome's
+    /// does, when the address bar loses the keyboard (Escape, a click
+    /// elsewhere, a tab switch), when the window does (another program in
+    /// front, minimized), or when the window moves.
+    fn suggestions_shown(&mut self, ctx: &egui::Context) -> bool {
+        if !self.suggest.open {
+            return false;
+        }
+        let moved = self
+            .suggest
+            .origin
+            .is_some_and(|o| (o - popup::screen_origin(ctx)).length() > 0.5);
+        let ours = self.editing
+            && self.chrome_keyboard
+            && !self.minimized
+            && ctx.memory(|m| m.has_focus(self.address_id));
+        if moved || !ours {
+            self.suggest.close();
+            return false;
+        }
+        // Any text has a first row: what was typed.
+        !self.suggest.typed.trim().is_empty()
+    }
+
+    /// The text the field shows for a highlighted row: what was typed for
+    /// the first row and the search, the address for the others.
+    fn row_text(&self, s: &model::Suggestion) -> String {
+        match s.kind {
+            SuggestionKind::Url | SuggestionKind::Search => self.suggest.typed.clone(),
+            SuggestionKind::Bookmark | SuggestionKind::History => s.url.clone(),
+        }
+    }
+
+    /// Forget a history row (Shift+Delete or its remove button).
+    fn forget_history(&mut self, url: &str) {
+        self.model.remove_history(url);
+        if let Some(p) = &self.profile {
+            let _ = p.delete_history(url);
+        }
+        // The new tab page's most visited sites come from history.
+        self.top_sites = None;
+    }
+
+    /// Chrome's keys for the open list, taken before the field sees them:
+    /// Up and Down move the highlight and put that row in the field, Tab
+    /// completes the field with the highlighted (or best) address match,
+    /// Shift+Delete (or Delete on a row the arrows reached) forgets a
+    /// history row.
+    fn suggestion_keys(&mut self, ctx: &egui::Context) {
+        use egui::Modifiers;
+        let arrowed = self.suggest.arrowed;
+        let (down, up, tab, delete) = ctx.input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                i.consume_key(Modifiers::NONE, Key::ArrowUp)
+                    || i.consume_key(Modifiers::SHIFT, Key::Tab),
+                i.consume_key(Modifiers::NONE, Key::Tab),
+                i.consume_key(Modifiers::SHIFT, Key::Delete)
+                    || (arrowed && i.consume_key(Modifiers::NONE, Key::Delete)),
+            )
+        });
+        if !(down || up || tab || delete) {
+            return;
+        }
+        let mut list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let Some(last) = list.len().checked_sub(1) else {
+            return;
+        };
+        let mut sel = self.suggest.sel.min(last);
+        if tab {
+            let typed = self.suggest.typed.trim().to_lowercase();
+            let address_row = |s: &model::Suggestion| {
+                matches!(s.kind, SuggestionKind::Bookmark | SuggestionKind::History)
+            };
+            let pick = if sel > 0 && address_row(&list[sel]) {
+                Some(sel)
+            } else {
+                list.iter()
+                    .position(|s| address_row(s) && model::completes(&s.url, &typed))
+            };
+            if let Some(i) = pick {
+                self.address = list[i].url.clone();
+                self.open_suggestions(ctx);
+                cursor_to_end(ctx, self.address_id, &self.address);
+            }
+            return;
+        }
+        if down {
+            sel = (sel + 1).min(last);
+        }
+        if up {
+            sel = sel.saturating_sub(1);
+        }
+        if delete && list[sel].kind == SuggestionKind::History {
+            let url = list[sel].url.clone();
+            self.forget_history(&url);
+            list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+            sel = sel.min(list.len().saturating_sub(1));
+        }
+        let Some(row) = list.get(sel) else {
+            return;
+        };
+        self.address = self.row_text(row);
+        self.suggest.sel = sel;
+        self.suggest.arrowed = sel > 0;
+        cursor_to_end(ctx, self.address_id, &self.address);
+    }
+
+    /// The list under the address field, in a window of its own as Chrome's
+    /// (it covers the page). Returns the address of a row clicked.
+    fn suggestion_list(
+        &mut self,
+        ctx: &egui::Context,
+        p: theme::Palette,
+        field_rect: Rect,
+    ) -> Option<String> {
+        let list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let sel = self.suggest.sel.min(list.len().saturating_sub(1));
+        let at = popup::to_screen(
+            ctx,
+            egui::pos2(field_rect.left(), field_rect.bottom() + 4.0),
+        );
+        let (go, forget) = popup::show(
+            ctx,
+            egui::Id::new("suggestions"),
+            at,
+            field_rect.width(),
+            false,
+            |ui| {
+                let mut go = None;
+                let mut forget = None;
+                ui.set_width(field_rect.width() - 12.0);
+                for (i, s) in list.iter().enumerate() {
+                    let icon = match s.kind {
+                        SuggestionKind::Url => Icon::Globe,
+                        SuggestionKind::Bookmark => Icon::Star,
+                        SuggestionKind::History => Icon::History,
+                        SuggestionKind::Search => Icon::Search,
+                    };
+                    let (row, r) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), SUGGESTION_ROW),
+                        Sense::click(),
+                    );
+                    if i == sel || r.contains_pointer() {
+                        ui.painter().rect_filled(
+                            row,
+                            CornerRadius::same(size::RADIUS_MD),
+                            p.surface_sunken,
+                        );
+                    }
+                    icon.paint(
+                        ui,
+                        Rect::from_center_size(
+                            egui::pos2(row.left() + 18.0, row.center().y),
+                            Vec2::splat(16.0),
+                        ),
+                        p.ink_muted,
+                    );
+                    // History rows can be removed, as in Chrome.
+                    let remove = (s.kind == SuggestionKind::History
+                        && (i == sel || r.contains_pointer()))
+                    .then(|| {
+                        Rect::from_center_size(
+                            egui::pos2(row.right() - 18.0, row.center().y),
+                            Vec2::splat(24.0),
+                        )
+                    });
+                    let (title, detail) = match s.kind {
+                        SuggestionKind::Search => (s.title.clone(), t("Search").to_string()),
+                        _ if s.title.is_empty() => (s.url.clone(), String::new()),
+                        _ => (s.title.clone(), s.url.clone()),
+                    };
+                    let right = remove.map_or(row.right(), |b| b.left());
+                    let painter = ui.painter_at(Rect::from_x_y_ranges(
+                        (row.left() + 4.0)..=(right - 4.0),
+                        row.y_range(),
+                    ));
+                    let g = painter.layout_no_wrap(
+                        theme::elide(&title, 60),
+                        egui::FontId::proportional(13.0),
+                        p.ink_primary,
+                    );
+                    let tw = g.size().x;
+                    painter.galley(
+                        egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0),
+                        g,
+                        p.ink_primary,
+                    );
+                    if !detail.is_empty() {
+                        painter.text(
+                            egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            theme::elide(&detail, 70),
+                            egui::FontId::proportional(12.0),
+                            p.ink_muted,
+                        );
+                    }
+                    if let Some(b) = remove {
+                        let hit = ui.interact(b, egui::Id::new(("forget", i)), Sense::click());
+                        if hit.hovered() {
+                            ui.painter()
+                                .circle_filled(b.center(), 12.0, p.surface_raised);
+                        }
+                        Icon::Close.paint(
+                            ui,
+                            Rect::from_center_size(b.center(), Vec2::splat(14.0)),
+                            p.ink_muted,
+                        );
+                        if hit.clicked() {
+                            forget = Some(s.url.clone());
+                            continue;
+                        }
+                    }
+                    if r.clicked() {
+                        go = Some(s.url.clone());
+                    }
+                }
+                (go, forget)
+            },
+        );
+        if let Some(url) = forget {
+            self.forget_history(&url);
+            if self.suggest.arrowed {
+                // The highlighted row went: the field shows what was typed.
+                self.address = self.suggest.typed.clone();
+                self.suggest.sel = 0;
+                self.suggest.arrowed = false;
+                cursor_to_end(ctx, self.address_id, &self.address);
+            }
+            ctx.request_repaint();
+        }
+        go
     }
 
     fn has_logins(&self, url: &str) -> bool {
