@@ -101,6 +101,18 @@ pub fn of(browser: &cef::Browser) -> Option<Handle> {
 
 pub use imp::{detach, find_window, focus, place, reparent, set_visible};
 
+/// Where the pointer is on screen (physical pixels) and whether its
+/// primary button is down, whichever window has it: a tab dragged out of
+/// a window follows it over others (browser.rs). None where the platform
+/// does not say (macOS): the window that took the press reports it.
+#[cfg(any(target_os = "linux", windows))]
+pub use imp::pointer;
+
+#[cfg(target_os = "macos")]
+pub fn pointer() -> Option<(i32, i32, bool)> {
+    None
+}
+
 /// The browser window's own controls take the keyboard.
 #[cfg(not(target_os = "linux"))]
 pub fn focus_chrome(top: Handle) {
@@ -313,6 +325,13 @@ mod imp {
         let _ = x.conn.flush();
     }
 
+    pub fn pointer() -> Option<(i32, i32, bool)> {
+        let x = x()?;
+        let r = x.conn.query_pointer(x.root).ok()?.reply().ok()?;
+        let down = u16::from(r.mask) & u16::from(x11rb::protocol::xproto::KeyButMask::BUTTON1) != 0;
+        Some((r.root_x as i32, r.root_y as i32, down))
+    }
+
     /// Give `w` the keyboard.
     pub fn focus(w: Handle) {
         let Some(x) = x() else { return };
@@ -445,6 +464,20 @@ mod imp {
     pub fn focus(w: Handle) {
         // SAFETY: as above.
         unsafe { SetFocus(hwnd(w)) };
+    }
+
+    pub fn pointer() -> Option<(i32, i32, bool)> {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut p = POINT { x: 0, y: 0 };
+        // SAFETY: out pointer to a local.
+        if unsafe { GetCursorPos(&mut p) } == 0 {
+            return None;
+        }
+        // SAFETY: no pointers.
+        let down = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } as u16 & 0x8000 != 0;
+        Some((p.x, p.y, down))
     }
 }
 

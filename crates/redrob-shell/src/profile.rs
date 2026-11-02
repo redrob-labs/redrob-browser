@@ -25,6 +25,8 @@ pub struct Profile {
 pub struct SavedTab {
     pub url: String,
     pub title: String,
+    /// The saved group's id (`SavedWindow::groups`).
+    pub group: Option<u64>,
 }
 
 /// Where a window was on screen, in points: its outer top-left corner and
@@ -43,6 +45,8 @@ pub struct SavedWindow {
     pub active: usize,
     pub bounds: Option<Bounds>,
     pub maximized: bool,
+    /// Its tab groups, by the ids its tabs carry.
+    pub groups: Vec<crate::model::Group>,
 }
 
 /// A window as it is saved: its tabs in strip order and which is active.
@@ -114,6 +118,22 @@ impl Profile {
         if !has_window {
             db.execute_batch("ALTER TABLE session ADD COLUMN window INTEGER NOT NULL DEFAULT 0")?;
         }
+        // Tab groups: each saved tab's group, and the groups' names and colors.
+        let has_group: bool = db
+            .prepare("SELECT 1 FROM pragma_table_info('session') WHERE name = 'grp'")?
+            .exists([])?;
+        if !has_group {
+            db.execute_batch("ALTER TABLE session ADD COLUMN grp INTEGER")?;
+        }
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_groups (
+                 id INTEGER PRIMARY KEY,
+                 window INTEGER NOT NULL,
+                 title TEXT NOT NULL DEFAULT '',
+                 color TEXT NOT NULL DEFAULT 'grey',
+                 collapsed INTEGER NOT NULL DEFAULT 0
+             );",
+        )?;
         Ok(Self {
             dir: dir.to_path_buf(),
             db,
@@ -249,6 +269,7 @@ impl Profile {
         let tx = self.db.transaction()?;
         tx.execute("DELETE FROM session", [])?;
         tx.execute("DELETE FROM session_windows", [])?;
+        tx.execute("DELETE FROM session_groups", [])?;
         let mut position = 0i64;
         let mut saved_windows = 0i64;
         for w in windows {
@@ -259,14 +280,33 @@ impl Profile {
                     continue;
                 }
                 tx.execute(
-                    "INSERT INTO session (position, url, title, active, window) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![position, t.url, t.title, (i == w.model.active) as i64, saved_windows],
+                    "INSERT INTO session (position, url, title, active, window, grp) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        position,
+                        t.url,
+                        t.title,
+                        (i == w.model.active) as i64,
+                        saved_windows,
+                        t.group.map(|g| g as i64)
+                    ],
                 )?;
                 position += 1;
                 saved_any = true;
             }
             if !saved_any {
                 continue;
+            }
+            for g in &w.model.groups {
+                tx.execute(
+                    "INSERT OR REPLACE INTO session_groups (id, window, title, color, collapsed) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        g.id as i64,
+                        saved_windows,
+                        g.title,
+                        g.color.key(),
+                        g.collapsed as i64
+                    ],
+                )?;
             }
             let b = w.bounds;
             tx.execute(
@@ -289,20 +329,21 @@ impl Profile {
     /// The windows open when the browser last closed, in order, each with its
     /// tabs and which was active.
     pub fn load_session(&self) -> anyhow::Result<Vec<SavedWindow>> {
-        let mut q = self
-            .db
-            .prepare("SELECT url, title, active, window FROM session ORDER BY window, position")?;
+        let mut q = self.db.prepare(
+            "SELECT url, title, active, window, grp FROM session ORDER BY window, position",
+        )?;
         let rows = q.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
                 r.get::<_, i64>(3)?,
+                r.get::<_, Option<i64>>(4)?,
             ))
         })?;
         let mut windows: Vec<(i64, SavedWindow)> = Vec::new();
         for row in rows {
-            let (url, title, is_active, window) = row?;
+            let (url, title, is_active, window, group) = row?;
             if windows.last().is_none_or(|(w, _)| *w != window) {
                 windows.push((
                     window,
@@ -311,6 +352,7 @@ impl Profile {
                         active: 0,
                         bounds: None,
                         maximized: false,
+                        groups: Vec::new(),
                     },
                 ));
             }
@@ -318,7 +360,34 @@ impl Profile {
             if is_active != 0 {
                 w.active = w.tabs.len();
             }
-            w.tabs.push(SavedTab { url, title });
+            w.tabs.push(SavedTab {
+                url,
+                title,
+                group: group.map(|g| g as u64),
+            });
+        }
+        let mut q = self
+            .db
+            .prepare("SELECT id, window, title, color, collapsed FROM session_groups")?;
+        let rows = q.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, window, title, color, collapsed) = row?;
+            if let Some((_, w)) = windows.iter_mut().find(|(n, _)| *n == window) {
+                w.groups.push(crate::model::Group {
+                    id: id as u64,
+                    title,
+                    color: crate::model::GroupColor::from_key(&color),
+                    collapsed: collapsed != 0,
+                });
+            }
         }
         let mut q = self
             .db

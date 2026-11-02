@@ -1,6 +1,7 @@
 //! What the window shows over the page area: menus, the address bar's
-//! suggestions, the page's context menu, tooltips, the link status bubble
-//! and the tab being dragged out.
+//! suggestions, the page's context menu, tooltips and the link status
+//! bubble. A tab dragged out of the strip is a window of its own that
+//! follows the pointer (browser.rs).
 //!
 //! The page is a native child window (docs/CEF.md), so nothing egui paints
 //! in the window can cover it. As in Chrome, each of these is a small window
@@ -291,9 +292,4 @@ pub fn status(ctx: &Context, page: Rect, link: &str) {
             ui.label(egui::RichText::new(text).size(12.0));
         },
     );
-}
-
-/// Something that follows the pointer (a tab dragged out of the strip).
-pub fn ghost(ctx: &Context, id: Id, at: Pos2, add: impl FnOnce(&mut Ui)) {
-    show(ctx, id, to_screen(ctx, at), 260.0, true, add);
 }

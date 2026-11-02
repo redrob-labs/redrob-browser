@@ -43,6 +43,9 @@ pub struct Actions {
     pub search_engine: Option<String>,
     /// The theme changed: "system", "light" or "dark".
     pub theme: Option<String>,
+    /// A day of history opened at once: its pages, and the group's name
+    /// when they open as a tab group.
+    pub open_all: Option<(Vec<String>, Option<String>)>,
 }
 
 pub fn ui(
@@ -142,18 +145,40 @@ fn history(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &mu
             return;
         }
         let mut day = String::new();
-        for h in &s.history {
+        for (k, h) in s.history.iter().enumerate() {
             let stamp = day_time(h.last_visit);
             let (d, time) = stamp.split_once(' ').unwrap_or((stamp.as_str(), ""));
             if d != day {
                 day = d.to_string();
                 ui.add_space(if day.is_empty() { 0.0 } else { size::SPACE_2 });
-                ui.label(
-                    egui::RichText::new(d)
-                        .size(12.0)
-                        .strong()
-                        .color(theme::palette(ui).ink_secondary),
+                let r = ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(d)
+                            .size(12.0)
+                            .strong()
+                            .color(theme::palette(ui).ink_secondary),
+                    )
+                    .sense(egui::Sense::click()),
                 );
+                // The day's pages at once, as tabs or as a tab group.
+                let urls: Vec<String> = s.history[k..]
+                    .iter()
+                    .take_while(|e| day_time(e.last_visit).split(' ').next() == Some(d))
+                    .map(|e| e.url.clone())
+                    .collect();
+                crate::popup::context_menu(&r, |ui| {
+                    if ui
+                        .button(crate::i18n::tf("Open all ({0})", &[&urls.len()]))
+                        .clicked()
+                    {
+                        act.open_all = Some((urls.clone(), None));
+                        ui.close();
+                    }
+                    if ui.button(t("Open all as group")).clicked() {
+                        act.open_all = Some((urls.clone(), Some(d.to_string())));
+                        ui.close();
+                    }
+                });
             }
             let host = url::Url::parse(&h.url)
                 .ok()
