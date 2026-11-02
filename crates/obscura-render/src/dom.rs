@@ -346,6 +346,8 @@ pub struct DomLayout {
     pub(crate) derived_seed: Option<derived::DerivedSeed>,
     /// Whether a style has a counter directive (see `resolve_css_counters`).
     pub(crate) counters_used: bool,
+    /// What made the layout need the emoji font.
+    pub(crate) emoji: EmojiNodes,
 }
 
 /// Whether `OBSCURA_LAYOUT_VERIFY` asks every incremental layout to be checked
@@ -1189,6 +1191,20 @@ pub(crate) struct RetainedGeometry {
     pub(crate) derived: Option<derived::PreviousDerived>,
     /// Whether a style of that layout had a counter directive.
     pub(crate) counters_used: bool,
+    /// What needed the emoji font in that layout, with `written` the texts
+    /// the mutations since wrote that need it; `None`: unknown.
+    pub(crate) emoji: Option<EmojiNodes>,
+}
+
+/// The nodes that make a layout need the emoji font.
+#[derive(Default)]
+pub(crate) struct EmojiNodes {
+    /// Text nodes (`text_node_may_need_emoji_font`).
+    pub(crate) texts: Vec<NodeId>,
+    /// Elements whose generated text needs it.
+    pub(crate) generated: Vec<NodeId>,
+    /// Text nodes written since `texts` was taken that need it.
+    pub(crate) written: Vec<NodeId>,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -7665,20 +7681,76 @@ fn layout_dom_once(
         },
     );
     grow_trailing_auto_cells(tree, &mut styles);
+    phase_marks.push(("p.cells", crate::prof::mark()));
     shrink_block_level_buttons(tree, &mut styles, fresh_styles.as_ref());
+    phase_marks.push(("p.buttons", crate::prof::mark()));
 
     // Style and script text never renders, and is often megabytes of CSS.
-    let needs_emoji_font = text_may_need_emoji_font(tree)
-        || styles.values().any(|style| {
-            style
-                .before_content
+    let generated_needs_emoji = |style: &crate::LayoutStyle| {
+        style
+            .before_content
+            .as_deref()
+            .is_some_and(crate::inline::text_may_need_emoji_font)
+            || style
+                .after_content
                 .as_deref()
                 .is_some_and(crate::inline::text_may_need_emoji_font)
-                || style
-                    .after_content
-                    .as_deref()
-                    .is_some_and(crate::inline::text_may_need_emoji_font)
-        });
+    };
+    // The text nodes and styles that need it. A retained layout starts from
+    // the previous layout's: those still there and still needing it, the
+    // texts the mutations wrote, and the fresh styles.
+    let previous_emoji = fresh_styles.as_ref().zip(
+        retained_geometry
+            .as_mut()
+            .and_then(|geometry| geometry.emoji.take()),
+    );
+    let emoji = match previous_emoji {
+        Some((fresh, previous)) => {
+            let document = tree.document();
+            let mut texts: Vec<NodeId> = previous
+                .texts
+                .into_iter()
+                .filter(|id| {
+                    tree.get_node(*id).is_some()
+                        && tree.ancestors(*id).contains(&document)
+                        && text_node_may_need_emoji_font(tree, *id)
+                })
+                .chain(previous.written)
+                .collect();
+            texts.sort_unstable_by_key(|id| id.index());
+            texts.dedup();
+            let generated = previous
+                .generated
+                .into_iter()
+                .filter(|id| !fresh.contains(id))
+                .chain(fresh.iter().copied())
+                .filter(|id| styles.get(id).is_some_and(generated_needs_emoji))
+                .collect();
+            EmojiNodes {
+                texts,
+                generated,
+                written: Vec::new(),
+            }
+        }
+        None => EmojiNodes {
+            texts: if text_may_need_emoji_font(tree) {
+                tree.descendants(tree.document())
+                    .into_iter()
+                    .filter(|id| text_node_may_need_emoji_font(tree, *id))
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            generated: styles
+                .iter()
+                .filter(|(_, style)| generated_needs_emoji(style))
+                .map(|(id, _)| *id)
+                .collect(),
+            written: Vec::new(),
+        },
+    };
+    let needs_emoji_font = !emoji.texts.is_empty() || !emoji.generated.is_empty();
+    phase_marks.push(("p.emoji", crate::prof::mark()));
 
     // The leaf context is the index of a cosmic-text inline formatting
     // context in `engine`; leaves without text carry no context.
@@ -11165,6 +11237,7 @@ fn layout_dom_once(
             generated_boxes,
             derived_seed,
             counters_used,
+            emoji,
         },
         signature,
         query_stats,
@@ -11413,9 +11486,13 @@ fn shrink_block_level_buttons(
     styles: &mut HashMap<NodeId, crate::LayoutStyle>,
     fresh: Option<&HashSet<NodeId>>,
 ) {
-    let buttons: Vec<NodeId> = styles
-        .iter()
-        .filter(|(id, _)| fresh.is_none_or(|fresh| fresh.contains(id)))
+    // A retained layout looks at the fresh styles only, without walking the
+    // whole (large) style map.
+    let candidates: Box<dyn Iterator<Item = (&NodeId, &crate::LayoutStyle)>> = match fresh {
+        Some(fresh) => Box::new(fresh.iter().filter_map(|id| styles.get_key_value(id))),
+        None => Box::new(styles.iter()),
+    };
+    let buttons: Vec<NodeId> = candidates
         .filter(|(_, style)| {
             style.width == crate::Dimension::Auto
                 && !style.width_set
@@ -11450,6 +11527,9 @@ fn shrink_block_level_buttons(
 }
 
 fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
+    if element_kinds_present(tree) & ElementKind::ROW_OR_SECTION == 0 {
+        return;
+    }
     let is_tag = |id: NodeId, tags: &[&str]| -> bool {
         with_local_name(tree, id, |local| tags.contains(&local)).unwrap_or(false)
     };
@@ -14649,21 +14729,27 @@ fn text_may_need_emoji_font(tree: &DomTree) -> bool {
             return answer;
         }
     }
-    let answer = tree.descendants(tree.document()).iter().any(|id| {
-        tree.with_node(*id, |node| match &node.data {
-            obscura_dom::tree::NodeData::Text { contents } => {
-                // Parent first: style and script text is often megabytes.
-                !node.parent.is_some_and(|parent| {
-                    with_local_name(tree, parent, |name| name == "style" || name == "script")
-                        .unwrap_or(false)
-                }) && crate::inline::text_may_need_emoji_font(contents)
-            }
-            _ => false,
-        })
-        .unwrap_or(false)
-    });
+    let answer = tree
+        .descendants(tree.document())
+        .iter()
+        .any(|id| text_node_may_need_emoji_font(tree, *id));
     ANSWER.with(|slot| slot.set(Some((generation, answer))));
     answer
+}
+
+/// The part of `text_may_need_emoji_font` that one node contributes.
+pub(crate) fn text_node_may_need_emoji_font(tree: &DomTree, id: NodeId) -> bool {
+    tree.with_node(id, |node| match &node.data {
+        obscura_dom::tree::NodeData::Text { contents } => {
+            // Parent first: style and script text is often megabytes.
+            !node.parent.is_some_and(|parent| {
+                with_local_name(tree, parent, |name| name == "style" || name == "script")
+                    .unwrap_or(false)
+            }) && crate::inline::text_may_need_emoji_font(contents)
+        }
+        _ => false,
+    })
+    .unwrap_or(false)
 }
 
 pub(crate) fn rendered_parent(tree: &DomTree, id: NodeId) -> Option<NodeId> {

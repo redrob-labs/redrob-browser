@@ -4239,6 +4239,34 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     };
     crate::prof::stop(crate::prof::RETAIN_CHECKS, _prof);
     let previous_rendered = previous.layout.rendered_tree.clone();
+    // What needed the emoji font, and the text the mutations wrote that does:
+    // a changed text node, or any text inserted.
+    let mut written = Vec::new();
+    let known = mutations.iter().all(|mutation| {
+        use crate::dom::{RetainedStyleMutation as M, TreeStyleMutation as T};
+        match mutation {
+            M::Tree(T::Text { node, .. }) => {
+                written.push(*node);
+                true
+            }
+            M::Tree(T::Insert { node, .. }) => {
+                written.push(*node);
+                written.extend(tree.descendants(*node));
+                true
+            }
+            M::Tree(T::Remove { .. })
+            | M::Attribute(_)
+            | M::Animation { .. }
+            | M::WaapiAnimation { .. } => true,
+            M::Resource | M::Stylesheet => false,
+        }
+    });
+    written.retain(|id| crate::dom::text_node_may_need_emoji_font(tree, *id));
+    let emoji = known.then(|| crate::dom::EmojiNodes {
+        texts: std::mem::take(&mut previous.layout.emoji.texts),
+        generated: std::mem::take(&mut previous.layout.emoji.generated),
+        written,
+    });
     let previous_derived =
         previous
             .derived_memo
@@ -4265,6 +4293,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             previous_rendered,
             derived: previous_derived,
             counters_used: previous.layout.counters_used,
+            emoji,
         }),
     };
     drop(previous);
