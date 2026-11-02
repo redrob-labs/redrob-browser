@@ -3563,22 +3563,32 @@ impl ClipDirty {
             subtree: vec![false; slots],
             moved: Vec::new(),
         };
+        let mut kept = 0usize;
         for (id, rect) in rects {
             match old_rects.get(id) {
-                Some(old) if old == rect => {}
+                Some(old) if old == rect => kept += 1,
                 Some(_) if !styles.get(id).is_some_and(clip_reads_rect) => {
+                    kept += 1;
                     crate::prof::count(crate::prof::RECT_MOVED);
                     dirty.moved.push(*id);
                 }
-                _ => {
+                Some(_) => {
+                    kept += 1;
+                    crate::prof::count(crate::prof::RECT_MOVED);
+                    dirty.mark(tree, *id, Self::RECT);
+                }
+                None => {
                     crate::prof::count(crate::prof::RECT_MOVED);
                     dirty.mark(tree, *id, Self::RECT);
                 }
             }
         }
-        for id in old_rects.keys() {
-            if !rects.contains_key(id) {
-                dirty.mark(tree, *id, Self::RECT);
+        // Every old rect was found: none went.
+        if kept != old_rects.len() {
+            for id in old_rects.keys() {
+                if !rects.contains_key(id) {
+                    dirty.mark(tree, *id, Self::RECT);
+                }
             }
         }
         let document = tree.document();
@@ -12073,13 +12083,19 @@ fn layout_dom_once(
                 .chain(&changes.added)
                 .chain(moved)
             {
+                // A marked node's ancestors are marked: the walk reached
+                // it through them, and this loop marks whole paths.
                 let mut current = Some(id);
                 while let Some(node) = current {
                     match changed.get_mut(node.index()) {
-                        Some(seen) => *seen = true,
-                        None => break,
+                        Some(seen) if !*seen => *seen = true,
+                        _ => break,
                     }
                     current = rendered_parent(tree, node);
+                }
+                // The walk starts below the document node.
+                if let Some(seen) = changed.get_mut(tree.document().index()) {
+                    *seen = true;
                 }
             }
             derived_seed = Some(derived::DerivedSeed {
@@ -13643,12 +13659,10 @@ fn ensure_static_probes(
         if !parent_ok {
             continue;
         }
-        let kids = taffy_tree.child_slice(parent);
-        let Some(index) = kids.iter().position(|&node| node == child) else {
-            continue;
-        };
         if let Some(probe) = previous.remove(&dom) {
-            if index > 0 && kids[index - 1] == probe {
+            // A probe stays right before its box while their parent is not
+            // built again (a built parent is a new box).
+            if taffy_tree.contains(probe) && taffy_tree.parent(probe) == Some(parent) {
                 probes.insert(dom, probe);
                 continue;
             }
