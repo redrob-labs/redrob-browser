@@ -284,6 +284,8 @@ struct Window {
     took_focus: bool,
     /// Whether the window itself had the keyboard last frame.
     window_focused: bool,
+    /// Minimized: its page is hidden to Chromium (browser.rs).
+    minimized: bool,
     /// Window shortcuts pressed while the page had the keyboard.
     page_shortcuts: Vec<Shortcut>,
     /// The link under the pointer in the page.
@@ -2544,6 +2546,7 @@ impl Window {
         let visible = web && rect.width() > 1.0 && rect.height() > 1.0;
         if self.last_place != Some((place, visible)) {
             self.last_place = Some((place, visible));
+            let visible = visible && !self.minimized;
             let _ = self.commands.send(Command::Place { place, visible });
         }
     }

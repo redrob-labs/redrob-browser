@@ -127,6 +127,28 @@ pub struct Browser {
     final_saved: bool,
 }
 
+/// Linux: Xlib has one error handler per process, and winit's keeps the
+/// last error of any connection and panics on it at the next focus change.
+/// Chromium's GTK connection makes harmless errors (its input method asks
+/// where a closed page's window was): those are not winit's, so its hook
+/// takes every error of another connection.
+#[cfg(target_os = "linux")]
+fn ignore_other_x_errors(cc: &eframe::CreationContext<'_>) {
+    use winit::raw_window_handle::{HasDisplayHandle as _, RawDisplayHandle};
+    let Ok(handle) = cc.display_handle() else {
+        return;
+    };
+    let RawDisplayHandle::Xlib(x) = handle.as_raw() else {
+        return;
+    };
+    let Some(ours) = x.display.map(|d| d.as_ptr() as usize) else {
+        return;
+    };
+    winit::platform::x11::register_xlib_error_hook(Box::new(move |display, _event| {
+        display as usize != ours
+    }));
+}
+
 /// The OS window for a browser window: undecorated except on macOS, at
 /// `bounds` when known.
 pub fn window_builder(
@@ -166,6 +188,8 @@ pub fn window_builder(
 impl Browser {
     pub fn start(cc: &eframe::CreationContext<'_>, start: Start) -> Self {
         let ctx = cc.egui_ctx.clone();
+        #[cfg(target_os = "linux")]
+        ignore_other_x_errors(cc);
         theme::install(&ctx);
         theme::set_preference(
             &ctx,
@@ -390,6 +414,7 @@ impl Browser {
             page_focused: false,
             took_focus: false,
             window_focused: false,
+            minimized: false,
             page_shortcuts: Vec::new(),
             status: None,
             native: None,
@@ -872,6 +897,7 @@ impl Browser {
                 PASSES.set((n + 1, Some(since)));
             }
         }
+        self.sync_minimized(ctx);
         let windows = self.windows.len();
         self.handle_requests(ctx);
         // The windows' commands go to Chromium, and Chromium does its work.
@@ -887,6 +913,29 @@ impl Browser {
         self.publish_places();
         self.answer_waiters();
         self.save_if_changed(ctx);
+    }
+
+    /// A minimized window's page is hidden to Chromium (no painting, timers
+    /// slowed), as Chrome's is: its page is a child window, which Chromium
+    /// does not see minimized with its parent.
+    fn sync_minimized(&mut self, ctx: &egui::Context) {
+        let infos = ctx.input(|i| i.raw.viewports.clone());
+        for w in &mut self.windows {
+            let m = infos
+                .get(&w.viewport)
+                .and_then(|v| v.minimized)
+                .unwrap_or(false);
+            if m == w.minimized {
+                continue;
+            }
+            w.minimized = m;
+            if let Some((place, visible)) = w.last_place {
+                let _ = w.commands.send(cdp::Command::Place {
+                    place,
+                    visible: visible && !m,
+                });
+            }
+        }
     }
 
     /// A pass of a window's own viewport.
