@@ -13,7 +13,7 @@ Usage:
   build.py --out <dir> --arch x64 --payload <redrob-browser-windows-x64-X.zip> --version 0.1.2 [--name <exe>]
   build.py --out <dir> --version 0.1.2          # demo-only build (REDROB_NO_PAYLOAD): --demo flags only
 
-The payload is the release's own zip (.github/workflows/release.yml: the programs, the GStreamer runtime
+The payload is the release's own zip (.github/workflows/release.yml: the programs, the CEF runtime
 and the Visual C++ runtime at the top level), already Authenticode-signed inside, so the setup must be
 built after signing and then signed itself.
 

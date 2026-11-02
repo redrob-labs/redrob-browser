@@ -7,6 +7,7 @@
 #![recursion_limit = "512"]
 
 pub mod http;
+pub mod window;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -796,6 +797,8 @@ fn handle_tools_list(id: Value) -> RpcResponse {
         ]);
     }
 
+    tools.extend(window::tools());
+
     RpcResponse::ok(id, json!({ "tools": tools }))
 }
 
@@ -805,6 +808,20 @@ async fn handle_tool_call(id: Value, params: &Value, state: &mut BrowserState) -
         None => return RpcResponse::err(id, -32602, "Missing tool name"),
     };
     let args = params.get("arguments").unwrap_or(&Value::Null);
+
+    // The person's window tabs (Chromium), over the window's relay.
+    if let Some(result) = window::call_tool(name, args).await {
+        return match result {
+            Ok(content) => RpcResponse::ok(id, json!({ "content": [content] })),
+            Err(error) => RpcResponse::ok(
+                id,
+                json!({
+                    "content": [{ "type": "text", "text": format!("Error: {error}") }],
+                    "isError": true
+                }),
+            ),
+        };
+    }
 
     #[cfg(feature = "render")]
     {

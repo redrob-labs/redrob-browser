@@ -48,6 +48,8 @@ resvg = { version = "0.47", default-features = false, features = ["text", "raste
 usvg = { version = "0.47", default-features = false, optional = true }
 url = { workspace = true, optional = true }
 cssparser = "0.34"
+# Seeded fast hasher for the node-keyed maps every layout pass fills.
+foldhash = "0.2"
 serde = { workspace = true, optional = true }
 wuff = { version = "0.2.7", optional = true }
 # AVIF (YouTube thumbnails): avif-parse + rav1d, a Rust port of dav1d.

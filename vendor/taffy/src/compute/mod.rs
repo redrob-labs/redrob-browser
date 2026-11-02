@@ -221,6 +221,11 @@ pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
 
     /// Recursive function to apply rounding to all descendents
     fn round_layout_inner(tree: &mut impl RoundTree, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) {
+        if tree.rounding_is_current(node_id, cumulative_x, cumulative_y) {
+            return;
+        }
+        let parent_x = cumulative_x;
+        let parent_y = cumulative_y;
         let unrounded_layout = tree.get_unrounded_layout(node_id);
         let mut layout = unrounded_layout;
 
@@ -256,6 +261,7 @@ pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
             let child = tree.get_child_id(node_id, index);
             round_layout_inner(tree, child, cumulative_x, cumulative_y);
         }
+        tree.note_rounded(node_id, parent_x, parent_y);
     }
 
     #[cfg(feature = "content_size")]

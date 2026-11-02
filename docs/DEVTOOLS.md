@@ -40,14 +40,15 @@ the real window too. The window's own hover and pick use the same path.
 ## The full DevTools front end
 
 Any DevTools front end can attach to one tab through the window's relay, which serves a
-per-tab endpoint at `/devtools/page/<targetId>`: the relay attaches to the tab and speaks for that
+per-tab endpoint at `/devtools/page/<targetId>?token=<secret>`: the relay attaches to the tab and speaks for that
 session, the way Chrome's own per-page endpoints do.
 
 ```text
-devtools://devtools/bundled/devtools_app.html?ws=127.0.0.1:<port>/devtools/page/<targetId>
+devtools://devtools/bundled/devtools_app.html?ws=127.0.0.1:<port>/devtools/page/<targetId>?token=<secret>
 ```
 
-Open that in Chrome, with the port from `<data>/redrob-browser/Default/engine/ws-endpoint` and a
+Open that in Chrome, with the port and the secret (the last part of the address) from
+`<data>/redrob-browser/Default/engine/ws-endpoint` and a
 target id from `redrob-browser tab list`.
 
 ## What the engine does not answer yet

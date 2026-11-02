@@ -150,6 +150,10 @@ pub(crate) struct IfcBox {
     pub(crate) node: Option<taffy::NodeId>,
     /// The DOM element of an atomic, floated or out-of-flow box.
     pub(crate) dom: Option<NodeId>,
+    /// An out-of-flow box that was block-level before blockification: its
+    /// static position is that of a block box, which starts a new line
+    /// after any inline content before it (CSS 2.2 10.3.7, 10.6.4).
+    pub(crate) static_block: bool,
     /// The inline element span the box is in.
     pub(crate) parent_span: Option<u32>,
 }
@@ -164,7 +168,7 @@ pub(crate) struct TextRange {
 }
 
 /// Root-style properties the line layout needs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RootParams {
     pub(crate) align: parley::Alignment,
     pub(crate) justify: bool,
@@ -191,6 +195,7 @@ pub(crate) struct RootParams {
 }
 
 /// One inline formatting context.
+#[derive(Clone)]
 pub(crate) struct Ifc {
     /// The element whose style is the root inline style: the container, or
     /// for an anonymous block the element that holds it.
@@ -228,6 +233,27 @@ pub(crate) struct Ifc {
     pub(crate) clip: Option<crate::Rect>,
     /// The shaped "…" marker of a clamped or ellipsized IFC.
     pub(crate) marker: Option<parley::Layout<Brush>>,
+    /// The [`build::IfcTemplate`] this IFC was shaped as (0: none). Two
+    /// IFCs of one template have the same content and lay out alike.
+    pub(crate) template_id: u64,
+    /// This is the previous layout's laid-out IFC of its template, taken
+    /// over whole (see `IfcStore::create`): it already has the line layout
+    /// `adopt_layout_of` would give it.
+    pub(crate) reused_laid: bool,
+}
+
+impl Ifc {
+    /// Take the line layout another IFC of the same template ended its
+    /// layout with, for a box whose Taffy layout is reused unchanged.
+    pub(crate) fn adopt_layout_of(&mut self, laid: Box<Ifc>) {
+        let laid = *laid;
+        self.layout = laid.layout;
+        self.final_layout = laid.final_layout;
+        self.layout_is_final = laid.layout_is_final;
+        self.content_offset = laid.content_offset;
+        self.logical_size = laid.logical_size;
+        self.line_shifts = laid.line_shifts;
+    }
 }
 
 impl Ifc {
@@ -245,9 +271,12 @@ pub(crate) struct IfcStore {
     /// The IFCs are lent to the thread's active layout.
     active: bool,
     /// Root element -> its IFCs, in document order (filled after layout).
-    pub(crate) by_node: std::collections::HashMap<NodeId, Vec<usize>>,
+    pub(crate) by_node: crate::HashMap<NodeId, Vec<usize>>,
     #[cfg(feature = "paint")]
     pub(crate) raster: paint::GlyphRaster,
+    /// The shaped, not yet laid out IFCs this store created, with what they
+    /// were built from. A later layout reuses one whose inputs are equal.
+    pub(crate) templates: Vec<build::IfcTemplate>,
 }
 
 impl Default for IfcStore {
@@ -260,6 +289,7 @@ impl Default for IfcStore {
             by_node: Default::default(),
             #[cfg(feature = "paint")]
             raster: Default::default(),
+            templates: Vec::new(),
         }
     }
 }
@@ -289,7 +319,7 @@ impl IfcStore {
     pub(crate) fn standalone(
         &mut self,
         tree: &obscura_dom::tree::DomTree,
-        styles: &std::collections::HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::HashMap<NodeId, crate::LayoutStyle>,
         owner: NodeId,
         style: &crate::LayoutStyle,
         text: &str,
@@ -352,6 +382,10 @@ impl Ifc {
 impl Drop for IfcStore {
     fn drop(&mut self) {
         self.deactivate();
+        build::retain_templates(
+            std::mem::take(&mut self.templates),
+            std::mem::take(&mut self.ifcs),
+        );
         if let Some(fonts) = self.fonts.take() {
             fonts.give_back();
         }

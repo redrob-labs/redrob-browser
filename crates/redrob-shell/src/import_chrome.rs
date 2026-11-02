@@ -170,16 +170,148 @@ fn chrome_key(source: &Source) -> anyhow::Result<zeroize::Zeroizing<[u8; 16]>> {
 
 /// `v10` + AES-128-CBC with a 16-space IV and PKCS#7 padding.
 fn decrypt_v10(key: &[u8; 16], blob: &[u8]) -> Option<zeroize::Zeroizing<String>> {
+    let plain = decrypt_v10_bytes(key, blob)?;
+    String::from_utf8(plain.to_vec())
+        .ok()
+        .map(zeroize::Zeroizing::new)
+}
+
+fn decrypt_v10_bytes(key: &[u8; 16], blob: &[u8]) -> Option<zeroize::Zeroizing<Vec<u8>>> {
     use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
     let body = blob.strip_prefix(b"v10")?;
     let mut buf = zeroize::Zeroizing::new(body.to_vec());
     let iv = [b' '; 16];
-    let plain = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into())
+    let n = cbc::Decryptor::<aes::Aes128>::new(key.into(), &iv.into())
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
-        .ok()?;
-    String::from_utf8(plain.to_vec())
+        .ok()?
+        .len();
+    buf.truncate(n);
+    Some(buf)
+}
+
+/// A cookie read from another browser, in Chromium's own terms: times are
+/// microseconds since 1601-01-01, `same_site` is -1 (unset), 0 (none),
+/// 1 (lax) or 2 (strict).
+pub struct ChromeCookie {
+    pub host: String,
+    pub name: String,
+    pub value: zeroize::Zeroizing<String>,
+    pub path: String,
+    pub secure: bool,
+    pub httponly: bool,
+    pub creation: i64,
+    pub last_access: i64,
+    /// 0 for a session cookie.
+    pub expires: i64,
+    pub same_site: i32,
+}
+
+/// Where a profile keeps its cookies (`Network/Cookies` since Chrome 96).
+pub fn cookies_file(profile: &Path) -> Option<PathBuf> {
+    [profile.join("Network/Cookies"), profile.join("Cookies")]
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// Read `source`'s cookies. Returns the cookies and how many could not be
+/// opened. Expired ones are left out. Keys are as for passwords
+/// ([`import_passwords`]).
+pub fn read_cookies(source: &Source, scratch: &Path) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
+    if cfg!(windows) {
+        anyhow::bail!(
+            "{} encrypts cookies so only it can read them. Sign in to your sites again here.",
+            source.name
+        );
+    }
+    let Some(path) = cookies_file(&source.profile) else {
+        return Ok((Vec::new(), 0));
+    };
+    std::fs::create_dir_all(scratch)?;
+    let copy = scratch.join("Cookies");
+    std::fs::copy(&path, &copy)?;
+    let key = chrome_key(source)?;
+    let out = read_cookies_db(&copy, &key);
+    let _ = std::fs::remove_file(&copy);
+    out
+}
+
+fn read_cookies_db(path: &Path, key: &[u8; 16]) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
+    let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    // Since version 24 the plain value starts with SHA-256 of the host.
+    let version: i64 = db
+        .query_row("SELECT value FROM meta WHERE key = 'version'", [], |r| {
+            r.get::<_, String>(0)
+        })
         .ok()
-        .map(zeroize::Zeroizing::new)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let now = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+        + WINDOWS_TO_UNIX_SECS)
+        * 1_000_000;
+    let mut q = db.prepare(
+        "SELECT host_key, name, value, encrypted_value, path, is_secure, is_httponly,
+                creation_utc, last_access_utc, expires_utc, has_expires, samesite
+         FROM cookies",
+    )?;
+    let rows = q.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, Vec<u8>>(3)?,
+            r.get::<_, String>(4)?,
+            r.get::<_, i64>(5)? != 0,
+            r.get::<_, i64>(6)? != 0,
+            r.get::<_, i64>(7)?,
+            r.get::<_, i64>(8)?,
+            r.get::<_, i64>(9)?,
+            r.get::<_, i64>(10)? != 0,
+            r.get::<_, i64>(11)? as i32,
+        ))
+    })?;
+    let mut out = Vec::new();
+    let mut skipped = 0;
+    for row in rows {
+        let (host, name, plain, enc, path, secure, httponly, creation, last, expires, has, ss) =
+            row?;
+        if has && expires < now {
+            continue;
+        }
+        let value = if !plain.is_empty() || enc.is_empty() {
+            zeroize::Zeroizing::new(plain)
+        } else {
+            let Some(mut bytes) = decrypt_v10_bytes(key, &enc) else {
+                skipped += 1;
+                continue;
+            };
+            if version >= 24 && bytes.len() >= 32 {
+                bytes.drain(..32);
+            }
+            match String::from_utf8(bytes.to_vec()) {
+                Ok(s) => zeroize::Zeroizing::new(s),
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            }
+        };
+        out.push(ChromeCookie {
+            host,
+            name,
+            value,
+            path,
+            secure,
+            httponly,
+            creation,
+            last_access: last,
+            expires: if has { expires } else { 0 },
+            same_site: ss,
+        });
+    }
+    Ok((out, skipped))
 }
 
 /// Chrome's password export: `name,url,username,password[,note]` with a header row.

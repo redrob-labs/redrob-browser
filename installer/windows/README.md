@@ -15,7 +15,7 @@ the language.
   `HKCU\Software\Redrob\Redrob Browser\Language`; the browser starts in it until the person picks another
   language in its menu (`crates/redrob-shell/src/i18n.rs`).
 - **Install**, per user, no administrator rights, into `%LOCALAPPDATA%\Programs\Redrob Browser` (the MSI's
-  folder). The payload is the release's own signed zip (the programs, the GStreamer runtime and the
+  folder). The payload is the release's own signed zip (the programs, the CEF runtime and the
   Visual C++ runtime), unpacked with System32's `tar.exe` beside the old install and swapped in, so a
   failed update never leaves a half-updated folder. A running browser is never closed for the person: the
   setup asks them to close it, then Retry.

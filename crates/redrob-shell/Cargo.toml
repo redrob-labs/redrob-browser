@@ -10,11 +10,6 @@ description = "The Redrob Browser window: draws pages from the engine and sends 
 name = "redrob-browser-window"
 path = "src/main.rs"
 
-# A page in the system web view, for DRM video (docs/DRM.md).
-[[bin]]
-name = "redrob-browser-protected"
-path = "src/bin/protected.rs"
-
 [dependencies]
 eframe = "0.36"
 egui = "0.36"
@@ -38,21 +33,30 @@ aes = "0.8"
 sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
-gstreamer = { version = "0.25", optional = true }
-vello = "0.11"
-# Validates engine fonts before vello draws them (vello panics on a bad face).
-skrifa = "0.44"
-redrob-scene = { workspace = true }
-# The spatial mapping agent screenshots use; the window maps with the same code.
-redrob-scene-raster = { path = "../redrob-scene-raster" }
-gstreamer-app = { version = "0.25", optional = true }
-gstreamer-video = { version = "0.25", optional = true }
 open = "5"
+# Chromium in every window tab (docs/CEF.md), each page a native child
+# window of the browser window. The binaries come from CEF_PATH.
+cef = { version = "=156.3.0", default-features = false, features = ["sandbox"] }
 
-# The protected tab: WebView2 on Windows, WKWebView on macOS. Linux does not offer it.
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-wry = "0.57"
-tao = "0.37"
+[target.'cfg(target_os = "linux")'.dependencies]
+# The pages are X11 child windows: the window runs on X11 (main.rs) and
+# places them with its own X connection (cef/native.rs).
+winit = { version = "0.30.13", default-features = false, features = ["x11", "rwh_06"] }
+x11rb = "0.13"
+# fcitx5 over D-Bus, so text composes in place on X11 (ime.rs). zbus is
+# already in the build (accesskit); blocking calls only.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+serde = "1"
+
+[target.'cfg(unix)'.dependencies]
+# SIGTERM and SIGINT handlers in place of Chromium's (cef/mod.rs).
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Pages are NSViews in the window's content view (cef/native.rs).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSArray", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation"] }
 
 [target.'cfg(windows)'.dependencies]
 # Start-up on Windows (startup.rs: the log file, the message box) and the
@@ -60,16 +64,13 @@ tao = "0.37"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Security",
     "Win32_System_Console",
+    "Win32_System_Pipes",
     "Win32_System_Registry",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
-
-[features]
-default = []
-# Video and audio playback through GStreamer (docs/MEDIA.md). Needs the
-# GStreamer development files at build time and its runtime when running.
-media = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]

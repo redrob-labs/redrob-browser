@@ -223,6 +223,13 @@ pub trait RoundTree: TraverseTree {
     fn get_unrounded_layout(&self, node_id: NodeId) -> Layout;
     /// Get a reference to the node's final layout
     fn set_final_layout(&mut self, node_id: NodeId, layout: &Layout);
+    /// Whether the final layouts of the node's subtree are already rounded from its current
+    /// unrounded layouts at this cumulative offset, so rounding may skip it
+    fn rounding_is_current(&self, _node_id: NodeId, _cumulative_x: f32, _cumulative_y: f32) -> bool {
+        false
+    }
+    /// The node's subtree was just rounded at this cumulative offset
+    fn note_rounded(&mut self, _node_id: NodeId, _cumulative_x: f32, _cumulative_y: f32) {}
 }
 
 /// Trait used by the `print_tree` method which prints a debug representation

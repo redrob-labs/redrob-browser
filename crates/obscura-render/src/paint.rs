@@ -6,9 +6,10 @@
 //! dependencies, so a screenshot is reproducible across hosts.
 
 use crate::canvas::{Canvas, ClipMask, PixmapCanvas};
+use crate::{HashMap, HashSet};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 mod damage;
@@ -228,7 +229,62 @@ pub struct RenderResourceCache {
     lazy_viewport_bottom: f32,
     /// The top of the nearest still-deferred lazy image, if any.
     lazy_deferred_top: Option<f32>,
+    /// Decoded web fonts by `(src, base URL)`, with the compressed bytes they
+    /// came from. Every layout collects the page's fonts; decoding a WOFF2
+    /// file again each time cost more than the layout of most pages.
+    decoded_fonts: HashMap<(String, Option<String>), DecodedFont>,
+    /// `@font-face` rules parsed from the author sheets they came from.
+    font_face_rules: Option<(Vec<(String, Option<String>)>, Vec<FontRule>)>,
+    /// The fonts the last layout of a document collected, with the document
+    /// state they were collected from (see `WebFontsKey`).
+    web_fonts_memo: Option<(WebFontsKey, Vec<crate::inline::WebFont>)>,
+    /// The images of the last collection (see `patch_image_intrinsics`).
+    image_memo: Option<ImageMemo>,
 }
+
+/// What `collect_web_fonts` reads besides the DOM: the document
+/// (`DomTree::identity`), its external sheet generation, the base URL and
+/// the FontFace set.
+#[derive(Clone, PartialEq)]
+struct WebFontsKey {
+    tree: usize,
+    external_generation: u64,
+    base_url: Option<String>,
+    dynamic_fonts: u64,
+}
+
+impl WebFontsKey {
+    fn new(tree: &DomTree, base_url: Option<&str>, dynamic_fonts: &[DynamicFontFace]) -> Self {
+        use std::hash::BuildHasher;
+        Self {
+            tree: tree.identity(),
+            external_generation: tree.external_stylesheet_generation(),
+            base_url: base_url.map(str::to_owned),
+            dynamic_fonts: foldhash::fast::FixedState::default().hash_one(
+                dynamic_fonts
+                    .iter()
+                    .map(|face| {
+                        (
+                            &face.family,
+                            &face.source,
+                            &face.style,
+                            &face.weight,
+                            &face.unicode_range,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
+}
+
+struct DecodedFont {
+    compressed: Arc<[u8]>,
+    decoded: Option<std::sync::Arc<Vec<u8>>>,
+}
+
+/// Bound on [`RenderResourceCache::decoded_fonts`]; past it the map restarts.
+const MAX_DECODED_FONTS: usize = 256;
 
 /// Chromium's lazy-load distance from the viewport when the effective
 /// connection type is unknown (headless): 3000px (measured: with an 800px
@@ -260,31 +316,42 @@ impl RenderResourceCache {
         max_bytes: usize,
     ) -> Self {
         Self {
-            entries: HashMap::new(),
-            stopped: HashSet::new(),
+            entries: HashMap::default(),
+            stopped: HashSet::default(),
             order: VecDeque::new(),
             retained_bytes: 0,
             raster_paints: VecDeque::new(),
             raster_paint_bytes: 0,
             max_entries,
             max_bytes,
-            content_image_intrinsics: HashMap::new(),
+            content_image_intrinsics: HashMap::default(),
             content_image_intrinsic_order: VecDeque::new(),
             max_content_image_intrinsics: max_entries.min(DEFAULT_CONTENT_IMAGE_INTRINSIC_ENTRIES),
             #[cfg(test)]
             content_image_layout_retries: 0,
             sync_loading_enabled: true,
             sync_misses: Vec::new(),
-            video_frames: HashMap::new(),
-            video_times: HashMap::new(),
-            sync_miss_keys: HashSet::new(),
+            video_frames: HashMap::default(),
+            video_times: HashMap::default(),
+            sync_miss_keys: HashSet::default(),
             loader: Box::new(loader),
             changed: Vec::new(),
             changed_overflow: false,
-            lazy_loaded: HashSet::new(),
+            lazy_loaded: HashSet::default(),
             lazy_viewport_bottom: 0.0,
             lazy_deferred_top: None,
+            decoded_fonts: HashMap::default(),
+            font_face_rules: None,
+            web_fonts_memo: None,
+            image_memo: None,
         }
+    }
+
+    /// Drop the image and font collections kept for patching (see
+    /// `patch_image_intrinsics`), so the next layout collects again.
+    pub(crate) fn forget_collection_memos(&mut self) {
+        self.image_memo = None;
+        self.web_fonts_memo = None;
     }
 
     /// Record that the viewport's bottom edge has reached document y
@@ -941,7 +1008,7 @@ impl RenderResourceCache {
             .iter()
             .map(|(&nid, value)| (nid, value.clone()))
             .collect::<Vec<_>>();
-        let mut seeded = HashSet::with_capacity(remembered.len());
+        let mut seeded = HashSet::with_capacity_and_hasher(remembered.len(), Default::default());
         for (nid, value) in remembered {
             let is_live_image = tree.get_node(nid).is_some_and(|node| {
                 node.as_element()
@@ -1267,7 +1334,7 @@ pub struct PreparedRender {
     base_url: Option<String>,
     has_dynamic_fonts: bool,
     content_size: (f32, f32),
-    viewport_fixed: std::collections::HashSet<obscura_dom::tree::NodeId>,
+    viewport_fixed: crate::HashSet<obscura_dom::tree::NodeId>,
     sticky: crate::StickyLayout,
     scroll_tree: crate::dom::ScrollTree,
     selected_images: HashMap<obscura_dom::tree::NodeId, SelectedImage>,
@@ -1433,7 +1500,7 @@ impl PreparedRender {
         self.content_size
     }
 
-    pub fn viewport_fixed_nodes(&self) -> &std::collections::HashSet<obscura_dom::tree::NodeId> {
+    pub fn viewport_fixed_nodes(&self) -> &crate::HashSet<obscura_dom::tree::NodeId> {
         &self.viewport_fixed
     }
 
@@ -1584,7 +1651,7 @@ impl PreparedRender {
             tree: &DomTree,
             laid: &crate::DomLayout,
             movement: &[(f32, f32)],
-            viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
+            viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
             id: obscura_dom::tree::NodeId,
             inherited: Option<crate::dom::OverflowClip>,
             out: &mut [Option<crate::dom::OverflowClip>],
@@ -2347,7 +2414,25 @@ impl PreparedRender {
         );
         out.insert("flex-shrink", css_number(style.flex_shrink.unwrap_or(1.0)));
         out.insert("flex-basis", dimension_css(style.flex_basis, "auto"));
+        out.insert(
+            "flex",
+            format!(
+                "{} {} {}",
+                out["flex-grow"], out["flex-shrink"], out["flex-basis"]
+            ),
+        );
         out.insert("order", style.order.to_string());
+        out.insert(
+            "object-fit",
+            match style.object_fit {
+                crate::ObjectFit::Fill => "fill",
+                crate::ObjectFit::Contain => "contain",
+                crate::ObjectFit::Cover => "cover",
+                crate::ObjectFit::ScaleDown => "scale-down",
+                crate::ObjectFit::None => "none",
+            }
+            .to_string(),
+        );
 
         let used_auto = id
             .and_then(|id| self.layout.used_auto_margins.get(&id))
@@ -2378,6 +2463,31 @@ impl PreparedRender {
                     _ => css_px(value),
                 },
             );
+        }
+        // Insets (CSSOM resolved values): a non-positioned box reports its
+        // computed value; a relatively positioned or sticky box its used
+        // offset, `auto` being the negated opposite side or 0. A box whose
+        // used offset depends on its containing block (absolute/fixed with
+        // `auto`) is left to script, which measures it.
+        for (index, name) in ["top", "right", "bottom", "left"].into_iter().enumerate() {
+            let value = style.inset[index];
+            let opposite = style.inset[(index + 2) % 4];
+            let reported = match style.position {
+                None => {
+                    Some(value.map_or_else(|| "auto".to_string(), |v| dimension_css(v, "auto")))
+                }
+                Some(taffy::Position::Relative) => Some(match (value, opposite) {
+                    (Some(value), _) => dimension_css(value, "0px"),
+                    (None, Some(crate::Dimension::Px(px))) => css_px(-px),
+                    (None, _) => "0px".to_string(),
+                }),
+                Some(taffy::Position::Absolute) => value
+                    .filter(|value| matches!(value, crate::Dimension::Px(_)))
+                    .map(|value| dimension_css(value, "auto")),
+            };
+            if let Some(reported) = reported {
+                out.insert(name, reported);
+            }
         }
         for (name, value) in [
             ("padding-top", style.padding.top),
@@ -2510,6 +2620,19 @@ impl PreparedRender {
             .to_string(),
         );
 
+        // Each row of named areas serializes as one double-quoted string,
+        // whether it came from the longhand or the grid-template shorthand.
+        out.insert(
+            "grid-template-areas",
+            match style.grid_areas.as_deref() {
+                Some(rows) if !rows.is_empty() => rows
+                    .iter()
+                    .map(|row| format!("\"{}\"", row.join(" ")))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                _ => "none".to_string(),
+            },
+        );
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
         if let Some((columns, rows)) =
@@ -2857,7 +2980,7 @@ impl PreparedRender {
             }
             false
         };
-        let mut chain = std::collections::HashSet::new();
+        let mut chain = crate::HashSet::default();
         for mutation in mutations {
             let crate::dom::RetainedStyleMutation::Attribute(attribute) = mutation else {
                 return false;
@@ -2961,7 +3084,7 @@ impl PreparedRender {
 pub(crate) fn non_geometric_computed_style(
     style: &crate::LayoutStyle,
 ) -> HashMap<&'static str, String> {
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
 
     out.insert("display", computed_display(style).to_string());
     out.insert(
@@ -3792,22 +3915,26 @@ fn verify_against_scratch(
     VERIFYING.with(|flag| flag.set(true));
     let mut fresh_sheets = crate::css::StylesheetCache::default();
     let scratch = crate::inline::without_shaped_item_reuse(|| {
-        prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
-            tree,
-            viewport,
-            base_url,
-            resources,
-            dynamic_fonts,
-            &mut fresh_sheets,
-            None,
-            None,
-            crate::CssMediaType::Screen,
-            animation_sample,
-            &mut timeline,
-        )
+        crate::dom::without_subtree_keys(|| {
+            prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                dynamic_fonts,
+                &mut fresh_sheets,
+                None,
+                None,
+                crate::CssMediaType::Screen,
+                animation_sample,
+                &mut timeline,
+            )
+        })
     });
     VERIFYING.with(|flag| flag.set(false));
-    let Some(mut scratch) = scratch else {
+    #[cfg_attr(not(feature = "scene"), allow(unused_mut))]
+    let Some(mut scratch) = scratch
+    else {
         panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
     };
     let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
@@ -3831,7 +3958,7 @@ fn verify_against_scratch(
     // frame built from scratch: no stale boxes, glyph runs or clips.
     #[cfg(feature = "scene")]
     if difference.is_none() {
-        let no_scroll = HashMap::new();
+        let no_scroll = HashMap::default();
         let frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
             scene::build_scene_prepared(
                 tree,
@@ -3857,6 +3984,15 @@ fn verify_against_scratch(
         }
     }
     if let Some(difference) = difference {
+        // `OBSCURA_LAYOUT_VERIFY=warn` reports every difference of a long
+        // session instead of stopping at the first one.
+        if std::env::var_os("OBSCURA_LAYOUT_VERIFY").is_some_and(|value| value == "warn") {
+            eprintln!(
+                "[timing] layout-verify path={path} DIFFERS {}",
+                difference.chars().take(400).collect::<String>()
+            );
+            return;
+        }
         panic!(
             "OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}"
         );
@@ -3883,6 +4019,33 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     animation_timeline: &mut crate::AnimationTimelineState,
 ) -> Option<PreparedRender> {
     let _prof = crate::prof::start();
+    if crate::prof::enabled() {
+        let mut summary: Vec<String> = Vec::new();
+        for mutation in mutations {
+            summary.push(match mutation {
+                crate::dom::RetainedStyleMutation::Attribute(attribute) => {
+                    format!("a:{}", attribute.name)
+                }
+                crate::dom::RetainedStyleMutation::Tree(crate::dom::TreeStyleMutation::Text {
+                    ..
+                }) => "text".into(),
+                crate::dom::RetainedStyleMutation::Tree(
+                    crate::dom::TreeStyleMutation::Insert { .. },
+                ) => "ins".into(),
+                crate::dom::RetainedStyleMutation::Tree(
+                    crate::dom::TreeStyleMutation::Remove { .. },
+                ) => "rm".into(),
+                other => format!("{other:?}").chars().take(12).collect(),
+            });
+        }
+        summary.sort();
+        summary.dedup();
+        eprintln!(
+            "[timing] mutations n={} kinds={}",
+            mutations.len(),
+            summary.join(",")
+        );
+    }
     let sample_changed = previous.animation_sample != animation_sample;
     let forward_document_sample = sample_changed
         && previous.animation_sample.mode == crate::AnimationSampleMode::DocumentTime
@@ -3920,6 +4083,10 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             || (forward_document_sample
                 && previous.advance_inactive_animation_sample_time(animation_sample.time)))
     {
+        // The collections of the next layout cannot be patched from the
+        // last ones past mutations this layout never saw.
+        resources.forget_collection_memos();
+        stylesheet_cache.forget_tree_token();
         return Some(previous);
     }
     if previous.viewport == viewport
@@ -4007,6 +4174,8 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
                         previous.selected_images.insert(id, selected);
                     }
                     previous.paint_epoch = next_paint_epoch();
+                    resources.forget_collection_memos();
+                    stylesheet_cache.forget_tree_token();
                     return Some(previous);
                 }
             }
@@ -4067,6 +4236,17 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
+        signatures: std::mem::take(&mut previous.layout.cascade_signatures),
+        definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
+        previous_rendered: previous.layout.rendered_tree.take(),
+        geometry: Some(crate::dom::RetainedGeometry {
+            rects: std::mem::take(&mut previous.layout.rects),
+            clip_rects: std::mem::take(&mut previous.layout.clip_rects),
+            translates: std::mem::take(&mut previous.layout.translates),
+            transforms: std::mem::take(&mut previous.layout.transforms),
+            projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
+            clip_inputs: previous.layout.clip_inputs,
+        }),
     };
     drop(previous);
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
@@ -4098,7 +4278,7 @@ fn retained_animation_restyle_mutations(
         .filter_map(|(node, style)| {
             (style.animation_name.is_some() && style.animation_has_render_effect).then_some(*node)
         })
-        .collect::<std::collections::HashSet<_>>();
+        .collect::<crate::HashSet<_>>();
     css_nodes.retain(|node| connected(*node));
     let mut mutations = css_nodes
         .into_iter()
@@ -4185,12 +4365,28 @@ fn prepare_dom_internal_unverified(
         return None;
     }
     let prepare_started = std::time::Instant::now();
+    if let Some((maps, mutations)) = retained.as_ref() {
+        if let Some(previous) = maps.previous_rendered.as_deref() {
+            crate::dom::patch_flat_tree(tree, previous, mutations);
+        }
+    }
     // Fetch <img> bytes up front to learn intrinsic sizes for layout (a
     // CSS-sized image with no width/height attribute would otherwise be 0x0
     // and never paint). This seeds the same cache the paint pass reads, so
     // each URL is still fetched at most once.
-    let (mut intrinsic, mut selected_images) =
-        collect_image_intrinsics(tree, viewport, base_url, resources);
+    let (mut intrinsic, mut selected_images) = retained
+        .as_ref()
+        .and_then(|(maps, mutations)| {
+            patch_image_intrinsics(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                mutations,
+                maps.previous_rendered.as_deref(),
+            )
+        })
+        .unwrap_or_else(|| collect_image_intrinsics(tree, viewport, base_url, resources));
     // Preserve the HTML source fallback separately: a remembered CSS content
     // image temporarily overrides it, but a changed/removed/failed content
     // selection must restore the source before the correction layout.
@@ -4223,14 +4419,42 @@ fn prepare_dom_internal_unverified(
     let mut deferred_images: HashMap<
         obscura_dom::tree::NodeId,
         (crate::ReplacedIntrinsic, Option<SelectedImage>),
-    > = HashMap::new();
+    > = HashMap::default();
     for nid in lazy_images {
         if let Some(value) = intrinsic.remove(&nid) {
             deferred_images.insert(nid, (value, selected_images.remove(&nid)));
         }
     }
     resources.lazy_viewport_bottom = resources.lazy_viewport_bottom.max(viewport.1);
-    let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
+    let images_done = std::time::Instant::now();
+    // A retained layout whose mutations left every sheet owner alone and
+    // loaded no resource collects the fonts the last layout did.
+    let fonts_key = WebFontsKey::new(tree, base_url, dynamic_fonts);
+    let fonts_unchanged = retained.as_ref().is_some_and(|(_, mutations)| {
+        !mutations
+            .iter()
+            .any(|mutation| matches!(mutation, crate::dom::RetainedStyleMutation::Resource))
+            && crate::dom::mutations_keep_document_stylesheets(
+                tree,
+                mutations,
+                retained
+                    .as_ref()
+                    .and_then(|(maps, _)| maps.previous_rendered.as_deref()),
+            )
+    });
+    let fonts = match resources
+        .web_fonts_memo
+        .as_ref()
+        .filter(|(key, _)| fonts_unchanged && *key == fonts_key)
+    {
+        Some((_, fonts)) => fonts.clone(),
+        None => {
+            let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
+            resources.web_fonts_memo = Some((fonts_key, fonts.clone()));
+            fonts
+        }
+    };
+    let fonts_done = std::time::Instant::now();
     // Most framework pages use web fonts and many decorative SVG icons, but
     // only SVG text needs the page font faces. Avoid cloning/loading the page
     // font database for ordinary icons and HTML-only text.
@@ -4339,6 +4563,12 @@ fn prepare_dom_internal_unverified(
     let layout_done = std::time::Instant::now();
     let derived = laid.derived_layout_state(tree, viewport);
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] prepare images={:?} fonts={:?} svg={:?}",
+            images_done.duration_since(prepare_started),
+            fonts_done.duration_since(images_done),
+            resources_done.duration_since(fonts_done),
+        );
         eprintln!(
             "[timing] prepare resources={:?} layout={:?} derived={:?}",
             resources_done.duration_since(prepare_started),
@@ -5168,7 +5398,7 @@ fn paint_laid_dom_scrolled(
     canvas_surfaces: &dyn CanvasSurfaceSource,
     svg_fonts: &Arc<usvg::fontdb::Database>,
     content_size: (f32, f32),
-    viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
+    viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
     sticky: &crate::StickyLayout,
     scroll_tree: &crate::dom::ScrollTree,
     laid: &mut crate::DomLayout,
@@ -5253,24 +5483,22 @@ fn paint_laid_dom_scrolled(
     // their painting is owned by that raster, so they are skipped in both the
     // box/text loop below and the inline-formatting loop after it (an svg
     // `<text>` element must not also paint its glyphs on top of the raster).
-    let mut svg_subtree_skip: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut svg_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     // Text is painted in a second pass, after the box-order loop. Remember
     // every subtree already painted into an opacity layer so its shaped text
     // is not drawn a second time at full opacity in the outer pass.
-    let mut opacity_subtree_skip: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut opacity_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> =
+        crate::HashSet::default();
     // External sprite symbols, keyed by "url#id", extracted from a fetched
     // sprite file so a `<use href="url#id">` resolves. One sprite backs many
     // icons (a whole logo/icon band), so cache the parsed symbol across every
     // inline svg on the page rather than re-parsing the sprite per icon.
-    let mut sprite_cache: std::collections::HashMap<String, Option<String>> =
-        std::collections::HashMap::new();
+    let mut sprite_cache: crate::HashMap<String, Option<String>> = crate::HashMap::default();
     // An overflow clip is inherited by every descendant until another clip
     // joins the chain. Rasterizing the same full-surface alpha mask per child
     // made clipped long pages scale as surface area times descendant count.
     // Cache immutable masks for this one paint surface and share them by Arc.
-    let mut overflow_mask_cache: OverflowClipMaskCache = HashMap::new();
+    let mut overflow_mask_cache: OverflowClipMaskCache = HashMap::default();
     // Whether any element carries a `transform: translate()`. When none does
     // (the overwhelmingly common case), every node's accumulated offset is
     // zero, so skip the per-node ancestor walk entirely and keep the paint
@@ -5293,12 +5521,10 @@ fn paint_laid_dom_scrolled(
     let mut pos_layers: Vec<(i32, Vec<obscura_dom::tree::NodeId>)> = Vec::new();
     let mut float_layers: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
-    let mut consumed: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut consumed: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     // Members of z >= 0 layers (Appendix E step 8 and up): the inline
     // content of this context paints before them.
-    let mut positive_members: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut positive_members: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -5380,20 +5606,19 @@ fn paint_laid_dom_scrolled(
     // that actually materialized a generated box. A reverse DOM-preorder pass
     // propagates each node's paint index to its parent once, deriving subtree
     // endpoints in O(nodes + generated boxes), including reordered z layers.
-    let mut generated_before: std::collections::HashMap<
+    let mut generated_before: crate::HashMap<
         obscura_dom::tree::NodeId,
         Vec<crate::dom::GeneratedBox>,
-    > = std::collections::HashMap::new();
+    > = crate::HashMap::default();
     let mut generated_after_at: Vec<Vec<crate::dom::GeneratedBox>> =
         vec![Vec::new(); paint_order.len()];
     if !laid.generated_boxes.is_empty() {
-        let paint_indices: std::collections::HashMap<obscura_dom::tree::NodeId, usize> =
-            paint_order
-                .iter()
-                .enumerate()
-                .map(|(index, &nid)| (nid, index))
-                .collect();
-        let mut last_index: std::collections::HashMap<obscura_dom::tree::NodeId, usize> =
+        let paint_indices: crate::HashMap<obscura_dom::tree::NodeId, usize> = paint_order
+            .iter()
+            .enumerate()
+            .map(|(index, &nid)| (nid, index))
+            .collect();
+        let mut last_index: crate::HashMap<obscura_dom::tree::NodeId, usize> =
             paint_indices.clone();
         let dom_preorder = paint_nodes.clone();
         for nid in dom_preorder.into_iter().rev() {
@@ -7606,11 +7831,11 @@ struct ScrollPaintState<'a> {
     tree: &'a DomTree,
     viewport: (f32, f32),
     scroll: (f32, f32),
-    viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
-    sticky: Arc<std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
-    sticky_clips: Arc<std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
+    viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
+    sticky: Arc<crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
+    sticky_clips: Arc<crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
     viewport_fixed_clips:
-        Arc<std::collections::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>>,
+        Arc<crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>>,
     resolved: Option<&'a ResolvedScrollState>,
     clip_scope_root: Option<obscura_dom::tree::NodeId>,
     surface_extent: Option<(f32, f32)>,
@@ -7621,20 +7846,17 @@ struct ScrollPaintState<'a> {
 fn viewport_fixed_clip_map(
     tree: &DomTree,
     laid: &crate::DomLayout,
-    viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
-    sticky: &std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
-) -> std::collections::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>> {
+    viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
+    sticky: &crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
+) -> crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>> {
     fn walk(
         tree: &DomTree,
         laid: &crate::DomLayout,
-        viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
-        sticky: &std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
+        viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
+        sticky: &crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
         id: obscura_dom::tree::NodeId,
         inherited: Option<crate::dom::OverflowClip>,
-        out: &mut std::collections::HashMap<
-            obscura_dom::tree::NodeId,
-            Option<crate::dom::OverflowClip>,
-        >,
+        out: &mut crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>,
     ) {
         out.insert(id, inherited.clone());
         let next = match (laid.styles.get(&id), laid.rects.get(&id)) {
@@ -7663,7 +7885,8 @@ fn viewport_fixed_clip_map(
         }
     }
 
-    let mut out = std::collections::HashMap::with_capacity(viewport_fixed.len());
+    let mut out =
+        crate::HashMap::with_capacity_and_hasher(viewport_fixed.len(), Default::default());
     for &id in viewport_fixed {
         let starts_subtree = crate::dom::rendered_parent(tree, id)
             .is_none_or(|parent| !viewport_fixed.contains(&parent));
@@ -7680,7 +7903,7 @@ impl<'a> ScrollPaintState<'a> {
         viewport: (f32, f32),
         requested: (f32, f32),
         content: (f32, f32),
-        viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
+        viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
         sticky_layout: &crate::StickyLayout,
         scroll_tree: &crate::dom::ScrollTree,
         laid: &crate::DomLayout,
@@ -7717,7 +7940,7 @@ impl<'a> ScrollPaintState<'a> {
             let sticky = Arc::new(if active {
                 sticky_layout.resolved_root_translations(viewport, scroll_tree, scroll)
             } else {
-                std::collections::HashMap::new()
+                crate::HashMap::default()
             });
             let sticky_clips = Arc::new(sticky_layout.clip_translations_from(&sticky));
             let viewport_fixed_clips =
@@ -7743,7 +7966,7 @@ impl<'a> ScrollPaintState<'a> {
     fn from_resolved(
         tree: &'a DomTree,
         viewport: (f32, f32),
-        viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
+        viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
         resolved: &'a ResolvedScrollState,
         clip_scope_root: Option<obscura_dom::tree::NodeId>,
         surface_extent: Option<(f32, f32)>,
@@ -7754,9 +7977,9 @@ impl<'a> ScrollPaintState<'a> {
             viewport,
             scroll: resolved.root_offset(),
             viewport_fixed,
-            sticky: Arc::new(std::collections::HashMap::new()),
-            sticky_clips: Arc::new(std::collections::HashMap::new()),
-            viewport_fixed_clips: Arc::new(std::collections::HashMap::new()),
+            sticky: Arc::new(crate::HashMap::default()),
+            sticky_clips: Arc::new(crate::HashMap::default()),
+            viewport_fixed_clips: Arc::new(crate::HashMap::default()),
             resolved: Some(resolved),
             clip_scope_root,
             surface_extent,
@@ -9999,16 +10222,8 @@ fn collect_web_fonts(
     cache: &mut RenderResourceCache,
     dynamic_fonts: &[DynamicFontFace],
 ) -> Vec<crate::inline::WebFont> {
-    struct FontRule {
-        sources: Vec<(String, String)>,
-        family: Option<String>,
-        weight: Option<(u16, u16)>,
-        italic: Option<bool>,
-    }
-
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::HashSet::default();
     let mut fonts = Vec::new();
-    let mut rules = Vec::new();
 
     // Author style sheets in document order: `<style>` text, and linked
     // sheets the host fetched (their URLs resolve against the sheet's own
@@ -10039,31 +10254,21 @@ fn collect_web_fonts(
             None => {}
         }
     }
-    for (css, sheet_base) in &sheets {
-        let sheet_base = sheet_base.as_deref();
-        for face in font_face_blocks(css) {
-            if !font_face_covers_ascii(face) {
-                continue;
-            }
-            let sources: Vec<_> = font_face_urls(face)
-                .into_iter()
-                .filter(|src| font_source_may_be_supported(src))
-                .map(|src| {
-                    let key = font_resource_key(&src, sheet_base);
-                    (key.clone(), key)
-                })
-                .collect();
-            if sources.is_empty() {
-                continue;
-            }
-            rules.push(FontRule {
-                sources,
-                family: font_face_family(face),
-                weight: font_face_weight(face),
-                italic: font_face_italic(face),
-            });
+    // Scanning every sheet for `@font-face` lowercases the whole CSS text;
+    // reuse the rules while the sheets are unchanged.
+    let cached_rules = cache
+        .font_face_rules
+        .as_ref()
+        .filter(|(cached_sheets, _)| *cached_sheets == sheets)
+        .map(|(_, rules)| rules.clone());
+    let mut rules = match cached_rules {
+        Some(rules) => rules,
+        None => {
+            let rules = sheet_font_rules(&sheets);
+            cache.font_face_rules = Some((sheets, rules.clone()));
+            rules
         }
-    }
+    };
     for face in dynamic_fonts {
         let descriptor_block = format!(
             "src:{};font-weight:{};font-style:{};unicode-range:{}",
@@ -10137,7 +10342,7 @@ fn collect_web_fonts(
 
     // Bytes already fetched per source, so two @font-face rules sharing a
     // `src` (one file under two families or weights) both register a face.
-    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
+    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::default();
     for rule in rules {
         if fonts.len() >= MAX_WEB_FONT_FACES {
             break;
@@ -10194,20 +10399,87 @@ fn font_resource_key(src: &str, base_url: Option<&str>) -> String {
         .unwrap_or_else(|| src.to_string())
 }
 
+#[derive(Clone)]
+pub(crate) struct FontRule {
+    sources: Vec<(String, String)>,
+    family: Option<String>,
+    weight: Option<(u16, u16)>,
+    italic: Option<bool>,
+}
+
+/// The ASCII-covering `@font-face` rules of the author sheets, in order.
+fn sheet_font_rules(sheets: &[(String, Option<String>)]) -> Vec<FontRule> {
+    let mut rules = Vec::new();
+    for (css, sheet_base) in sheets {
+        let sheet_base = sheet_base.as_deref();
+        for face in font_face_blocks(css) {
+            if !font_face_covers_ascii(face) {
+                continue;
+            }
+            let sources: Vec<_> = font_face_urls(face)
+                .into_iter()
+                .filter(|src| font_source_may_be_supported(src))
+                .map(|src| {
+                    let key = font_resource_key(&src, sheet_base);
+                    (key.clone(), key)
+                })
+                .collect();
+            if sources.is_empty() {
+                continue;
+            }
+            rules.push(FontRule {
+                sources,
+                family: font_face_family(face),
+                weight: font_face_weight(face),
+                italic: font_face_italic(face),
+            });
+        }
+    }
+    rules
+}
+
 fn fetch_and_decode_font(
     src: &str,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
 ) -> Option<std::sync::Arc<Vec<u8>>> {
+    let key = (src.to_string(), base_url.map(str::to_string));
+    // A data: URL is its own bytes; a fetched font is reused while the cache
+    // still returns the same bytes.
+    if src.starts_with("data:") {
+        if let Some(entry) = cache.decoded_fonts.get(&key) {
+            return entry.decoded.clone();
+        }
+    }
     let compressed = fetch_font_bytes(src, base_url, cache)?;
+    if let Some(entry) = cache.decoded_fonts.get(&key) {
+        if Arc::ptr_eq(&entry.compressed, &compressed) {
+            return entry.decoded.clone();
+        }
+    }
+    let decoded = decode_font_bytes(&compressed);
+    if cache.decoded_fonts.len() >= MAX_DECODED_FONTS {
+        cache.decoded_fonts.clear();
+    }
+    cache.decoded_fonts.insert(
+        key,
+        DecodedFont {
+            compressed,
+            decoded: decoded.clone(),
+        },
+    );
+    decoded
+}
+
+fn decode_font_bytes(compressed: &Arc<[u8]>) -> Option<std::sync::Arc<Vec<u8>>> {
     if compressed.len() > 8 * 1024 * 1024 {
         return None;
     }
     let decoded = match compressed.get(..4) {
-        Some(b"wOF2") => wuff::decompress_woff2(&compressed)
+        Some(b"wOF2") => wuff::decompress_woff2(compressed)
             .ok()
             .map(std::sync::Arc::new),
-        Some(b"wOFF") => wuff::decompress_woff1(&compressed)
+        Some(b"wOFF") => wuff::decompress_woff1(compressed)
             .ok()
             .map(std::sync::Arc::new),
         // TrueType/OpenType collections and raw sfnt fonts already have the
@@ -12833,81 +13105,241 @@ fn collect_image_intrinsics(
     HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     HashMap<obscura_dom::tree::NodeId, SelectedImage>,
 ) {
+    let mut out = crate::HashMap::default();
+    let mut selected = HashMap::default();
+    let mut videos = Vec::new();
+    for nid in crate::dom::rendered_descendants(tree, tree.document()) {
+        if collect_image_intrinsic_of(
+            tree,
+            nid,
+            viewport,
+            base_url,
+            cache,
+            &mut out,
+            &mut selected,
+        ) {
+            videos.push(nid);
+        }
+    }
+    cache.image_memo = Some(ImageMemo {
+        key: ImageMemoKey::new(tree, viewport, base_url),
+        intrinsic: out.clone(),
+        selected: selected.clone(),
+        videos,
+    });
+    (out, selected)
+}
+
+/// The image intrinsics of the last collection of a document.
+struct ImageMemo {
+    key: ImageMemoKey,
+    intrinsic: HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    selected: HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+    /// Rendered `<video>` elements: their frame changes with playback time,
+    /// so every collection reads them again.
+    videos: Vec<obscura_dom::tree::NodeId>,
+}
+
+#[derive(PartialEq)]
+struct ImageMemoKey {
+    tree: usize,
+    viewport: (u32, u32),
+    base_url: Option<String>,
+}
+
+impl ImageMemoKey {
+    fn new(tree: &DomTree, viewport: (f32, f32), base_url: Option<&str>) -> Self {
+        Self {
+            tree: tree.identity(),
+            viewport: (viewport.0.to_bits(), viewport.1.to_bits()),
+            base_url: base_url.map(str::to_owned),
+        }
+    }
+}
+
+/// `collect_image_intrinsics` after `mutations`, from the last collection:
+/// only inserted and removed subtrees are visited. `None` when a mutation
+/// can change an image elsewhere (an attribute of an image, a `<source>` or
+/// `<picture>`, a `<details>` opening, a loaded resource) or the document
+/// has shadow roots. Videos are read again every time.
+fn patch_image_intrinsics(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+    mutations: &[crate::dom::RetainedStyleMutation],
+    previous: Option<&crate::dom::FlatTree>,
+) -> Option<(
+    HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+)> {
+    use crate::dom::{RetainedStyleMutation, TreeStyleMutation};
+    if tree.has_shadow_roots() {
+        return None;
+    }
+    let memo = cache.image_memo.as_ref()?;
+    if memo.key != ImageMemoKey::new(tree, viewport, base_url) {
+        return None;
+    }
+    let image_element = |node: obscura_dom::tree::NodeId| {
+        tree.with_node(node, |node| {
+            node.as_element().is_some_and(|element| {
+                matches!(
+                    element.local.as_ref(),
+                    "img" | "source" | "picture" | "video" | "details" | "summary" | "slot"
+                )
+            })
+        })
+        .unwrap_or(false)
+    };
+    let image_safe = mutations.iter().all(|mutation| match mutation {
+        RetainedStyleMutation::Attribute(attribute) => {
+            !image_element(attribute.node)
+                && !matches!(attribute.name.as_str(), "open" | "slot" | "name")
+        }
+        RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
+            new_parent,
+            old_parent,
+            ..
+        }) => !image_element(*new_parent) && !old_parent.is_some_and(image_element),
+        RetainedStyleMutation::Tree(TreeStyleMutation::Remove { old_parent, .. }) => {
+            !image_element(*old_parent)
+        }
+        RetainedStyleMutation::Tree(TreeStyleMutation::Text { .. })
+        | RetainedStyleMutation::Animation { .. }
+        | RetainedStyleMutation::WaapiAnimation { .. }
+        | RetainedStyleMutation::Stylesheet => true,
+        RetainedStyleMutation::Resource => false,
+    });
+    if !image_safe {
+        return None;
+    }
+    let subtrees = crate::dom::mutated_subtrees(tree, mutations, previous)?;
+    let mut out = memo.intrinsic.clone();
+    let mut selected = memo.selected.clone();
+    let mut videos = memo.videos.clone();
+    for id in subtrees.old.iter().chain(&subtrees.new) {
+        out.remove(id);
+        selected.remove(id);
+        videos.retain(|video| video != id);
+    }
+    for &video in &videos {
+        out.remove(&video);
+        selected.remove(&video);
+        collect_image_intrinsic_of(
+            tree,
+            video,
+            viewport,
+            base_url,
+            cache,
+            &mut out,
+            &mut selected,
+        );
+    }
+    for &id in &subtrees.new {
+        if collect_image_intrinsic_of(tree, id, viewport, base_url, cache, &mut out, &mut selected)
+            && !videos.contains(&id)
+        {
+            videos.push(id);
+        }
+    }
+    cache.image_memo = Some(ImageMemo {
+        key: ImageMemoKey::new(tree, viewport, base_url),
+        intrinsic: out.clone(),
+        selected: selected.clone(),
+        videos,
+    });
+    Some((out, selected))
+}
+
+/// Record the intrinsic size and selected source of `nid` if it is an image
+/// or a video. Returns whether it is a video.
+fn collect_image_intrinsic_of(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+    out: &mut HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    selected: &mut HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+) -> bool {
     enum Source {
         Image,
         VideoPoster(String),
         VideoFrame(String),
     }
-    let mut out = std::collections::HashMap::new();
-    let mut selected = HashMap::new();
-    for nid in crate::dom::rendered_descendants(tree, tree.document()) {
-        let source = tree
-            .with_node(nid, |node| match node.as_element()?.local.as_ref() {
-                "img" => Some(Source::Image),
-                "video" => node
-                    .get_attribute("poster")
-                    .map(str::trim)
-                    .filter(|poster| !poster.is_empty())
-                    .map(|poster| Source::VideoPoster(poster.to_owned()))
-                    .or_else(|| {
-                        // Without a poster a paused video shows its frame at
-                        // the playback position; without a decoder its header
-                        // still gives the natural size.
-                        if node.get_attribute("preload") == Some("none") {
-                            return None;
-                        }
-                        video_source_url(tree, nid).map(Source::VideoFrame)
-                    }),
-                _ => None,
-            })
-            .flatten();
-        // Release the scoped borrow before responsive selection reads the tree.
-        let (url, density) = match source {
-            Some(Source::Image) => {
-                let Some(candidate) = resolve_img_url(tree, nid, viewport) else {
-                    continue;
-                };
-                candidate
-            }
-            Some(Source::VideoPoster(poster)) => (poster, 1.0),
-            Some(Source::VideoFrame(src)) => {
-                let Some(media_url) = resolve_resource_url(&src, base_url) else {
-                    continue;
-                };
-                let time = cache.video_time(nid);
-                let Some(frame) = cache.video_frame(&media_url, time) else {
-                    // Chrome sizes the box from the metadata alone.
-                    if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
-                        out.insert(
-                            nid,
-                            crate::ReplacedIntrinsic::from_dimensions(width, height),
-                        );
+    let is_video = tree
+        .with_node(nid, |node| {
+            node.as_element()
+                .is_some_and(|element| element.local.as_ref() == "video")
+        })
+        .unwrap_or(false);
+    let source = tree
+        .with_node(nid, |node| match node.as_element()?.local.as_ref() {
+            "img" => Some(Source::Image),
+            "video" => node
+                .get_attribute("poster")
+                .map(str::trim)
+                .filter(|poster| !poster.is_empty())
+                .map(|poster| Source::VideoPoster(poster.to_owned()))
+                .or_else(|| {
+                    // Without a poster a paused video shows its frame at
+                    // the playback position; without a decoder its header
+                    // still gives the natural size.
+                    if node.get_attribute("preload") == Some("none") {
+                        return None;
                     }
-                    continue;
-                };
-                (frame.data_url.to_string(), 1.0)
-            }
-            None => continue,
-        };
-        let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
-        let profile = image_request_profile(tree, nid);
-        selected.insert(
-            nid,
-            SelectedImage {
-                resolved_url: resolved_url.clone(),
-                density,
-                profile,
-            },
-        );
-        if let Some(mut intrinsic) = cache.profiled_image_intrinsic(&resolved_url, profile) {
-            // A 2x (or w-descriptor) candidate's raw pixels are density times
-            // its CSS size. A ratio is dimensionless and remains unchanged.
-            intrinsic.width = intrinsic.width.map(|width| width / density);
-            intrinsic.height = intrinsic.height.map(|height| height / density);
-            out.insert(nid, intrinsic);
+                    video_source_url(tree, nid).map(Source::VideoFrame)
+                }),
+            _ => None,
+        })
+        .flatten();
+    // Release the scoped borrow before responsive selection reads the tree.
+    let (url, density) = match source {
+        Some(Source::Image) => {
+            let Some(candidate) = resolve_img_url(tree, nid, viewport) else {
+                return is_video;
+            };
+            candidate
         }
+        Some(Source::VideoPoster(poster)) => (poster, 1.0),
+        Some(Source::VideoFrame(src)) => {
+            let Some(media_url) = resolve_resource_url(&src, base_url) else {
+                return is_video;
+            };
+            let time = cache.video_time(nid);
+            let Some(frame) = cache.video_frame(&media_url, time) else {
+                // Chrome sizes the box from the metadata alone.
+                if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
+                    out.insert(
+                        nid,
+                        crate::ReplacedIntrinsic::from_dimensions(width, height),
+                    );
+                }
+                return is_video;
+            };
+            (frame.data_url.to_string(), 1.0)
+        }
+        None => return is_video,
+    };
+    let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
+    let profile = image_request_profile(tree, nid);
+    selected.insert(
+        nid,
+        SelectedImage {
+            resolved_url: resolved_url.clone(),
+            density,
+            profile,
+        },
+    );
+    if let Some(mut intrinsic) = cache.profiled_image_intrinsic(&resolved_url, profile) {
+        // A 2x (or w-descriptor) candidate's raw pixels are density times
+        // its CSS size. A ratio is dimensionless and remains unchanged.
+        intrinsic.width = intrinsic.width.map(|width| width / density);
+        intrinsic.height = intrinsic.height.map(|height| height / density);
+        out.insert(nid, intrinsic);
     }
-    (out, selected)
+    is_video
 }
 
 /// Add intrinsic metadata for CSS `content:url(...)` images after the first
@@ -12915,17 +13347,17 @@ fn collect_image_intrinsics(
 /// entry was added and layout therefore needs one resource-aware retry.
 fn collect_content_image_intrinsics(
     tree: &DomTree,
-    styles: &std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
-    out: &mut std::collections::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    out: &mut crate::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     selected: &mut HashMap<obscura_dom::tree::NodeId, SelectedImage>,
     source_intrinsic: &HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     source_selected: &HashMap<obscura_dom::tree::NodeId, SelectedImage>,
     seeded: &HashSet<obscura_dom::tree::NodeId>,
 ) -> bool {
     let mut changed = false;
-    let mut active = HashSet::new();
+    let mut active = HashSet::default();
     for (&nid, style) in styles {
         if !tree
             .with_node(nid, |node| {
@@ -14226,10 +14658,10 @@ fn serialize_svg(tree: &DomTree, root: obscura_dom::tree::NodeId) -> String {
 fn serialize_svg_styled(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: &std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
-    custom_properties: &std::collections::HashMap<
+    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    custom_properties: &crate::HashMap<
         obscura_dom::tree::NodeId,
-        std::rc::Rc<std::collections::HashMap<String, String>>,
+        std::rc::Rc<crate::HashMap<String, String>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
 ) -> String {
@@ -14270,12 +14702,9 @@ fn serialize_svg_node(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     buf: &mut String,
@@ -14302,12 +14731,9 @@ fn serialize_svg_node_impl(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     use_clone: bool,
@@ -14368,7 +14794,7 @@ fn serialize_svg_node_impl(
                 continue;
             }
             let value = if styles.is_some() && svg_css_presentation_attribute(aname) {
-                let empty = std::collections::HashMap::new();
+                let empty = crate::HashMap::default();
                 let properties = custom_properties
                     .and_then(|all| all.get(&nid))
                     .map_or(&empty, std::rc::Rc::as_ref);
@@ -14411,7 +14837,7 @@ fn serialize_svg_node_impl(
             declarations.push_str("!important;");
         };
         if let Some(computed) = styles.and_then(|all| all.get(&nid)) {
-            let empty = std::collections::HashMap::new();
+            let empty = crate::HashMap::default();
             let properties = custom_properties
                 .and_then(|all| all.get(&nid))
                 .map_or(&empty, std::rc::Rc::as_ref);
@@ -14633,7 +15059,7 @@ fn svg_css_presentation_attribute(name: &str) -> bool {
 fn resolve_svg_presentation_value<'a>(
     name: &str,
     value: &'a str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> Option<std::borrow::Cow<'a, str>> {
     if !value.contains("var(") {
         return Some(std::borrow::Cow::Borrowed(value));
@@ -14802,17 +15228,14 @@ fn inline_svg_image_hrefs(
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     base_url: Option<&str>,
     markup: &mut String,
     cache: &mut RenderResourceCache,
-    sprite_cache: &mut std::collections::HashMap<String, Option<String>>,
+    sprite_cache: &mut crate::HashMap<String, Option<String>>,
 ) {
     // Distinct external references (full href, url, fragment id), in first-seen
     // order. Dedupe so one symbol referenced by several `<use>` is fetched and
@@ -14857,9 +15280,8 @@ fn inject_external_sprites(
     }
     let mut defs = String::new();
     let mut rewrites: Vec<(String, String)> = Vec::new();
-    let wanted_local: std::collections::HashSet<&str> =
-        local_fragments.iter().map(String::as_str).collect();
-    let mut local_nodes = std::collections::HashMap::new();
+    let wanted_local: crate::HashSet<&str> = local_fragments.iter().map(String::as_str).collect();
+    let mut local_nodes = crate::HashMap::default();
     if !wanted_local.is_empty() {
         for nid in tree.descendants(tree.document()) {
             let Some(node) = tree.get_node(nid) else {
@@ -14906,7 +15328,7 @@ fn inject_external_sprites(
             })
             .clone();
         let Some(symbol) = symbol else { continue };
-        let empty = std::collections::HashMap::new();
+        let empty = crate::HashMap::default();
         let properties = custom_properties
             .and_then(|all| all.get(&root))
             .map_or(&empty, std::rc::Rc::as_ref);
@@ -14938,7 +15360,7 @@ fn inject_external_sprites(
 /// XML-only attributes byte-for-byte.
 fn resolve_svg_markup_presentation_vars(
     markup: &str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> String {
     if !markup.contains("var(") {
         return markup.to_string();
@@ -14984,7 +15406,7 @@ fn svg_markup_tag_end(markup: &str, start: usize) -> Option<usize> {
 
 fn resolve_svg_tag_presentation_vars(
     tag: &str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> String {
     let bytes = tag.as_bytes();
     if bytes.len() < 3 || bytes[0] != b'<' || matches!(bytes[1], b'/' | b'!' | b'?') {
@@ -15410,7 +15832,7 @@ mod tests {
             ));
             let mut cache = RenderResourceCache::default();
             let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut cache).unwrap();
-            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
             let under = tree.get_element_by_id("under").unwrap();
             let over = tree.get_element_by_id("over").unwrap();
             for (x, y, expected) in [
@@ -15451,7 +15873,7 @@ mod tests {
                 </style><div id="switch">{children}</div>"#));
             let mut cache = RenderResourceCache::default();
             let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut cache).unwrap();
-            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
             let label = tree.query_selector("label").unwrap().unwrap();
             let input = tree.get_element_by_id("control").unwrap();
             assert_eq!(prepared.layout.rects[&label].height, 16.0);
@@ -17595,6 +18017,7 @@ mod tests {
             &[crate::dom::TreeStyleMutation::Remove {
                 node: item,
                 old_parent: right,
+                old_next_sibling: None,
             }
             .into()],
             2.0,
@@ -17633,11 +18056,13 @@ mod tests {
                 crate::dom::TreeStyleMutation::Remove {
                     node: kept,
                     old_parent: right,
+                    old_next_sibling: None,
                 }
                 .into(),
                 crate::dom::TreeStyleMutation::Remove {
                     node: item,
                     old_parent: left,
+                    old_next_sibling: None,
                 }
                 .into(),
             ],
@@ -18905,7 +19330,7 @@ mod tests {
             </body></html>"#,
         );
         let viewport = (100.0, 80.0);
-        let counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
+        let counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::default()));
         let loader_counts = Arc::clone(&counts);
         let mut resources = RenderResourceCache::with_loader(move |url: &str| {
             *loader_counts
@@ -20178,7 +20603,7 @@ mod tests {
         // The first cascade exposes the style image. Feeding its decoded
         // dimensions back through the ordinary intrinsic map must give the
         // source-less replaced element its 30x20 CSS box.
-        let mut intrinsic = std::collections::HashMap::new();
+        let mut intrinsic = crate::HashMap::default();
         let first = layout_dom_with_web_fonts(&tree, (120.0, 80.0), &intrinsic, &[]);
         let host_id = tree
             .query_selector("#host")
@@ -20207,7 +20632,7 @@ mod tests {
             (0.0, 0.0, 100.0, 40.0)
         );
         let mut cache = RenderResourceCache::default();
-        let mut selected = HashMap::new();
+        let mut selected = HashMap::default();
         assert!(collect_content_image_intrinsics(
             &tree,
             &first.styles,
@@ -20215,9 +20640,9 @@ mod tests {
             &mut cache,
             &mut intrinsic,
             &mut selected,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashSet::new(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashSet::default(),
         ));
         let laid = layout_dom_with_web_fonts(&tree, (120.0, 80.0), &intrinsic, &[]);
         let image_id = tree
@@ -22078,7 +22503,7 @@ mod tests {
         let mut markup = serialize_svg(&tree, svg);
         let before = markup.clone();
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22105,7 +22530,7 @@ mod tests {
         let svg = tree.query_selector("#icon").unwrap().unwrap();
         let mut markup = serialize_svg(&tree, svg);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22142,7 +22567,7 @@ mod tests {
         let mut markup =
             serialize_svg_styled(&tree, svg, &laid.styles, &laid.custom_properties, None);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22179,7 +22604,7 @@ mod tests {
         let mut markup =
             serialize_svg_styled(&tree, svg, &laid.styles, &laid.custom_properties, None);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::from([(
+        let mut sprite_cache = crate::HashMap::from_iter([(
             "icons.svg#badge".to_string(),
             Some(
                 r##"<symbol id="badge" viewBox="0 0 10 10"><rect width="10" height="10" fill="var(--icon-fill, #ff0000)" stroke="var(--missing, #224466)"/><path d="var(--xml-only)"/></symbol>"##
@@ -22221,7 +22646,7 @@ mod tests {
         let svg = tree.query_selector("#icon").unwrap().unwrap();
         let mut markup = serialize_svg(&tree, svg);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22652,7 +23077,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (360.0, 240.0), None, &mut resources).expect("prepared render");
-        let top_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let top_outer = prepared
             .viewport_rect_with_scroll(outer, &top_state)
             .expect("top outer");
@@ -22662,7 +23087,7 @@ mod tests {
         let top = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &top_state)
             .expect("top paint");
 
-        let offsets = HashMap::from([(outer, (9999.0, 9999.0)), (inner, (9999.0, 9999.0))]);
+        let offsets = HashMap::from_iter([(outer, (9999.0, 9999.0)), (inner, (9999.0, 9999.0))]);
         let scrolled_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &offsets);
         let outer_metrics = prepared
             .element_scroll_metrics(outer, &scrolled_state)
@@ -22771,7 +23196,7 @@ mod tests {
         let mut prepared =
             prepare_dom(&tree, (480.0, 120.0), None, &mut resources).expect("prepared");
 
-        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         assert_eq!(
             prepared
                 .viewport_rect_with_scroll(plain_sticky, &top)
@@ -22779,7 +23204,7 @@ mod tests {
                 .y,
             40.0,
         );
-        let offsets = HashMap::from([
+        let offsets = HashMap::from_iter([
             (plain, (0.0, 60.0)),
             (padded, (0.0, 80.0)),
             (fixed_scroller, (0.0, 60.0)),
@@ -22917,7 +23342,7 @@ mod tests {
             "clips created inside a viewport-fixed subtree must still apply: {internal_clip_pixel:?}",
         );
 
-        let offsets = HashMap::from([(scroller, (0.0, 60.0))]);
+        let offsets = HashMap::from_iter([(scroller, (0.0, 60.0))]);
         let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &offsets);
         assert!(
             scroll.inherited_clip_for(fixed).is_none(),
@@ -22961,13 +23386,13 @@ mod tests {
         let live = prepared.resolve_scroll_state_for_viewport(
             &tree,
             (0.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             (200.0, 200.0),
         );
         let page = prepared.resolve_scroll_state_for_viewport(
             &tree,
             (0.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             (200.0, 100.0),
         );
 
@@ -23014,7 +23439,7 @@ mod tests {
         assert!(prepared.scroll_container_nodes().any(|node| node == hidden));
         assert!(!prepared.scroll_container_nodes().any(|node| node == clip));
 
-        let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::new());
+        let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::default());
         assert_eq!(
             prepared
                 .viewport_rect_with_scroll(hidden_sticky, &scrolled)
@@ -23056,7 +23481,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (120.0, 100.0), None, &mut resources).expect("prepared");
-        let offsets = HashMap::from([(inner_scroller, (0.0, 40.0))]);
+        let offsets = HashMap::from_iter([(inner_scroller, (0.0, 40.0))]);
         let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 60.0), &offsets);
 
         assert_eq!(
@@ -23112,7 +23537,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (240.0, 100.0), None, &mut resources).expect("prepared");
-        let resolved = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let resolved = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         assert_eq!(prepared.viewport_rect(sticky, (0.0, 0.0)).unwrap().y, 60.0);
         assert_eq!(
             prepared.viewport_rect(fixed_sticky, (0.0, 0.0)).unwrap().y,
@@ -23173,7 +23598,7 @@ mod tests {
         )
         .expect("prepared render");
         assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::default());
         let fixed = tree.get_element_by_id("fixed").expect("fixed");
         let before_fixed = prepared
             .viewport_rect_with_scroll(fixed, &scroll)
@@ -23270,7 +23695,7 @@ mod tests {
         let mut resources = RenderResourceCache::default();
         let mut prepared = prepare_dom(&tree, (120.0, 220.0), None, &mut resources)
             .expect("prepared print fixture");
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let region = CaptureRegion::new(0.0, 0.0, 120.0, 220.0, 1.0);
 
         let screen_before = screenshot_prepared_region_with_scroll_and_backgrounds(
@@ -23329,7 +23754,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (20.0, 20.0), None, &mut resources).expect("prepared render");
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
 
         for invalid in [
             CaptureRegion::new(0.0, 0.0, 0.0, 10.0, 1.0),
@@ -23411,7 +23836,7 @@ mod tests {
             native_raster_scale_supported(&tree, &prepared.layout),
             "solid boxes and shaped text should use direct device-scale paint"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23484,7 +23909,7 @@ mod tests {
             native_raster_scale_supported(&tree, &prepared.layout),
             "direct non-repeating linear/radial gradients should use device-scale paint"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23614,7 +24039,7 @@ mod tests {
             !native_raster_scale_supported(&tree, &prepared.layout),
             "sampled conic gradients must retain the logical-pixel fallback"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23798,13 +24223,13 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (120.0, 80.0), None, &mut resources).expect("prepared render");
-        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let top_pixmap = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &top)
             .expect("top paint");
         let translated = top_pixmap.pixel(15, 15).expect("translated pixel");
         assert!(translated.red() > 240 && translated.green() < 20);
 
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 990.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 990.0), &HashMap::default());
         let pixmap = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &scroll)
             .expect("scrolled paint");
         let fixed = pixmap.pixel(45, 15).expect("fixed pixel");
@@ -23843,11 +24268,11 @@ mod tests {
         timeline.register_waapi(animation(3, detached));
         assert_eq!(
             timeline.waapi_nodes(),
-            std::collections::HashSet::from([connected, detached]),
+            crate::HashSet::from_iter([connected, detached]),
             "the timeline accessor must return the exact deduplicated target set"
         );
 
-        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::new(), &timeline);
+        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::default(), &timeline);
         assert_eq!(
             mutations,
             vec![crate::dom::RetainedStyleMutation::WaapiAnimation { node: connected }],
@@ -24060,7 +24485,7 @@ mod tests {
                 format!("{:?}", oracle.layout.styles[&node]),
             );
         }
-        let element_offsets = HashMap::from([(scroller, (9999.0, 9999.0))]);
+        let element_offsets = HashMap::from_iter([(scroller, (9999.0, 9999.0))]);
         let candidate_scroll = candidate.resolve_scroll_state(&tree, (0.0, 80.0), &element_offsets);
         let oracle_scroll = oracle.resolve_scroll_state(&tree, (0.0, 80.0), &element_offsets);
         assert_eq!(candidate_scroll.root_offset, oracle_scroll.root_offset);
@@ -24097,7 +24522,7 @@ mod tests {
             candidate
                 .sticky
                 .translations(viewport, candidate_scroll.root_offset),
-            HashMap::new(),
+            HashMap::default(),
         );
         let candidate_pixels = paint_prepared_with_scroll(
             &tree,
@@ -24351,7 +24776,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24378,7 +24803,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &redrob_scene_raster::ResourceStore::new(),
-            &HashMap::new(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24452,7 +24877,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24473,7 +24898,8 @@ mod scene_text_tests {
             ))
         );
         let raster = |scroll_y: f32| {
-            let scroll: HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
+            let scroll: std::collections::HashMap<u64, (f32, f32)> =
+                [(0u64, (0.0, scroll_y))].into();
             redrob_scene_raster::rasterize(
                 &built.frame,
                 &redrob_scene_raster::ResourceStore::new(),
@@ -24547,7 +24973,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24572,7 +24998,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::new(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24621,7 +25047,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24638,7 +25064,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::new(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24696,7 +25122,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,

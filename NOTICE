@@ -13,3 +13,19 @@ MIT License, Copyright (c) 2026 Janghoon Lee (Redrob) and contributors.
 
 Wanted Sans (crates/redrob-shell/assets/fonts/WantedSans-Regular.ttf),
 SIL Open Font License 1.1; the licence text is beside the font file.
+
+
+The window runs web pages on Chromium through the Chromium Embedded Framework
+(CEF). The release packages carry CEF's prebuilt binaries (libcef, its
+resources and helpers):
+  Chromium Embedded Framework, https://bitbucket.org/chromiumembedded/cef,
+  BSD 3-Clause License, Copyright Marshall A. Greenblatt.
+  Chromium, https://www.chromium.org, BSD 3-Clause License,
+  Copyright 2015 The Chromium Authors, and the licences of the third-party
+  code Chromium includes.
+The full licence texts of Chromium, CEF and every component they include are
+in CREDITS.html in the package (beside the programs; on macOS in
+Redrob Browser.app/Contents/Resources), which the window's About page links.
+
+cef (Rust bindings for CEF, https://github.com/tauri-apps/cef-rs),
+Apache License 2.0 or MIT License, Copyright the cef-rs contributors.
