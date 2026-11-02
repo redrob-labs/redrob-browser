@@ -414,6 +414,7 @@ impl Browser {
             address_id: egui::Id::new("address"),
             page_input: Default::default(),
             page_focused: false,
+            autoscroll: Default::default(),
             incognito: self.incognito,
             wid,
             viewport,

@@ -11,6 +11,7 @@
 
 mod account;
 mod agent_bridge;
+mod autoscroll;
 mod browser;
 mod cdp;
 mod cef;
@@ -231,6 +232,7 @@ struct Window {
     page_input: cef::input::State,
     /// Whether the page area had keyboard focus last frame.
     page_focused: bool,
+    autoscroll: autoscroll::Autoscroll,
     /// A private window (`--incognito`).
     incognito: bool,
     /// Which window this is, for the engine connection all windows share.
@@ -543,16 +545,20 @@ impl Window {
         let shift = Modifiers::COMMAND | Modifiers::SHIFT;
         let (new, close, reopen, address, bookmark, reload, next, prev, back, fwd) =
             ctx.input_mut(|i| {
+                // With Shift first: a shortcut without Shift also matches
+                // the same keys with it (egui's logical matching).
+                let reopen = i.consume_key(shift, Key::T);
+                let prev = i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab)
+                    || i.consume_key(cmd, Key::PageUp);
                 (
                     i.consume_key(cmd, Key::T),
                     i.consume_key(cmd, Key::W),
-                    i.consume_key(shift, Key::T),
+                    reopen,
                     i.consume_key(cmd, Key::L),
                     i.consume_key(cmd, Key::D),
                     i.consume_key(cmd, Key::R) || i.consume_key(Modifiers::NONE, Key::F5),
                     i.consume_key(Modifiers::CTRL, Key::Tab) || i.consume_key(cmd, Key::PageDown),
-                    i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab)
-                        || i.consume_key(cmd, Key::PageUp),
+                    prev,
                     i.consume_key(Modifiers::ALT, Key::ArrowLeft),
                     i.consume_key(Modifiers::ALT, Key::ArrowRight),
                 )
@@ -2369,9 +2375,20 @@ impl Window {
             self.page_focused = focused;
             self.op(tab, Op::Focus(focused));
         }
+        let Some(view) = cdp::view(tab) else {
+            return;
+        };
         let pointer = ui.input(|i| i.pointer.hover_pos());
         let hovering = response.hovered() || response.is_pointer_button_down_on();
-        let events = ui.input(|i| i.events.clone());
+        let mut events = ui.input(|i| i.events.clone());
+        // Middle-click autoscroll takes its clicks before the page sees them.
+        let (link, text) = {
+            let v = cef::osr::lock(&view);
+            (v.status.clone(), v.cursor == egui::CursorIcon::Text)
+        };
+        if let Some(url) = self.autoscroll.filter(&mut events, rect, link.as_deref(), text) {
+            self.open_tab(&url, false);
+        }
         let mut ops = cef::input::to_ops(
             &mut self.page_input,
             &events,
@@ -2380,12 +2397,23 @@ impl Window {
             focused,
         );
         ops.extend(cef::input::file_drops(&mut self.page_input, &ctx, pointer, rect));
+        if self.autoscroll.active() {
+            let step = self.autoscroll.tick(pointer, rect);
+            if let Some((x, y)) = step.wheel_at {
+                // Wheel deltas scroll up when positive.
+                ops.push(Op::Wheel {
+                    x,
+                    y,
+                    dx: -step.wheel.x.round(),
+                    dy: -step.wheel.y.round(),
+                    modifiers: cef::input::PRECISE,
+                });
+            }
+            ctx.request_repaint();
+        }
         for op in ops {
             self.op(tab, op);
         }
-        let Some(view) = cdp::view(tab) else {
-            return;
-        };
         let scale = ctx.pixels_per_point();
         // Whole physical pixels, so the texture maps 1:1.
         let min = ((rect.min.to_vec2() * scale).round() / scale).to_pos2();
@@ -2415,7 +2443,11 @@ impl Window {
         }
         let v = cef::osr::lock(&view);
         let in_page = pointer.is_some_and(|p| rect.contains(p)) && response.hovered();
-        if in_page || response.is_pointer_button_down_on() {
+        if self.autoscroll.active() {
+            let p = *theme::palette(ui);
+            self.autoscroll.paint(ui.painter(), p.ink_primary, p.surface_base.gamma_multiply(0.9));
+            ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+        } else if in_page || response.is_pointer_button_down_on() {
             ctx.set_cursor_icon(v.cursor);
         }
         if let Some(link) = v.status.as_deref().filter(|_| in_page) {

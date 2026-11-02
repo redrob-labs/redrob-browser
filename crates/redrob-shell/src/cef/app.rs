@@ -36,8 +36,6 @@ wrap_app! {
             };
             switch("noerrdialogs");
             switch("hide-crash-restore-bubble");
-            // Middle-click autoscroll, as Chrome on Windows has it, on every platform.
-            value("enable-blink-features", "MiddleClickAutoscroll");
             if cfg!(target_os = "macos") {
                 // Cookies are encrypted with the profile's own key, not a
                 // Keychain prompt for "Chromium Safe Storage".
