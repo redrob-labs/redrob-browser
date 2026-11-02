@@ -1,5 +1,5 @@
-//! Each tab's page as a Chrome browser that has Chrome's toolbar (Linux,
-//! Chrome style; docs/CEF.md).
+//! Each tab's page as a Chrome browser that has Chrome's toolbar (Chrome
+//! style on Linux and Windows, macOS opt-in; docs/CEF.md).
 //!
 //! CEF makes a page created inside a parent window (`set_as_child`) a
 //! popup-type Chrome browser with no toolbar. Chrome keeps the extensions'
@@ -11,7 +11,8 @@
 //! window draws its own). Before it is ever shown, its native window is
 //! moved into the browser window's page area, as a window manager moves a
 //! window into its frame; from there native.rs places, shows, hides and
-//! re-parents it as it did the child pages.
+//! re-parents it as it did the child pages (Windows: a `WS_CHILD` HWND;
+//! macOS: a child NSWindow kept over the page area).
 //!
 //! Pages a page opens (`window.open`, `target=_blank`) are Views browsers
 //! too: CEF asks the opener's view for their delegate and window

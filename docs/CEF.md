@@ -35,10 +35,11 @@ redrob-browser-window (one process per profile, CEF browser process)
   │   │  only the tab on screen is shown, moved between windows by
   │   │  re-parenting. Chromium does its own keyboard, IME, clipboard,
   │   │  popups (<select>), cursor, drag and drop, scrolling, throttling
-  │   ├ host.rs (Linux): each page is a Chrome browser with Chrome's toolbar
-  │   │  (hidden), in a frameless CEF Views window moved into the browser
-  │   │  window before it is shown, so extension actions run through Chrome
-  │   │  (activeTab); see "Pages as Chrome windows" below
+  │   ├ host.rs (Linux, Windows; macOS opt-in): each page is a Chrome
+  │   │  browser with Chrome's toolbar (hidden), in a frameless CEF Views
+  │   │  window moved into the browser window before it is shown, so
+  │   │  extension actions run through Chrome (activeTab); see "Pages as
+  │   │  Chrome windows" below
   │   ├ keys.rs: window shortcuts taken in on_pre_key_event while the page
   │   │  has the keyboard
   │   ├ xdnd.rs (Linux): the chrome's focus window and the window's XDND
@@ -100,21 +101,21 @@ Linux specifics:
 `crates/redrob-shell/src/cef/mod.rs` defines `Sink`: CEF callbacks report
 `cdp::Event`s for a CEF browser id; the sink maps it to the window `TabId`.
 
-## Pages as Chrome windows (Linux)
+## Pages as Chrome windows (Linux, Windows; macOS opt-in)
 
 CEF makes a Chrome style page created inside a parent window
 (`WindowInfo::set_as_child`) a popup-type Chrome browser without Chrome's
 toolbar. Chrome keeps the extensions' toolbar container in that toolbar, and
 everything that runs an extension's action as a click (and so grants it
 `activeTab`) goes through the container: `Extensions.triggerAction` crashes
-Chromium without one. So on Linux each page is created differently
+Chromium without one. So each page is created differently
 (`cef/host.rs`):
 
 - a CEF Views `BrowserView` whose delegate asks for Chrome's normal toolbar
   (`CEF_CTT_NORMAL`; the browser is still TYPE_POPUP, but CEF builds the
   toolbar with its extensions container), hidden as soon as it exists;
 - in a frameless top-level CEF window of its own (one Chrome style
-  BrowserView per CEF window), whose X11 window is re-parented into the
+  BrowserView per CEF window), whose native window is re-parented into the
   browser window's page area before it is first shown, as a window manager
   moves a window into its frame. From then on native.rs places, shows, hides
   and re-parents it like a child page;
@@ -130,7 +131,7 @@ What the window does for it:
   runs `onClicked`. For an action with a popup Chrome draws no popup of its
   own (its toolbar is not on screen) and the window opens it as before. CEF's
   own DevTools sessions are refused the method ("Method not allowed").
-- Chromium counts such a page active, and gives it keys, only while its own
+- Linux: Chromium counts such a page active, and gives it keys, only while its own
   window has the X input focus; it asks the window manager for that with
   `_NET_ACTIVE_WINDOW`, which ignores a window inside another. So the page
   on screen gets `XSetInputFocus` when it takes the keyboard (cdp.rs
@@ -138,9 +139,53 @@ What the window does for it:
 - Chrome closing such a page itself (an agent's `Target.closeTarget`) calls
   no `do_close`; the window learns of it in `on_before_close`.
 
-`REDROB_CHILD_PAGES=1` keeps child pages. Windows keeps child pages
-(re-parenting Chromium's top-level HWND into ours with `WS_CHILD` is not
-verified on Windows yet); macOS pages are Alloy style.
+Windows (native.rs `embed`; written from Chromium 156 and CEF cf671c0
+sources, not yet run on Windows):
+
+- The Views window's HWND (`CefWindow::GetWindowHandle`) gets `WS_CHILD`,
+  loses its caption, frame and taskbar styles, and `SetParent` puts it in
+  the browser window before it is first shown, as CEF does for its own
+  child windows (chrome_child_window.cc: `params.child`, `WS_EX_NOACTIVATE`
+  around the first `Show` so a background tab does not bring the window
+  forward).
+- Chromium handles `WM_ACTIVATE` only for a top-level window
+  (`HWNDMessageHandler::IsTopLevelWindow` reads `WS_CHILD`), and CEF's
+  patch that activates a child window on focus applies only to windows it
+  made a child itself (`has_external_parent_`). Without activation the
+  page gets no characters and TSF ignores it. A subclass in front of
+  Chromium's window procedure sends it `WM_ACTIVATE` on `WM_SETFOCUS` and
+  `WM_KILLFOCUS`, `WS_CHILD` lifted for that one message; a mouse button
+  press gives the page `SetFocus`, as CEF's patch does; hit tests are
+  always `HTCLIENT`, so the page's edge never resizes it.
+- Scale: a child window never gets `WM_DPICHANGED`. The page is sent one
+  (the browser window's DPI, `GetDpiForWindow`, and the page's rectangle in
+  its parent) when it is embedded and whenever the window's scale changes,
+  per-monitor DPI v2 as the rest of the process.
+- Moves: a child window gets no `WM_MOVE` when its parent moves; pages on
+  screen that moved are sent one (Chromium updates its screen position)
+  and `NotifyMoveOrResizeStarted` (popups close).
+- Fullscreen: Chrome sizes a fullscreen page's window to the screen in
+  screen coordinates; the window puts it back over the page area
+  (`on_window_fullscreen_transition`), fullscreen there, as on Linux.
+
+macOS (`REDROB_MAC_HOSTED=1`, off by default until it runs on a Mac): CEF
+refuses Chrome style for a page inside a parent NSView
+(`CefBrowserCreateParams::MaybeSetWindowInfo`, browser_host_create.cc,
+issue #3294) but not for a Views window of its own. Moving that window's
+content view into ours is not possible: it is Chromium's
+`BridgedContentView`, bound to its own `NativeWidgetMacNSWindow` (events,
+key status, the compositor). So the page's NSWindow (borderless, no
+shadow, `FullScreenAuxiliary`) is kept over the page area as a child
+window of the browser window (`addChildWindow:ordered:`): it moves,
+minimizes and changes spaces with it; it is ordered in while its tab is on
+screen and out otherwise, placed in screen points. A child window covers
+every view of its parent, so an extension's popup (an Alloy NSView) is
+lifted into a borderless child window of its own, in front of the pages.
+A click in the page makes its window key, so the browser window's title
+bar shows as inactive meanwhile. These pages are Chrome style; other
+views inside the window (extension popups) stay Alloy.
+
+`REDROB_CHILD_PAGES=1` keeps child pages everywhere.
 
 ## Agents
 

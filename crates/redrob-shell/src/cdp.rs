@@ -565,10 +565,12 @@ impl Engine {
 
     /// `tab`'s page took the keyboard (a click in it). A page hosted as a
     /// Chrome window of its own (cef/host.rs) counts as active, and takes
-    /// keys, only while its own native window has the X input focus:
-    /// Chromium asks the window manager for that, which ignores a window
-    /// inside another. So the page on screen gets it here, as the window
-    /// manager would give it.
+    /// keys, only while its own native window has the input focus: on
+    /// Linux Chromium asks the window manager for that, which ignores a
+    /// window inside another, so the page on screen gets it here, as the
+    /// window manager would give it. Windows: the same `SetFocus`, which
+    /// native.rs turns into the activation Chromium waits for; macOS: the
+    /// page's window becomes key.
     fn page_focused(&mut self, tab: TabId) {
         if !crate::cef::host::enabled() || !self.shown(tab) {
             return;
