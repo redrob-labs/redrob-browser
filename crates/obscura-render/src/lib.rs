@@ -44,7 +44,8 @@ pub mod prof {
     pub const IFC_LAYOUT: usize = 8;
     pub const STYLE_SHARE_HIT: usize = 9;
     pub const STYLE_SHARE_MISS: usize = 10;
-    const NAMES: [&str; 11] = [
+    pub const STYLE_UNCHANGED: usize = 11;
+    const NAMES: [&str; 12] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -56,9 +57,10 @@ pub mod prof {
         "ifc_layout",
         "style_share_hit",
         "style_share_miss",
+        "style_unchanged",
     ];
-    static NANOS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
-    static COUNTS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+    static NANOS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
+    static COUNTS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
@@ -1748,6 +1750,10 @@ pub struct LayoutStyle {
     /// `font_size` (px) during the inheritance pass against the parent and
     /// root font-sizes. `None` when font-size was absolute or unset.
     pub font_size_raw: Option<Dimension>,
+    /// No element from the root to this one (inclusive) set `font-size`, so
+    /// it is still the `medium` keyword. Recorded by the inheritance pass so
+    /// a retained style can seed it for a freshly cascaded descendant.
+    pub font_size_keyword_path: bool,
     /// Deferred functional `font-size` (`clamp()`, `min()`, `max()`, `calc()`).
     /// These expressions must see the live viewport and parent font size;
     /// eagerly treating `9vw` as the number 9 made responsive headings pin to

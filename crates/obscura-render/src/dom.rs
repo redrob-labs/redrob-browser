@@ -292,6 +292,11 @@ pub struct DomLayout {
     /// CSSOM still exposes every inherited `--token` through
     /// `getComputedStyle()`.
     pub custom_properties: HashMap<NodeId, std::rc::Rc<HashMap<String, String>>>,
+    /// A hash of every input of each element's cascade (matched rules,
+    /// inline style, attributes, inherited values, parent), so the next
+    /// retained layout can tell a restyled element that would get the same
+    /// style. Elements whose cascade reads more context have none.
+    pub(crate) cascade_signatures: HashMap<NodeId, u64>,
     /// The per-axis clip inherited from ancestor non-visible overflow, keyed
     /// per node, in SCREEN space (the clip owner's box shifted by the owner's
     /// accumulated translate; see `resolve_clip_rects`). `None` means
@@ -1109,6 +1114,8 @@ impl From<TreeStyleMutation> for RetainedStyleMutation {
 pub(crate) struct RetainedStyleMaps {
     pub styles: HashMap<NodeId, crate::LayoutStyle>,
     pub custom_properties: HashMap<NodeId, std::rc::Rc<HashMap<String, String>>>,
+    /// The cascade inputs of each retained style (`DomLayout::cascade_signatures`).
+    pub signatures: HashMap<NodeId, u64>,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -3421,6 +3428,24 @@ fn apply_picture_source_hints(
     style.aspect_ratio_is_intrinsic = style.aspect_ratio.is_some();
 }
 
+/// State one cascade pass carries from node to node.
+#[derive(Default)]
+pub(crate) struct CascadeCx {
+    share: StyleShareCache,
+    /// A hash of every input of each element's cascade (see
+    /// `cascade_node_style`), carried from the layout that computed its
+    /// retained style.
+    signatures: HashMap<NodeId, u64>,
+    /// Fresh elements whose inputs turned out unchanged: they keep their
+    /// retained style and leave the fresh set after the cascade.
+    reverted: Vec<NodeId>,
+    /// Set by the walk: an ancestor of the node being cascaded got a new
+    /// style, so a retained style cannot stand in for this node's.
+    context_changed: bool,
+    /// Set by `cascade_node_style`: the node just cascaded got a new style.
+    changed: bool,
+}
+
 /// What applying author rules to an element reads besides the style it
 /// starts from: the sheet, the matched rules in cascade order, the inline
 /// declarations, the inherited custom properties (by identity) and whether an
@@ -3536,7 +3561,7 @@ fn cascade_node_style(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
     ancestor_display_none: bool,
-    share: Option<&mut StyleShareCache>,
+    mut cx: Option<&mut CascadeCx>,
 ) -> Option<(
     std::rc::Rc<HashMap<String, String>>,
     Option<f32>,
@@ -3547,6 +3572,9 @@ fn cascade_node_style(
     // element styles need only the table-scoped presentational hint below.
     // Borrow the full node only when its element style must be recomputed.
     let is_element = tree.with_node(id, |node| node.is_element())?;
+    if let Some(cx) = cx.as_deref_mut() {
+        cx.changed = false;
+    }
     // The custom-property map in force for this node's subtree: the parent's,
     // unless this element declares its own `--x` (then a richer map).
     let mut this_props = parent_props.clone();
@@ -3783,16 +3811,24 @@ fn cascade_node_style(
             }
             assigned_slot = tree.assigned_slot(slot);
         }
-        let share = share.filter(|_| {
-            shadow_host_sheet.is_none()
-                && slotted_scopes.is_empty()
-                && container_evaluator.is_none()
-                && animation_timeline
-                    .waapi_for_node(id, animation_sample.time)
-                    .next()
-                    .is_none()
-        });
-        if let Some(share) = share {
+        if let Some(cx) = cx.as_deref_mut() {
+            cx.changed = true;
+        }
+        let signable = shadow_host_sheet.is_none()
+            && slotted_scopes.is_empty()
+            && container_evaluator.is_none()
+            && animation_timeline
+                .waapi_for_node(id, animation_sample.time)
+                .next()
+                .is_none();
+        if !signable {
+            if let Some(cx) = cx.as_deref_mut() {
+                cx.signatures.remove(&id);
+            }
+        }
+        let cx = cx.filter(|_| signable);
+        let mut pseudo_matches = None;
+        if let Some(cx) = cx {
             let matched = sheet.matched_rules_without_scopes(
                 tree,
                 matcher,
@@ -3803,6 +3839,104 @@ fn cascade_node_style(
             );
             let inline = node.get_attribute("style");
             let shareable = sheet.matched_rules_are_shareable(&matched, inline);
+            let pseudo = sheet.pseudo_matches(tree, matcher, id, &mut None);
+            // Everything the rest of this function reads, for an element whose
+            // starting style depends on nothing outside itself.
+            let local = elem.local.as_ref();
+            let context_free = !matches!(
+                local,
+                "table"
+                    | "caption"
+                    | "colgroup"
+                    | "col"
+                    | "thead"
+                    | "tbody"
+                    | "tfoot"
+                    | "tr"
+                    | "td"
+                    | "th"
+                    | "dir"
+                    | "dl"
+                    | "menu"
+                    | "ol"
+                    | "ul"
+            ) && !(local == "img"
+                && node.parent.is_some_and(|parent| {
+                    element_local_name(tree, parent).as_deref() == Some("picture")
+                }));
+            let signature = context_free.then(|| {
+                use std::hash::BuildHasher;
+                let attributes = node
+                    .attrs()
+                    .map(|attributes| {
+                        attributes
+                            .iter()
+                            .filter(|attribute| {
+                                !matches!(attribute.name.local.as_ref(), "class" | "id" | "style")
+                            })
+                            .map(|attribute| {
+                                (attribute.name.local.as_ref(), attribute.value.as_str())
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                foldhash::fast::FixedState::default().hash_one((
+                    sheet as *const crate::css::Stylesheet as usize,
+                    &matched,
+                    &pseudo,
+                    inline,
+                    // Each layout starts the root from a new empty map.
+                    if parent_props.is_empty() {
+                        0
+                    } else {
+                        std::rc::Rc::as_ptr(parent_props) as usize
+                    },
+                    (
+                        ancestor_display_none,
+                        inherited_color_scheme_dark,
+                        quirks_mode,
+                    ),
+                    inherited_cell_padding.map(f32::to_bits),
+                    rendered_parent(tree, id),
+                    (elem.ns.as_ref(), local),
+                    attributes,
+                ))
+            });
+            // Unchanged inputs under unchanged ancestors: the style a fresh
+            // cascade would give is the retained one, so keep it (and the
+            // retained custom-property map, so the children's inputs stay
+            // the same too).
+            if shareable
+                && !cx.context_changed
+                && signature.is_some()
+                && cx.signatures.get(&id) == signature.as_ref()
+            {
+                if let (Some(retained), Some(props)) = (styles.get(&id), custom_properties.get(&id))
+                {
+                    descendant_color_scheme_dark = retained.color_scheme_dark;
+                    this_props = props.clone();
+                    animation_timeline.clear_animation(id, animation_sample);
+                    cx.reverted.push(id);
+                    cx.changed = false;
+                    crate::prof::count(crate::prof::STYLE_UNCHANGED);
+                    return Some((
+                        this_props,
+                        descendant_cell_padding,
+                        descendant_color_scheme_dark,
+                        true,
+                    ));
+                }
+            }
+            match signature {
+                Some(signature) => {
+                    cx.signatures.insert(id, signature);
+                }
+                None => {
+                    cx.signatures.remove(&id);
+                }
+            }
+            pseudo_matches = Some(pseudo);
+            let share = &mut cx.share;
             let key = StyleShareKey {
                 sheet: sheet as *const crate::css::Stylesheet,
                 matched,
@@ -3868,14 +4002,19 @@ fn cascade_node_style(
         custom_properties.insert(id, this_props.clone());
         style.is_replaced_box |= style.content_image.is_some();
         style.has_replaced_sizing |= style.content_image.is_some();
-        let (mut before_pseudo, mut after_pseudo, placeholder_pseudo) = sheet.all_pseudo_styles(
-            tree,
-            matcher,
-            id,
-            &this_props,
-            &style,
-            container_evaluator.as_deref_mut(),
-        );
+        let (mut before_pseudo, mut after_pseudo, placeholder_pseudo) = match &pseudo_matches {
+            Some(matches) => {
+                sheet.pseudo_styles_from_matches(tree, id, &this_props, &style, matches)
+            }
+            None => sheet.all_pseudo_styles(
+                tree,
+                matcher,
+                id,
+                &this_props,
+                &style,
+                container_evaluator.as_deref_mut(),
+            ),
+        };
         for pseudo in [&mut before_pseudo, &mut after_pseudo]
             .into_iter()
             .flatten()
@@ -3969,7 +4108,7 @@ fn cascade_walk(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
     fresh_ancestors: Option<&HashSet<NodeId>>,
-    mut share: Option<&mut StyleShareCache>,
+    mut cx: Option<&mut CascadeCx>,
 ) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum MatcherBase {
@@ -3993,6 +4132,8 @@ fn cascade_walk(
         display_none: bool,
         matcher_base: MatcherBase,
         use_container_evaluator: bool,
+        /// An ancestor got a new style in this pass.
+        context_changed: bool,
     }
 
     enum Work<'a> {
@@ -4011,6 +4152,7 @@ fn cascade_walk(
         display_none: false,
         matcher_base: MatcherBase::Incremental,
         use_container_evaluator: true,
+        context_changed: false,
     })];
 
     while let Some(item) = work.pop() {
@@ -4074,11 +4216,16 @@ fn cascade_walk(
                     visit.color_scheme_dark,
                     fresh_styles,
                     visit.display_none,
-                    share.as_deref_mut(),
+                    cx.as_deref_mut().map(|cx| {
+                        cx.context_changed = visit.context_changed;
+                        cx
+                    }),
                 )
                 else {
                     continue;
                 };
+                let context_changed =
+                    visit.context_changed || cx.as_deref().is_some_and(|cx| cx.changed);
                 if let (Some(fresh), Some(ancestors)) = (fresh_styles, fresh_ancestors) {
                     if is_element
                         && !fresh.contains(&visit.id)
@@ -4113,6 +4260,7 @@ fn cascade_walk(
                                 display_none: descendant_display_none,
                                 matcher_base: MatcherBase::FreshEmpty,
                                 use_container_evaluator: false,
+                                context_changed,
                             }));
                         }
                     }
@@ -4132,6 +4280,7 @@ fn cascade_walk(
                             display_none: descendant_display_none,
                             matcher_base: MatcherBase::FreshFromAncestors,
                             use_container_evaluator: true,
+                            context_changed,
                         }));
                     }
                 }
@@ -4152,6 +4301,7 @@ fn cascade_walk(
                         display_none: descendant_display_none,
                         matcher_base: MatcherBase::Incremental,
                         use_container_evaluator: visit.use_container_evaluator,
+                        context_changed,
                     }));
                 }
             }
@@ -6528,6 +6678,19 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
         retained
             .custom_properties
             .retain(|node, _| connected.contains(node));
+        retained
+            .signatures
+            .retain(|node, _| connected.contains(node));
+        // An inserted or moved node (or a new node reusing a removed one's
+        // id) has a new place in the tree: its old inputs say nothing.
+        for mutation in mutations {
+            if let RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. }) = mutation {
+                retained.signatures.remove(node);
+                for descendant in tree.descendants(*node) {
+                    retained.signatures.remove(&descendant);
+                }
+            }
+        }
         let _prof = crate::prof::start();
         let plan = retained_style_plan_for_sheet(tree, &sheet, mutations, appended_keys.is_some());
         crate::prof::stop(crate::prof::STYLE_PLAN, _prof);
@@ -6779,6 +6942,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 *query_seed = Some(RetainedStyleMaps {
                     styles: std::mem::take(&mut laid.styles),
                     custom_properties: std::mem::take(&mut laid.custom_properties),
+                    signatures: std::mem::take(&mut laid.cascade_signatures),
                 });
             }
         }
@@ -6902,14 +7066,20 @@ fn layout_dom_once(
 ) {
     let t1 = std::time::Instant::now();
     let mut matcher = tree.matcher();
-    let (mut styles, mut custom_properties, fresh_styles) = match retained {
-        Some((retained, fresh)) => (retained.styles, retained.custom_properties, Some(fresh)),
+    let (mut styles, mut custom_properties, mut fresh_styles, signatures) = match retained {
+        Some((retained, fresh)) => (
+            retained.styles,
+            retained.custom_properties,
+            Some(fresh),
+            retained.signatures,
+        ),
         // Sized up front: growing a map of computed styles moves every
         // (large) style each time it doubles.
         None => (
             HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
             HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
             None,
+            HashMap::default(),
         ),
     };
     let root_props = std::rc::Rc::new(HashMap::default());
@@ -6925,6 +7095,10 @@ fn layout_dom_once(
     let fresh_ancestors = fresh_styles
         .as_ref()
         .map(|fresh| fresh_style_ancestors(tree, fresh));
+    let mut cascade_cx = CascadeCx {
+        signatures,
+        ..CascadeCx::default()
+    };
     cascade_walk(
         tree,
         tree.document(),
@@ -6944,8 +7118,15 @@ fn layout_dom_once(
         false,
         fresh_styles.as_ref(),
         fresh_ancestors.as_ref(),
-        Some(&mut StyleShareCache::default()),
+        Some(&mut cascade_cx),
     );
+    // A fresh element that kept its retained style is retained from here on.
+    if let Some(fresh) = fresh_styles.as_mut() {
+        for id in &cascade_cx.reverted {
+            fresh.remove(id);
+        }
+    }
+    let cascade_signatures = std::mem::take(&mut cascade_cx.signatures);
     resolve_css_counters(tree, &mut styles);
     let cascade_time = t1.elapsed();
     let mut phase_marks: Vec<(&'static str, std::time::Instant)> =
@@ -7265,6 +7446,7 @@ fn layout_dom_once(
                     inh.cssom.clone_from(&style.cssom);
                     inh.color = style.color.or(inh.color);
                     inh.font_size = style.font_size.or(inh.font_size);
+                    inh.font_size_keyword = style.font_size_keyword_path;
                     inh.font_weight = crate::style::used_font_weight(style);
                     if let Some(family) = style.font_family.as_ref() {
                         inh.font_family = Some(family.clone());
@@ -7526,6 +7708,7 @@ fn layout_dom_once(
                         .is_some_and(|family| family.trim().eq_ignore_ascii_case("monospace"));
                     style.font_size = Some(if monospace { 13.0 } else { 16.0 });
                 }
+                style.font_size_keyword_path = inh.font_size_keyword;
                 if let Some(expression) = style.font_size_expression.as_deref() {
                     style.font_size = crate::style::resolve_contextual_length(
                         expression, parent_fs, root_fs, vw, vh, parent_fs,
@@ -10247,6 +10430,7 @@ fn layout_dom_once(
             column_rules,
             styles,
             custom_properties,
+            cascade_signatures,
             clip_rects,
             translates,
             transforms,
@@ -20212,6 +20396,7 @@ mod tests {
             let retained = RetainedStyleMaps {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
+                signatures: HashMap::default(),
             };
             let (mut active, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20252,6 +20437,7 @@ mod tests {
             let retained = RetainedStyleMaps {
                 styles: std::mem::take(&mut active.styles),
                 custom_properties: std::mem::take(&mut active.custom_properties),
+                signatures: HashMap::default(),
             };
             let (inactive, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20350,6 +20536,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -20471,6 +20658,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
@@ -20552,6 +20740,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let mutations = [
             TreeStyleMutation::Insert {
@@ -20622,6 +20811,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (_, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -20922,6 +21112,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21021,6 +21212,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21359,6 +21551,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21407,6 +21600,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let mutations = mutations
             .iter()
@@ -22041,6 +22235,7 @@ mod tests {
             let retained = RetainedStyleMaps {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
+                signatures: HashMap::default(),
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22250,6 +22445,7 @@ mod tests {
             let retained = RetainedStyleMaps {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
+                signatures: HashMap::default(),
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22420,6 +22616,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22469,6 +22666,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22524,6 +22722,7 @@ mod tests {
         let retained = RetainedStyleMaps {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
+            signatures: HashMap::default(),
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -23281,6 +23480,7 @@ mod tests {
             let retained = RetainedStyleMaps {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
+                signatures: HashMap::default(),
             };
             let (incremental, _) = layout_dom_with_web_fonts_pass_limit(
                 &tree,

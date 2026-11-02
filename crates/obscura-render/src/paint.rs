@@ -4149,6 +4149,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
+        signatures: std::mem::take(&mut previous.layout.cascade_signatures),
     };
     drop(previous);
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
