@@ -22,6 +22,18 @@ pub(crate) fn compute_inline_layout(
     inputs: LayoutInput,
     block_ctx: Option<&mut BlockContext<'_>>,
 ) -> LayoutOutput {
+    let started = crate::prof::start();
+    let output = compute_inline_layout_uncounted(host, node, inputs, block_ctx);
+    crate::prof::stop(crate::prof::IFC_LAYOUT, started);
+    output
+}
+
+fn compute_inline_layout_uncounted(
+    host: &mut Host<'_>,
+    node: NodeId,
+    inputs: LayoutInput,
+    block_ctx: Option<&mut BlockContext<'_>>,
+) -> LayoutOutput {
     let Some(index) = host
         .context(node)
         .copied()
@@ -309,6 +321,13 @@ fn percentage_sized_atomics(host: &Host<'_>, ifc: &Ifc, children: &[NodeId]) -> 
 }
 
 #[allow(clippy::too_many_lines)]
+/// `OBSCURA_IFC_DEBUG`: trace every line break. Read once; the line loop
+/// runs for every line of every paragraph.
+fn ifc_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_IFC_DEBUG").is_some())
+}
+
 fn layout_ifc(
     host: &mut Host<'_>,
     node: NodeId,
@@ -715,7 +734,7 @@ fn layout_ifc(
                     // A line whose content does not fit beside the floats
                     // moves down to the next band (CSS 2.2 §9.5).
                     let used = data.metrics.advance - data.metrics.hanging_advance;
-                    if std::env::var_os("OBSCURA_IFC_DEBUG").is_some() {
+                    if ifc_debug_enabled() {
                         eprintln!(
                             "[ifc] line used={used} slot={slot:?} active={has_active_floats} floats={floats_this_line} y={}..{}",
                             data.line_y_start, data.line_y_end

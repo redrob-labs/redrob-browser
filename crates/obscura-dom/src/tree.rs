@@ -347,6 +347,16 @@ impl DomTree {
         Rc::ptr_eq(&self.inner, &other.inner)
     }
 
+    /// An address shared by every handle of this document while it lives.
+    pub fn identity(&self) -> usize {
+        Rc::as_ptr(&self.inner) as usize
+    }
+
+    /// Whether any element of the document hosts a shadow root.
+    pub fn has_shadow_roots(&self) -> bool {
+        !self.inner.borrow().shadow_roots_by_host.is_empty()
+    }
+
     /// A value no other tree state of this process has had: every mutable
     /// access (conservatively any mutation, including hover state) takes a
     /// fresh one from a process-wide counter. It keys a cache of anything

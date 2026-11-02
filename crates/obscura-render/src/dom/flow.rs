@@ -85,7 +85,7 @@ fn is_collapsible_whitespace(
             )
         )
     });
-    !preserves && crate::ifc::build::is_css_whitespace(&tree.text_content(id))
+    !preserves && super::text_is_css_whitespace(tree, id)
 }
 
 /// Whether an element is an atomic inline-level box: replaced elements,
@@ -93,7 +93,7 @@ fn is_collapsible_whitespace(
 fn is_atomic(tree: &DomTree, id: NodeId, style: &crate::LayoutStyle) -> bool {
     style.is_inline_block
         || style.is_replaced_box
-        || local_name(tree, id).is_some_and(|name| crate::inline::is_replaced(&name))
+        || super::with_local_name(tree, id, crate::inline::is_replaced).unwrap_or(false)
 }
 
 /// Whether a non-atomic inline element contains an in-flow block-level box,
@@ -490,7 +490,12 @@ impl BuildCx<'_> {
             Piece(Piece, usize),
             SpanEnd,
         }
-        let mut parents: Vec<Option<crate::LayoutStyle>> = vec![parent_style.cloned()];
+        thread_local! {
+            static DEFAULT_STYLE: &'static crate::LayoutStyle =
+                Box::leak(Box::new(crate::LayoutStyle::default()));
+        }
+        let styles = self.styles;
+        let mut parents: Vec<Option<&crate::LayoutStyle>> = vec![parent_style];
         let mut stack: Vec<Work> = pieces
             .iter()
             .rev()
@@ -504,7 +509,7 @@ impl BuildCx<'_> {
                 }
                 Work::Piece(piece, parent) => (piece, parent),
             };
-            let level = level(self.tree, piece, parents[parent].as_ref(), self.styles);
+            let level = level(self.tree, piece, parents[parent], self.styles);
             match (piece, level) {
                 (Piece::Open(owner, start, end), _) => {
                     items.push(Item::SplitSpanStart(owner, start, end));
@@ -516,20 +521,26 @@ impl BuildCx<'_> {
                     items.push(Item::Text(id))
                 }
                 (Piece::Dom(id), Level::Inline) => {
-                    let style = self.styles.get(&id).cloned().unwrap_or_default();
-                    let name = local_name(self.tree, id);
-                    if name.as_deref() == Some("br") {
+                    let style = styles
+                        .get(&id)
+                        .unwrap_or_else(|| DEFAULT_STYLE.with(|style| *style));
+                    let name = super::with_local_name(self.tree, id, |name| match name {
+                        "br" => 1u8,
+                        "wbr" => 2,
+                        _ => 0,
+                    });
+                    if name == Some(1) {
                         // The element still needs a rect.
                         items.push(Item::Break(id));
-                    } else if name.as_deref() == Some("wbr") {
+                    } else if name == Some(2) {
                         // A line break opportunity with no box of its own.
                         items.push(Item::GeneratedText("\u{200B}".to_string()));
-                    } else if is_atomic(self.tree, id, &style) {
+                    } else if is_atomic(self.tree, id, style) {
                         if let Some(node) = self.build_element(id) {
                             items.push(Item::Atomic {
                                 dom: Some(id),
                                 node,
-                                baseline: self.baseline_source(id, &style),
+                                baseline: self.baseline_source(id, style),
                             });
                         }
                     } else {

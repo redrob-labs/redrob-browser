@@ -1844,6 +1844,26 @@ struct ShadowScopeDeclarations {
     important: String,
 }
 
+/// One pseudo-element's matched rules: (normal, important), cascade order.
+pub(crate) type PseudoMatch = (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>);
+
+/// The rules each pseudo-element of an element matches.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub(crate) struct PseudoMatches {
+    before: Option<PseudoMatch>,
+    after: Option<PseudoMatch>,
+    placeholder: Option<PseudoMatch>,
+}
+
+/// The author rules an element matches, in cascade order: what
+/// `Stylesheet::apply_matched_rules_without_scopes` applies. Equal matches
+/// with equal inputs apply alike (see `dom::StyleShareCache`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MatchedRules {
+    normal: Vec<(u32, usize, usize)>,
+    important: Vec<(u32, usize, usize)>,
+}
+
 pub(crate) struct ShadowSlottedScope<'a> {
     pub sheet: &'a Stylesheet,
     pub host: NodeId,
@@ -2674,6 +2694,9 @@ pub struct StylesheetCache {
     misses: u64,
     /// How the sheet of the latest miss continued an earlier parse.
     last_resume: Option<SheetResume>,
+    /// The document (`DomTree::identity`) and external sheet generation whose
+    /// sources the entry was last parsed or checked against.
+    tree_token: Option<(usize, u64)>,
 }
 
 /// The rule counts of the parse a sheet continued from: every rule at or
@@ -2867,10 +2890,13 @@ impl StylesheetCache {
     ) -> (Arc<Stylesheet>, bool) {
         let viewport_bits = (viewport.0.to_bits(), viewport.1.to_bits());
         self.last_resume = None;
+        let token = (tree.identity(), tree.external_stylesheet_generation());
         if let Some(sheet) = self.get(sources, viewport, media_type) {
             self.hits = self.hits.saturating_add(1);
+            self.tree_token = Some(token);
             return (sheet, true);
         }
+        self.tree_token = None;
 
         self.misses = self.misses.saturating_add(1);
         if crate::prof::enabled() {
@@ -2952,6 +2978,7 @@ impl StylesheetCache {
             && compiled_rules <= MAX_STYLESHEET_CACHE_RULES
         {
             let source_bytes = source_bytes.unwrap_or_default();
+            self.tree_token = Some(token);
             self.entry = Some(CachedStylesheet {
                 sources: sources.to_vec(),
                 fold,
@@ -2965,6 +2992,36 @@ impl StylesheetCache {
             self.entry = None;
         }
         (sheet, false)
+    }
+
+    /// The cached sheet of `tree`, when the caller knows the document's
+    /// stylesheet sources have not changed since `get_or_parse` last read
+    /// them from it (no mutation since then touched a `<style>`, a
+    /// stylesheet `<link>` or their text). Skips collecting and comparing
+    /// the sources, which are often megabytes of CSS.
+    pub(crate) fn sheet_for_unchanged_tree(
+        &mut self,
+        tree: &DomTree,
+        viewport: (f32, f32),
+        media_type: CssMediaType,
+    ) -> Option<Arc<Stylesheet>> {
+        let token = (tree.identity(), tree.external_stylesheet_generation());
+        let entry = self.entry.as_ref()?;
+        if self.tree_token != Some(token)
+            || entry.viewport_bits != (viewport.0.to_bits(), viewport.1.to_bits())
+            || entry.media_type != media_type
+        {
+            return None;
+        }
+        self.last_resume = None;
+        self.hits = self.hits.saturating_add(1);
+        Some(Arc::clone(&entry.sheet))
+    }
+
+    /// Forget which document state the entry was read from, so
+    /// `sheet_for_unchanged_tree` answers `None` until the next parse.
+    pub(crate) fn forget_tree_token(&mut self) {
+        self.tree_token = None;
     }
 
     /// How the sheet of the latest `get_or_parse` miss continued an earlier
@@ -3547,220 +3604,289 @@ impl Stylesheet {
         Option<LayoutStyle>,
         Option<LayoutStyle>,
     ) {
-        let mut build = |rules: &PseudoRuleMap, matcher: &mut Matcher, is_placeholder: bool| {
-            let mut normal_matched: Vec<(u32, usize, usize)> = Vec::new();
-            let mut important_matched: Vec<(u32, usize, usize)> = Vec::new();
-            if rules.candidate_slot_count != 0 {
-                matcher.begin_candidate_collection(rules.candidate_slot_count);
-            }
-            let mut consider =
-                |bucket: Option<&Vec<usize>>,
-                 normal_matched: &mut Vec<(u32, usize, usize)>,
-                 important_matched: &mut Vec<(u32, usize, usize)>| {
-                    let Some(indices) = bucket else { return };
-                    for &index in indices {
-                        let rule = &rules.rules[index];
-                        if rule.candidate_slot != NO_CANDIDATE_SLOT
-                            && !matcher.mark_candidate(rule.candidate_slot as usize)
-                        {
-                            continue;
+        let matches = self.pseudo_matches(tree, matcher, nid, &mut evaluator);
+        self.pseudo_styles_from_matches(tree, nid, props, host_style, &matches)
+    }
+
+    /// The rules each pseudo-element of `nid` matches (`::before`,
+    /// `::after`, `::placeholder` for text controls): the first half of
+    /// `all_pseudo_styles`.
+    pub(crate) fn pseudo_matches(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+    ) -> PseudoMatches {
+        let supports_placeholder = tree.borrow_node(nid).is_some_and(|node| {
+            node.as_element()
+                .is_some_and(|element| matches!(element.local.as_ref(), "input" | "textarea"))
+        });
+        PseudoMatches {
+            before: self.pseudo_rule_matches(&self.before_rules, tree, matcher, nid, evaluator),
+            after: self.pseudo_rule_matches(&self.after_rules, tree, matcher, nid, evaluator),
+            placeholder: supports_placeholder
+                .then(|| {
+                    self.pseudo_rule_matches(&self.placeholder_rules, tree, matcher, nid, evaluator)
+                })
+                .flatten(),
+        }
+    }
+
+    /// The pseudo-element styles of `nid` from `matches`: the second half
+    /// of `all_pseudo_styles`.
+    pub(crate) fn pseudo_styles_from_matches(
+        &self,
+        tree: &DomTree,
+        nid: NodeId,
+        props: &HashMap<String, String>,
+        host_style: &LayoutStyle,
+        matches: &PseudoMatches,
+    ) -> (
+        Option<LayoutStyle>,
+        Option<LayoutStyle>,
+        Option<LayoutStyle>,
+    ) {
+        let style = |rules: &PseudoRuleMap, matched: &Option<PseudoMatch>, placeholder: bool| {
+            matched.as_ref().and_then(|matched| {
+                self.pseudo_style_from_matches(
+                    rules,
+                    tree,
+                    nid,
+                    props,
+                    host_style,
+                    placeholder,
+                    matched,
+                )
+            })
+        };
+        (
+            style(&self.before_rules, &matches.before, false),
+            style(&self.after_rules, &matches.after, false),
+            style(&self.placeholder_rules, &matches.placeholder, true),
+        )
+    }
+
+    /// The `rules` (one pseudo-element's) matching `nid`, normal and
+    /// important, each in cascade order; `None` when none match.
+    fn pseudo_rule_matches(
+        &self,
+        rules: &PseudoRuleMap,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+    ) -> Option<PseudoMatch> {
+        let mut normal_matched: Vec<(u32, usize, usize)> = Vec::new();
+        let mut important_matched: Vec<(u32, usize, usize)> = Vec::new();
+        if rules.candidate_slot_count != 0 {
+            matcher.begin_candidate_collection(rules.candidate_slot_count);
+        }
+        let mut consider =
+            |bucket: Option<&Vec<usize>>,
+             normal_matched: &mut Vec<(u32, usize, usize)>,
+             important_matched: &mut Vec<(u32, usize, usize)>| {
+                let Some(indices) = bucket else { return };
+                for &index in indices {
+                    let rule = &rules.rules[index];
+                    if rule.candidate_slot != NO_CANDIDATE_SLOT
+                        && !matcher.mark_candidate(rule.candidate_slot as usize)
+                    {
+                        continue;
+                    }
+                    // Candidate buckets only reject impossible originating
+                    // elements. Full selector matching remains authoritative.
+                    // Container lookup is an ancestor walk, so keep it behind
+                    // the selector match as well.
+                    if matcher.matches(tree, nid, &rule.sel)
+                        && self.container_condition_is_active(
+                            rule.container_condition_id,
+                            nid,
+                            ContainerQuerySubjectKind::OriginatingPseudo,
+                            evaluator,
+                        )
+                    {
+                        let matched = (rule.specificity, rule.order, index);
+                        if !rule.normal_decls.is_empty() {
+                            normal_matched.push(matched);
                         }
-                        // Candidate buckets only reject impossible originating
-                        // elements. Full selector matching remains authoritative.
-                        // Container lookup is an ancestor walk, so keep it behind
-                        // the selector match as well.
-                        if matcher.matches(tree, nid, &rule.sel)
-                            && self.container_condition_is_active(
-                                rule.container_condition_id,
-                                nid,
-                                ContainerQuerySubjectKind::OriginatingPseudo,
-                                &mut evaluator,
-                            )
-                        {
-                            let matched = (rule.specificity, rule.order, index);
-                            if !rule.normal_decls.is_empty() {
-                                normal_matched.push(matched);
-                            }
-                            if !rule.important_decls.is_empty() {
-                                important_matched.push(matched);
-                            }
+                        if !rule.important_decls.is_empty() {
+                            important_matched.push(matched);
                         }
                     }
-                };
+                }
+            };
 
-            if let Some(node) = tree.borrow_node(nid) {
-                if let Some(element) = node.as_element() {
+        if let Some(node) = tree.borrow_node(nid) {
+            if let Some(element) = node.as_element() {
+                consider(
+                    rules.by_local.get(element.local.as_ref()),
+                    &mut normal_matched,
+                    &mut important_matched,
+                );
+            }
+            if let Some(id) = node.get_attribute("id") {
+                consider(
+                    rules.by_id.get(id),
+                    &mut normal_matched,
+                    &mut important_matched,
+                );
+            }
+            if let Some(classes) = node.get_attribute("class") {
+                for class in classes.split_whitespace() {
                     consider(
-                        rules.by_local.get(element.local.as_ref()),
+                        rules.by_class.get(class),
                         &mut normal_matched,
                         &mut important_matched,
                     );
                 }
-                if let Some(id) = node.get_attribute("id") {
-                    consider(
-                        rules.by_id.get(id),
-                        &mut normal_matched,
-                        &mut important_matched,
-                    );
-                }
-                if let Some(classes) = node.get_attribute("class") {
-                    for class in classes.split_whitespace() {
+            }
+            if !rules.by_attribute.is_empty() {
+                if let Some(attributes) = node.attrs() {
+                    for attribute in attributes {
                         consider(
-                            rules.by_class.get(class),
+                            rules.by_attribute.get(attribute.name.local.as_ref()),
                             &mut normal_matched,
                             &mut important_matched,
                         );
                     }
                 }
-                if !rules.by_attribute.is_empty() {
-                    if let Some(attributes) = node.attrs() {
-                        for attribute in attributes {
-                            consider(
-                                rules.by_attribute.get(attribute.name.local.as_ref()),
-                                &mut normal_matched,
-                                &mut important_matched,
-                            );
-                        }
-                    }
-                }
             }
-            if is_root_element(tree, nid) {
-                consider(
-                    (!rules.by_root.is_empty()).then_some(&rules.by_root),
-                    &mut normal_matched,
-                    &mut important_matched,
-                );
-            }
+        }
+        if is_root_element(tree, nid) {
             consider(
-                (!rules.universal.is_empty()).then_some(&rules.universal),
+                (!rules.by_root.is_empty()).then_some(&rules.by_root),
                 &mut normal_matched,
                 &mut important_matched,
             );
+        }
+        consider(
+            (!rules.universal.is_empty()).then_some(&rules.universal),
+            &mut normal_matched,
+            &mut important_matched,
+        );
 
-            if normal_matched.is_empty() && important_matched.is_empty() {
-                return None;
-            }
-            if normal_matched.len() > 1 {
-                normal_matched.sort_unstable_by(|a, b| {
-                    compare_rule_cascade(
-                        rules.rules[a.2].layer.as_ref(),
-                        a.0,
-                        a.1,
-                        rules.rules[b.2].layer.as_ref(),
-                        b.0,
-                        b.1,
-                        false,
-                    )
-                });
-            }
-            if important_matched.len() > 1 {
-                important_matched.sort_unstable_by(|a, b| {
-                    compare_rule_cascade(
-                        rules.rules[a.2].layer.as_ref(),
-                        a.0,
-                        a.1,
-                        rules.rules[b.2].layer.as_ref(),
-                        b.0,
-                        b.1,
-                        true,
-                    )
-                });
-            }
-            // Generated ::before/::after boxes have an inline outer display
-            // by default. LayoutStyle's general default is block because it
-            // primarily represents ordinary DOM boxes, so set the pseudo
-            // initial value explicitly before applying author declarations.
-            let mut style = LayoutStyle {
-                display: crate::Display::Inline,
-                ..Default::default()
-            };
-            style.color_scheme_dark = host_style.color_scheme_dark;
-            if is_placeholder {
-                // Chromium's light native-control placeholder color. Author
-                // declarations cascade over this UA-origin initial value.
-                style.color = Some([117, 117, 117, 255]);
-            }
-            let inherited_color_scheme_dark = host_style.color_scheme_dark;
-            let mut generated_content = None;
-            for &(_, _, index) in &normal_matched {
-                let rule = &rules.rules[index];
-                if !rule.normal_flags.has_color_scheme {
-                    continue;
-                }
-                let expanded =
-                    substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
-                crate::style::apply_color_scheme_declarations_from(
-                    &mut style,
-                    &expanded,
-                    inherited_color_scheme_dark,
-                );
-            }
-            for &(_, _, index) in &important_matched {
-                let rule = &rules.rules[index];
-                if !rule.important_flags.has_color_scheme {
-                    continue;
-                }
-                let expanded = substitute_declarations(
-                    &rule.important_decls,
-                    props,
-                    rule.important_flags.has_var,
-                );
-                crate::style::apply_color_scheme_declarations_from(
-                    &mut style,
-                    &expanded,
-                    inherited_color_scheme_dark,
-                );
-            }
-            for &(_, _, index) in &normal_matched {
-                let rule = &rules.rules[index];
-                let expanded =
-                    substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
-                crate::style::apply_declarations_with_locked_color_scheme(&mut style, &expanded);
-                if let Some(value) = extract_content(&expanded, tree, nid) {
-                    generated_content = value;
-                }
-            }
-            for &(_, _, index) in &important_matched {
-                let rule = &rules.rules[index];
-                let expanded = substitute_declarations(
-                    &rule.important_decls,
-                    props,
-                    rule.important_flags.has_var,
-                );
-                crate::style::apply_declarations_with_locked_color_scheme(&mut style, &expanded);
-                if let Some(value) = extract_content(&expanded, tree, nid) {
-                    generated_content = value;
-                }
-            }
-            style.before_content = generated_content
-                .as_ref()
-                .map(|items| generated_content_with_zero_counters(items));
-            style.generated_content = generated_content;
-            if is_placeholder {
-                // `color` is inherited on the pseudo. The declaration parser
-                // represents `inherit` as None, so resolve it against the
-                // originating control after the author cascade.
-                if style.color.is_none() {
-                    style.color = host_style.color;
-                }
-                Some(style)
-            } else if style.generated_content.is_some() || style.content_image.is_some() {
-                Some(style)
-            } else {
-                None
-            }
+        if normal_matched.is_empty() && important_matched.is_empty() {
+            return None;
+        }
+        if normal_matched.len() > 1 {
+            normal_matched.sort_unstable_by(|a, b| {
+                compare_rule_cascade(
+                    rules.rules[a.2].layer.as_ref(),
+                    a.0,
+                    a.1,
+                    rules.rules[b.2].layer.as_ref(),
+                    b.0,
+                    b.1,
+                    false,
+                )
+            });
+        }
+        if important_matched.len() > 1 {
+            important_matched.sort_unstable_by(|a, b| {
+                compare_rule_cascade(
+                    rules.rules[a.2].layer.as_ref(),
+                    a.0,
+                    a.1,
+                    rules.rules[b.2].layer.as_ref(),
+                    b.0,
+                    b.1,
+                    true,
+                )
+            });
+        }
+        Some((normal_matched, important_matched))
+    }
+
+    /// The style of one pseudo-element of `nid` from its matched rules.
+    #[allow(clippy::too_many_arguments)]
+    fn pseudo_style_from_matches(
+        &self,
+        rules: &PseudoRuleMap,
+        tree: &DomTree,
+        nid: NodeId,
+        props: &HashMap<String, String>,
+        host_style: &LayoutStyle,
+        is_placeholder: bool,
+        (normal_matched, important_matched): &PseudoMatch,
+    ) -> Option<LayoutStyle> {
+        // Generated ::before/::after boxes have an inline outer display
+        // by default. LayoutStyle's general default is block because it
+        // primarily represents ordinary DOM boxes, so set the pseudo
+        // initial value explicitly before applying author declarations.
+        let mut style = LayoutStyle {
+            display: crate::Display::Inline,
+            ..Default::default()
         };
-        let supports_placeholder = tree.borrow_node(nid).is_some_and(|node| {
-            node.as_element()
-                .is_some_and(|element| matches!(element.local.as_ref(), "input" | "textarea"))
-        });
-        (
-            build(&self.before_rules, matcher, false),
-            build(&self.after_rules, matcher, false),
-            supports_placeholder
-                .then(|| build(&self.placeholder_rules, matcher, true))
-                .flatten(),
-        )
+        style.color_scheme_dark = host_style.color_scheme_dark;
+        if is_placeholder {
+            // Chromium's light native-control placeholder color. Author
+            // declarations cascade over this UA-origin initial value.
+            style.color = Some([117, 117, 117, 255]);
+        }
+        let inherited_color_scheme_dark = host_style.color_scheme_dark;
+        let mut generated_content = None;
+        for &(_, _, index) in normal_matched.iter() {
+            let rule = &rules.rules[index];
+            if !rule.normal_flags.has_color_scheme {
+                continue;
+            }
+            let expanded =
+                substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
+            crate::style::apply_color_scheme_declarations_from(
+                &mut style,
+                &expanded,
+                inherited_color_scheme_dark,
+            );
+        }
+        for &(_, _, index) in important_matched.iter() {
+            let rule = &rules.rules[index];
+            if !rule.important_flags.has_color_scheme {
+                continue;
+            }
+            let expanded =
+                substitute_declarations(&rule.important_decls, props, rule.important_flags.has_var);
+            crate::style::apply_color_scheme_declarations_from(
+                &mut style,
+                &expanded,
+                inherited_color_scheme_dark,
+            );
+        }
+        for &(_, _, index) in normal_matched.iter() {
+            let rule = &rules.rules[index];
+            let expanded =
+                substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
+            crate::style::apply_declarations_with_locked_color_scheme(&mut style, &expanded);
+            if let Some(value) = extract_content(&expanded, tree, nid) {
+                generated_content = value;
+            }
+        }
+        for &(_, _, index) in important_matched.iter() {
+            let rule = &rules.rules[index];
+            let expanded =
+                substitute_declarations(&rule.important_decls, props, rule.important_flags.has_var);
+            crate::style::apply_declarations_with_locked_color_scheme(&mut style, &expanded);
+            if let Some(value) = extract_content(&expanded, tree, nid) {
+                generated_content = value;
+            }
+        }
+        style.before_content = generated_content
+            .as_ref()
+            .map(|items| generated_content_with_zero_counters(items));
+        style.generated_content = generated_content;
+        if is_placeholder {
+            // `color` is inherited on the pseudo. The declaration parser
+            // represents `inherit` as None, so resolve it against the
+            // originating control after the author cascade.
+            if style.color.is_none() {
+                style.color = host_style.color;
+            }
+            Some(style)
+        } else if style.generated_content.is_some() || style.content_image.is_some() {
+            Some(style)
+        } else {
+            None
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -4143,6 +4269,34 @@ impl Stylesheet {
             &mut shadow_scope_declarations.important,
             &shadow_host_declarations.important,
         );
+        let (normal_matched, important_matched) =
+            self.collect_matched_rules(tree, matcher, nid, id, classes, local, &mut evaluator);
+        self.apply_matched_rules(
+            nid,
+            style,
+            parent_props,
+            inline_css,
+            &shadow_scope_declarations,
+            &normal_matched,
+            &important_matched,
+            animation_sample,
+            animation_timeline,
+            ancestor_display_none,
+        )
+    }
+
+    /// Author rules matching `nid`, (normal, important), each in cascade order.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_matched_rules(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[String],
+        local: &str,
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+    ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
         // Keep the two cascade priorities separate from the outset. A typical
         // stylesheet has very few important declarations, so cloning and
         // sorting every matching normal-only rule into an empty important pass
@@ -4171,7 +4325,7 @@ impl Stylesheet {
                                 rule.container_condition_id,
                                 nid,
                                 ContainerQuerySubjectKind::Element,
-                                &mut evaluator,
+                                evaluator,
                             )
                         {
                             let matched = (rule.specificity, rule.order, i);
@@ -4264,6 +4418,89 @@ impl Stylesheet {
             });
         }
 
+        (normal_matched, important_matched)
+    }
+
+    /// Whether applying `matched` (with `inline_css`) to an element gives a
+    /// result that depends only on its inputs, not on the element itself: no
+    /// CSS animation samples the timeline under the element's identity.
+    pub(crate) fn matched_rules_are_shareable(
+        &self,
+        matched: &MatchedRules,
+        inline_css: Option<&str>,
+    ) -> bool {
+        self.keyframes.is_empty()
+            || !(matched
+                .normal
+                .iter()
+                .any(|&(_, _, i)| self.rules[i].normal_flags.has_animation)
+                || matched
+                    .important
+                    .iter()
+                    .any(|&(_, _, i)| self.rules[i].important_flags.has_animation)
+                || inline_css.is_some_and(|css| css.to_ascii_lowercase().contains("animation")))
+    }
+
+    /// The author rules matching `nid`, normal and important, each in
+    /// cascade order (the winner last), when the element has no shadow scope
+    /// and no container query can apply: the first half of `apply`, for a
+    /// caller that may reuse the result of applying the same rules before.
+    pub(crate) fn matched_rules_without_scopes(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[String],
+        local: &str,
+    ) -> MatchedRules {
+        let (normal, important) =
+            self.collect_matched_rules(tree, matcher, nid, id, classes, local, &mut None);
+        MatchedRules { normal, important }
+    }
+
+    /// The second half of `apply`: apply rules already matched (and inline
+    /// declarations) to `style`. Reads nothing from the tree; the animation
+    /// timeline is the only state it changes.
+    pub(crate) fn apply_matched_rules_without_scopes(
+        &self,
+        nid: NodeId,
+        style: &mut LayoutStyle,
+        parent_props: &HashMap<String, String>,
+        inline_css: Option<&str>,
+        matched: &MatchedRules,
+        animation_sample: crate::AnimationSample,
+        animation_timeline: &mut crate::AnimationTimelineState,
+        ancestor_display_none: bool,
+    ) -> Option<HashMap<String, String>> {
+        self.apply_matched_rules(
+            nid,
+            style,
+            parent_props,
+            inline_css,
+            &ShadowScopeDeclarations::default(),
+            &matched.normal,
+            &matched.important,
+            animation_sample,
+            animation_timeline,
+            ancestor_display_none,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_matched_rules(
+        &self,
+        nid: NodeId,
+        style: &mut LayoutStyle,
+        parent_props: &HashMap<String, String>,
+        inline_css: Option<&str>,
+        shadow_scope_declarations: &ShadowScopeDeclarations,
+        normal_matched: &[(u32, usize, usize)],
+        important_matched: &[(u32, usize, usize)],
+        animation_sample: crate::AnimationSample,
+        animation_timeline: &mut crate::AnimationTimelineState,
+        ancestor_display_none: bool,
+    ) -> Option<HashMap<String, String>> {
         let (inline_normal, inline_important) = inline_css
             .map(crate::style::partition_declarations)
             .unwrap_or_default();
@@ -4322,7 +4559,7 @@ impl Stylesheet {
             if shadow_normal_flags.has_custom_properties {
                 collect_custom(&shadow_scope_declarations.normal);
             }
-            for &(_, _, i) in &normal_matched {
+            for &(_, _, i) in normal_matched {
                 let rule = &self.rules[i];
                 if rule.normal_flags.has_custom_properties {
                     collect_custom(&rule.normal_decls);
@@ -4331,7 +4568,7 @@ impl Stylesheet {
             if inline_normal_flags.has_custom_properties {
                 collect_custom(&inline_normal);
             }
-            for &(_, _, i) in &important_matched {
+            for &(_, _, i) in important_matched {
                 let rule = &self.rules[i];
                 if rule.important_flags.has_custom_properties {
                     collect_custom(&rule.important_decls);
@@ -4409,21 +4646,28 @@ impl Stylesheet {
             // then pass those substituted values to descendants. Re-resolving an
             // inherited `--b:var(--a)` after a child overrides `--a` is observably
             // wrong: browsers keep the parent's already-computed `--b`.
-            let resolution_environment = resolved_props.clone();
-            for name in own_names {
-                let Some(value) = resolution_environment.get(&name) else {
-                    continue;
-                };
-                if let Some(computed) = substitute_var_value(value, &resolution_environment, 0) {
-                    resolved_props.insert(name, computed);
-                } else if let Some(initial) = self
-                    .registered_custom_properties
-                    .get(&name)
-                    .and_then(|entry| entry.initial_value.clone())
-                {
-                    resolved_props.insert(name, initial);
-                } else {
-                    resolved_props.remove(&name);
+            // Every substitution reads the environment as it was before any of
+            // them is applied, so compute them all first instead of cloning it.
+            let resolved_own: Vec<(String, Option<String>)> = own_names
+                .into_iter()
+                .filter_map(|name| {
+                    let value = resolved_props.get(&name)?;
+                    let computed = substitute_var_value(value, &resolved_props, 0).or_else(|| {
+                        self.registered_custom_properties
+                            .get(&name)
+                            .and_then(|entry| entry.initial_value.clone())
+                    });
+                    Some((name, computed))
+                })
+                .collect();
+            for (name, computed) in resolved_own {
+                match computed {
+                    Some(computed) => {
+                        resolved_props.insert(name, computed);
+                    }
+                    None => {
+                        resolved_props.remove(&name);
+                    }
                 }
             }
             if has_own || registration_changed_props {
@@ -4451,7 +4695,7 @@ impl Stylesheet {
                 inherited_color_scheme_dark,
             );
         }
-        for &(_, _, i) in &normal_matched {
+        for &(_, _, i) in normal_matched {
             let rule = &self.rules[i];
             if !rule.normal_flags.has_color_scheme {
                 continue;
@@ -4473,7 +4717,7 @@ impl Stylesheet {
                 inherited_color_scheme_dark,
             );
         }
-        for &(_, _, i) in &important_matched {
+        for &(_, _, i) in important_matched {
             let rule = &self.rules[i];
             if !rule.important_flags.has_color_scheme {
                 continue;
@@ -4516,7 +4760,7 @@ impl Stylesheet {
             shadow_normal_flags.has_var,
         );
         crate::style::apply_declarations_with_locked_color_scheme(style, &expanded);
-        for &(_, _, i) in &normal_matched {
+        for &(_, _, i) in normal_matched {
             let rule = &self.rules[i];
             let expanded =
                 substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
@@ -4542,7 +4786,7 @@ impl Stylesheet {
             let mut animation_style = style.clone();
             // The winning display declaration participates in animation
             // eligibility, including !important and shadow-scope declarations.
-            for &(_, _, i) in &important_matched {
+            for &(_, _, i) in important_matched {
                 let rule = &self.rules[i];
                 let expanded = substitute_declarations(
                     &rule.important_decls,
@@ -4622,7 +4866,7 @@ impl Stylesheet {
                 .iter()
                 .any(|&(_, _, i)| self.rules[i].important_flags.has_opacity);
 
-        for &(_, _, i) in &important_matched {
+        for &(_, _, i) in important_matched {
             let rule = &self.rules[i];
             let expanded =
                 substitute_declarations(&rule.important_decls, props, rule.important_flags.has_var);

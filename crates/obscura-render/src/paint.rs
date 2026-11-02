@@ -235,6 +235,47 @@ pub struct RenderResourceCache {
     decoded_fonts: HashMap<(String, Option<String>), DecodedFont>,
     /// `@font-face` rules parsed from the author sheets they came from.
     font_face_rules: Option<(Vec<(String, Option<String>)>, Vec<FontRule>)>,
+    /// The fonts the last layout of a document collected, with the document
+    /// state they were collected from (see `WebFontsKey`).
+    web_fonts_memo: Option<(WebFontsKey, Vec<crate::inline::WebFont>)>,
+    /// The images of the last collection (see `patch_image_intrinsics`).
+    image_memo: Option<ImageMemo>,
+}
+
+/// What `collect_web_fonts` reads besides the DOM: the document
+/// (`DomTree::identity`), its external sheet generation, the base URL and
+/// the FontFace set.
+#[derive(Clone, PartialEq)]
+struct WebFontsKey {
+    tree: usize,
+    external_generation: u64,
+    base_url: Option<String>,
+    dynamic_fonts: u64,
+}
+
+impl WebFontsKey {
+    fn new(tree: &DomTree, base_url: Option<&str>, dynamic_fonts: &[DynamicFontFace]) -> Self {
+        use std::hash::BuildHasher;
+        Self {
+            tree: tree.identity(),
+            external_generation: tree.external_stylesheet_generation(),
+            base_url: base_url.map(str::to_owned),
+            dynamic_fonts: foldhash::fast::FixedState::default().hash_one(
+                dynamic_fonts
+                    .iter()
+                    .map(|face| {
+                        (
+                            &face.family,
+                            &face.source,
+                            &face.style,
+                            &face.weight,
+                            &face.unicode_range,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+        }
+    }
 }
 
 struct DecodedFont {
@@ -301,7 +342,16 @@ impl RenderResourceCache {
             lazy_deferred_top: None,
             decoded_fonts: HashMap::default(),
             font_face_rules: None,
+            web_fonts_memo: None,
+            image_memo: None,
         }
+    }
+
+    /// Drop the image and font collections kept for patching (see
+    /// `patch_image_intrinsics`), so the next layout collects again.
+    pub(crate) fn forget_collection_memos(&mut self) {
+        self.image_memo = None;
+        self.web_fonts_memo = None;
     }
 
     /// Record that the viewport's bottom edge has reached document y
@@ -3865,22 +3915,26 @@ fn verify_against_scratch(
     VERIFYING.with(|flag| flag.set(true));
     let mut fresh_sheets = crate::css::StylesheetCache::default();
     let scratch = crate::inline::without_shaped_item_reuse(|| {
-        prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
-            tree,
-            viewport,
-            base_url,
-            resources,
-            dynamic_fonts,
-            &mut fresh_sheets,
-            None,
-            None,
-            crate::CssMediaType::Screen,
-            animation_sample,
-            &mut timeline,
-        )
+        crate::dom::without_subtree_keys(|| {
+            prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                dynamic_fonts,
+                &mut fresh_sheets,
+                None,
+                None,
+                crate::CssMediaType::Screen,
+                animation_sample,
+                &mut timeline,
+            )
+        })
     });
     VERIFYING.with(|flag| flag.set(false));
-    let Some(mut scratch) = scratch else {
+    #[cfg_attr(not(feature = "scene"), allow(unused_mut))]
+    let Some(mut scratch) = scratch
+    else {
         panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
     };
     let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
@@ -3965,6 +4019,33 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     animation_timeline: &mut crate::AnimationTimelineState,
 ) -> Option<PreparedRender> {
     let _prof = crate::prof::start();
+    if crate::prof::enabled() {
+        let mut summary: Vec<String> = Vec::new();
+        for mutation in mutations {
+            summary.push(match mutation {
+                crate::dom::RetainedStyleMutation::Attribute(attribute) => {
+                    format!("a:{}", attribute.name)
+                }
+                crate::dom::RetainedStyleMutation::Tree(crate::dom::TreeStyleMutation::Text {
+                    ..
+                }) => "text".into(),
+                crate::dom::RetainedStyleMutation::Tree(
+                    crate::dom::TreeStyleMutation::Insert { .. },
+                ) => "ins".into(),
+                crate::dom::RetainedStyleMutation::Tree(
+                    crate::dom::TreeStyleMutation::Remove { .. },
+                ) => "rm".into(),
+                other => format!("{other:?}").chars().take(12).collect(),
+            });
+        }
+        summary.sort();
+        summary.dedup();
+        eprintln!(
+            "[timing] mutations n={} kinds={}",
+            mutations.len(),
+            summary.join(",")
+        );
+    }
     let sample_changed = previous.animation_sample != animation_sample;
     let forward_document_sample = sample_changed
         && previous.animation_sample.mode == crate::AnimationSampleMode::DocumentTime
@@ -4002,6 +4083,10 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             || (forward_document_sample
                 && previous.advance_inactive_animation_sample_time(animation_sample.time)))
     {
+        // The collections of the next layout cannot be patched from the
+        // last ones past mutations this layout never saw.
+        resources.forget_collection_memos();
+        stylesheet_cache.forget_tree_token();
         return Some(previous);
     }
     if previous.viewport == viewport
@@ -4089,6 +4174,8 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
                         previous.selected_images.insert(id, selected);
                     }
                     previous.paint_epoch = next_paint_epoch();
+                    resources.forget_collection_memos();
+                    stylesheet_cache.forget_tree_token();
                     return Some(previous);
                 }
             }
@@ -4149,6 +4236,17 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
     let retained = RetainedStyleMaps {
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
+        signatures: std::mem::take(&mut previous.layout.cascade_signatures),
+        definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
+        previous_rendered: previous.layout.rendered_tree.take(),
+        geometry: Some(crate::dom::RetainedGeometry {
+            rects: std::mem::take(&mut previous.layout.rects),
+            clip_rects: std::mem::take(&mut previous.layout.clip_rects),
+            translates: std::mem::take(&mut previous.layout.translates),
+            transforms: std::mem::take(&mut previous.layout.transforms),
+            projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
+            clip_inputs: previous.layout.clip_inputs,
+        }),
     };
     drop(previous);
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
@@ -4267,12 +4365,28 @@ fn prepare_dom_internal_unverified(
         return None;
     }
     let prepare_started = std::time::Instant::now();
+    if let Some((maps, mutations)) = retained.as_ref() {
+        if let Some(previous) = maps.previous_rendered.as_deref() {
+            crate::dom::patch_flat_tree(tree, previous, mutations);
+        }
+    }
     // Fetch <img> bytes up front to learn intrinsic sizes for layout (a
     // CSS-sized image with no width/height attribute would otherwise be 0x0
     // and never paint). This seeds the same cache the paint pass reads, so
     // each URL is still fetched at most once.
-    let (mut intrinsic, mut selected_images) =
-        collect_image_intrinsics(tree, viewport, base_url, resources);
+    let (mut intrinsic, mut selected_images) = retained
+        .as_ref()
+        .and_then(|(maps, mutations)| {
+            patch_image_intrinsics(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                mutations,
+                maps.previous_rendered.as_deref(),
+            )
+        })
+        .unwrap_or_else(|| collect_image_intrinsics(tree, viewport, base_url, resources));
     // Preserve the HTML source fallback separately: a remembered CSS content
     // image temporarily overrides it, but a changed/removed/failed content
     // selection must restore the source before the correction layout.
@@ -4313,7 +4427,33 @@ fn prepare_dom_internal_unverified(
     }
     resources.lazy_viewport_bottom = resources.lazy_viewport_bottom.max(viewport.1);
     let images_done = std::time::Instant::now();
-    let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
+    // A retained layout whose mutations left every sheet owner alone and
+    // loaded no resource collects the fonts the last layout did.
+    let fonts_key = WebFontsKey::new(tree, base_url, dynamic_fonts);
+    let fonts_unchanged = retained.as_ref().is_some_and(|(_, mutations)| {
+        !mutations
+            .iter()
+            .any(|mutation| matches!(mutation, crate::dom::RetainedStyleMutation::Resource))
+            && crate::dom::mutations_keep_document_stylesheets(
+                tree,
+                mutations,
+                retained
+                    .as_ref()
+                    .and_then(|(maps, _)| maps.previous_rendered.as_deref()),
+            )
+    });
+    let fonts = match resources
+        .web_fonts_memo
+        .as_ref()
+        .filter(|(key, _)| fonts_unchanged && *key == fonts_key)
+    {
+        Some((_, fonts)) => fonts.clone(),
+        None => {
+            let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
+            resources.web_fonts_memo = Some((fonts_key, fonts.clone()));
+            fonts
+        }
+    };
     let fonts_done = std::time::Instant::now();
     // Most framework pages use web fonts and many decorative SVG icons, but
     // only SVG text needs the page font faces. Avoid cloning/loading the page
@@ -12965,81 +13105,241 @@ fn collect_image_intrinsics(
     HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     HashMap<obscura_dom::tree::NodeId, SelectedImage>,
 ) {
+    let mut out = crate::HashMap::default();
+    let mut selected = HashMap::default();
+    let mut videos = Vec::new();
+    for nid in crate::dom::rendered_descendants(tree, tree.document()) {
+        if collect_image_intrinsic_of(
+            tree,
+            nid,
+            viewport,
+            base_url,
+            cache,
+            &mut out,
+            &mut selected,
+        ) {
+            videos.push(nid);
+        }
+    }
+    cache.image_memo = Some(ImageMemo {
+        key: ImageMemoKey::new(tree, viewport, base_url),
+        intrinsic: out.clone(),
+        selected: selected.clone(),
+        videos,
+    });
+    (out, selected)
+}
+
+/// The image intrinsics of the last collection of a document.
+struct ImageMemo {
+    key: ImageMemoKey,
+    intrinsic: HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    selected: HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+    /// Rendered `<video>` elements: their frame changes with playback time,
+    /// so every collection reads them again.
+    videos: Vec<obscura_dom::tree::NodeId>,
+}
+
+#[derive(PartialEq)]
+struct ImageMemoKey {
+    tree: usize,
+    viewport: (u32, u32),
+    base_url: Option<String>,
+}
+
+impl ImageMemoKey {
+    fn new(tree: &DomTree, viewport: (f32, f32), base_url: Option<&str>) -> Self {
+        Self {
+            tree: tree.identity(),
+            viewport: (viewport.0.to_bits(), viewport.1.to_bits()),
+            base_url: base_url.map(str::to_owned),
+        }
+    }
+}
+
+/// `collect_image_intrinsics` after `mutations`, from the last collection:
+/// only inserted and removed subtrees are visited. `None` when a mutation
+/// can change an image elsewhere (an attribute of an image, a `<source>` or
+/// `<picture>`, a `<details>` opening, a loaded resource) or the document
+/// has shadow roots. Videos are read again every time.
+fn patch_image_intrinsics(
+    tree: &DomTree,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+    mutations: &[crate::dom::RetainedStyleMutation],
+    previous: Option<&crate::dom::FlatTree>,
+) -> Option<(
+    HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+)> {
+    use crate::dom::{RetainedStyleMutation, TreeStyleMutation};
+    if tree.has_shadow_roots() {
+        return None;
+    }
+    let memo = cache.image_memo.as_ref()?;
+    if memo.key != ImageMemoKey::new(tree, viewport, base_url) {
+        return None;
+    }
+    let image_element = |node: obscura_dom::tree::NodeId| {
+        tree.with_node(node, |node| {
+            node.as_element().is_some_and(|element| {
+                matches!(
+                    element.local.as_ref(),
+                    "img" | "source" | "picture" | "video" | "details" | "summary" | "slot"
+                )
+            })
+        })
+        .unwrap_or(false)
+    };
+    let image_safe = mutations.iter().all(|mutation| match mutation {
+        RetainedStyleMutation::Attribute(attribute) => {
+            !image_element(attribute.node)
+                && !matches!(attribute.name.as_str(), "open" | "slot" | "name")
+        }
+        RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
+            new_parent,
+            old_parent,
+            ..
+        }) => !image_element(*new_parent) && !old_parent.is_some_and(image_element),
+        RetainedStyleMutation::Tree(TreeStyleMutation::Remove { old_parent, .. }) => {
+            !image_element(*old_parent)
+        }
+        RetainedStyleMutation::Tree(TreeStyleMutation::Text { .. })
+        | RetainedStyleMutation::Animation { .. }
+        | RetainedStyleMutation::WaapiAnimation { .. }
+        | RetainedStyleMutation::Stylesheet => true,
+        RetainedStyleMutation::Resource => false,
+    });
+    if !image_safe {
+        return None;
+    }
+    let subtrees = crate::dom::mutated_subtrees(tree, mutations, previous)?;
+    let mut out = memo.intrinsic.clone();
+    let mut selected = memo.selected.clone();
+    let mut videos = memo.videos.clone();
+    for id in subtrees.old.iter().chain(&subtrees.new) {
+        out.remove(id);
+        selected.remove(id);
+        videos.retain(|video| video != id);
+    }
+    for &video in &videos {
+        out.remove(&video);
+        selected.remove(&video);
+        collect_image_intrinsic_of(
+            tree,
+            video,
+            viewport,
+            base_url,
+            cache,
+            &mut out,
+            &mut selected,
+        );
+    }
+    for &id in &subtrees.new {
+        if collect_image_intrinsic_of(tree, id, viewport, base_url, cache, &mut out, &mut selected)
+            && !videos.contains(&id)
+        {
+            videos.push(id);
+        }
+    }
+    cache.image_memo = Some(ImageMemo {
+        key: ImageMemoKey::new(tree, viewport, base_url),
+        intrinsic: out.clone(),
+        selected: selected.clone(),
+        videos,
+    });
+    Some((out, selected))
+}
+
+/// Record the intrinsic size and selected source of `nid` if it is an image
+/// or a video. Returns whether it is a video.
+fn collect_image_intrinsic_of(
+    tree: &DomTree,
+    nid: obscura_dom::tree::NodeId,
+    viewport: (f32, f32),
+    base_url: Option<&str>,
+    cache: &mut RenderResourceCache,
+    out: &mut HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    selected: &mut HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+) -> bool {
     enum Source {
         Image,
         VideoPoster(String),
         VideoFrame(String),
     }
-    let mut out = crate::HashMap::default();
-    let mut selected = HashMap::default();
-    for nid in crate::dom::rendered_descendants(tree, tree.document()) {
-        let source = tree
-            .with_node(nid, |node| match node.as_element()?.local.as_ref() {
-                "img" => Some(Source::Image),
-                "video" => node
-                    .get_attribute("poster")
-                    .map(str::trim)
-                    .filter(|poster| !poster.is_empty())
-                    .map(|poster| Source::VideoPoster(poster.to_owned()))
-                    .or_else(|| {
-                        // Without a poster a paused video shows its frame at
-                        // the playback position; without a decoder its header
-                        // still gives the natural size.
-                        if node.get_attribute("preload") == Some("none") {
-                            return None;
-                        }
-                        video_source_url(tree, nid).map(Source::VideoFrame)
-                    }),
-                _ => None,
-            })
-            .flatten();
-        // Release the scoped borrow before responsive selection reads the tree.
-        let (url, density) = match source {
-            Some(Source::Image) => {
-                let Some(candidate) = resolve_img_url(tree, nid, viewport) else {
-                    continue;
-                };
-                candidate
-            }
-            Some(Source::VideoPoster(poster)) => (poster, 1.0),
-            Some(Source::VideoFrame(src)) => {
-                let Some(media_url) = resolve_resource_url(&src, base_url) else {
-                    continue;
-                };
-                let time = cache.video_time(nid);
-                let Some(frame) = cache.video_frame(&media_url, time) else {
-                    // Chrome sizes the box from the metadata alone.
-                    if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
-                        out.insert(
-                            nid,
-                            crate::ReplacedIntrinsic::from_dimensions(width, height),
-                        );
+    let is_video = tree
+        .with_node(nid, |node| {
+            node.as_element()
+                .is_some_and(|element| element.local.as_ref() == "video")
+        })
+        .unwrap_or(false);
+    let source = tree
+        .with_node(nid, |node| match node.as_element()?.local.as_ref() {
+            "img" => Some(Source::Image),
+            "video" => node
+                .get_attribute("poster")
+                .map(str::trim)
+                .filter(|poster| !poster.is_empty())
+                .map(|poster| Source::VideoPoster(poster.to_owned()))
+                .or_else(|| {
+                    // Without a poster a paused video shows its frame at
+                    // the playback position; without a decoder its header
+                    // still gives the natural size.
+                    if node.get_attribute("preload") == Some("none") {
+                        return None;
                     }
-                    continue;
-                };
-                (frame.data_url.to_string(), 1.0)
-            }
-            None => continue,
-        };
-        let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
-        let profile = image_request_profile(tree, nid);
-        selected.insert(
-            nid,
-            SelectedImage {
-                resolved_url: resolved_url.clone(),
-                density,
-                profile,
-            },
-        );
-        if let Some(mut intrinsic) = cache.profiled_image_intrinsic(&resolved_url, profile) {
-            // A 2x (or w-descriptor) candidate's raw pixels are density times
-            // its CSS size. A ratio is dimensionless and remains unchanged.
-            intrinsic.width = intrinsic.width.map(|width| width / density);
-            intrinsic.height = intrinsic.height.map(|height| height / density);
-            out.insert(nid, intrinsic);
+                    video_source_url(tree, nid).map(Source::VideoFrame)
+                }),
+            _ => None,
+        })
+        .flatten();
+    // Release the scoped borrow before responsive selection reads the tree.
+    let (url, density) = match source {
+        Some(Source::Image) => {
+            let Some(candidate) = resolve_img_url(tree, nid, viewport) else {
+                return is_video;
+            };
+            candidate
         }
+        Some(Source::VideoPoster(poster)) => (poster, 1.0),
+        Some(Source::VideoFrame(src)) => {
+            let Some(media_url) = resolve_resource_url(&src, base_url) else {
+                return is_video;
+            };
+            let time = cache.video_time(nid);
+            let Some(frame) = cache.video_frame(&media_url, time) else {
+                // Chrome sizes the box from the metadata alone.
+                if let Some((width, height)) = cache.video_header_dimensions(&media_url) {
+                    out.insert(
+                        nid,
+                        crate::ReplacedIntrinsic::from_dimensions(width, height),
+                    );
+                }
+                return is_video;
+            };
+            (frame.data_url.to_string(), 1.0)
+        }
+        None => return is_video,
+    };
+    let resolved_url = resolve_resource_url(&url, base_url).unwrap_or(url);
+    let profile = image_request_profile(tree, nid);
+    selected.insert(
+        nid,
+        SelectedImage {
+            resolved_url: resolved_url.clone(),
+            density,
+            profile,
+        },
+    );
+    if let Some(mut intrinsic) = cache.profiled_image_intrinsic(&resolved_url, profile) {
+        // A 2x (or w-descriptor) candidate's raw pixels are density times
+        // its CSS size. A ratio is dimensionless and remains unchanged.
+        intrinsic.width = intrinsic.width.map(|width| width / density);
+        intrinsic.height = intrinsic.height.map(|height| height / density);
+        out.insert(nid, intrinsic);
     }
-    (out, selected)
+    is_video
 }
 
 /// Add intrinsic metadata for CSS `content:url(...)` images after the first
@@ -17717,6 +18017,7 @@ mod tests {
             &[crate::dom::TreeStyleMutation::Remove {
                 node: item,
                 old_parent: right,
+                old_next_sibling: None,
             }
             .into()],
             2.0,
@@ -17755,11 +18056,13 @@ mod tests {
                 crate::dom::TreeStyleMutation::Remove {
                     node: kept,
                     old_parent: right,
+                    old_next_sibling: None,
                 }
                 .into(),
                 crate::dom::TreeStyleMutation::Remove {
                     node: item,
                     old_parent: left,
+                    old_next_sibling: None,
                 }
                 .into(),
             ],
