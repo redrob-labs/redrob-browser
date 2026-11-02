@@ -449,8 +449,8 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
         .or_else(|| {
             first_map_difference(
                 "styles",
-                incremental.styles.boxed(),
-                scratch.styles.boxed(),
+                &incremental.styles.boxed(),
+                &scratch.styles.boxed(),
                 |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
             )
         })
@@ -15563,6 +15563,8 @@ pub(crate) struct FlatTree {
     /// How this tree differs from the one of generation `.0` it was spliced
     /// from (`splice_flat_walk`), for `rendered_tree_changes`.
     spliced_from: Option<(u64, RenderedTreeChanges)>,
+    /// The nodes of the walk with a kind, in walk order, made on first use.
+    kinded: std::cell::OnceCell<std::rc::Rc<Vec<NodeId>>>,
 }
 
 /// Elements a few layout passes look for, as bits (see `FlatTree::kinds`).
@@ -15604,7 +15606,20 @@ pub(crate) fn rendered_nodes_of_kind(tree: &DomTree, kinds: u8) -> Vec<NodeId> {
     if flat.kinds_present & kinds == 0 {
         return Vec::new();
     }
-    flat.walk
+    let kinded = flat.kinded.get_or_init(|| {
+        std::rc::Rc::new(
+            flat.walk
+                .iter()
+                .copied()
+                .filter(|id| {
+                    flat.kinds
+                        .get(id.index())
+                        .is_some_and(|&kind| kind != 0 && kind != ElementKind::UNKNOWN)
+                })
+                .collect(),
+        )
+    });
+    kinded
         .iter()
         .copied()
         .filter(|id| {
@@ -15853,6 +15868,7 @@ pub(crate) fn patch_flat_tree(
             kinds,
             kinds_present: previous.kinds_present,
             spliced_from: None,
+            kinded: previous.kinded.clone(),
         });
         if layout_verify_enabled() {
             verify_flat_tree(tree, &flat);
@@ -15938,6 +15954,7 @@ pub(crate) fn patch_flat_tree(
                 kinds,
                 kinds_present,
                 spliced_from: Some((previous.generation, changes)),
+                kinded: Default::default(),
             });
             if layout_verify_enabled() {
                 verify_flat_tree(tree, &flat);
@@ -16012,6 +16029,7 @@ pub(crate) fn patch_flat_tree(
         kinds,
         kinds_present,
         spliced_from: None,
+        kinded: Default::default(),
     });
     if layout_verify_enabled() {
         verify_flat_tree(tree, &flat);
@@ -16250,6 +16268,7 @@ fn build_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
         kinds,
         kinds_present,
         spliced_from: None,
+        kinded: Default::default(),
     })
 }
 
