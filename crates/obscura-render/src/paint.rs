@@ -8,7 +8,8 @@
 use crate::canvas::{Canvas, ClipMask, PixmapCanvas};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
-use std::collections::{HashMap, HashSet, VecDeque};
+use crate::{HashMap, HashSet};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 mod damage;
@@ -274,31 +275,31 @@ impl RenderResourceCache {
         max_bytes: usize,
     ) -> Self {
         Self {
-            entries: HashMap::new(),
-            stopped: HashSet::new(),
+            entries: HashMap::default(),
+            stopped: HashSet::default(),
             order: VecDeque::new(),
             retained_bytes: 0,
             raster_paints: VecDeque::new(),
             raster_paint_bytes: 0,
             max_entries,
             max_bytes,
-            content_image_intrinsics: HashMap::new(),
+            content_image_intrinsics: HashMap::default(),
             content_image_intrinsic_order: VecDeque::new(),
             max_content_image_intrinsics: max_entries.min(DEFAULT_CONTENT_IMAGE_INTRINSIC_ENTRIES),
             #[cfg(test)]
             content_image_layout_retries: 0,
             sync_loading_enabled: true,
             sync_misses: Vec::new(),
-            video_frames: HashMap::new(),
-            video_times: HashMap::new(),
-            sync_miss_keys: HashSet::new(),
+            video_frames: HashMap::default(),
+            video_times: HashMap::default(),
+            sync_miss_keys: HashSet::default(),
             loader: Box::new(loader),
             changed: Vec::new(),
             changed_overflow: false,
-            lazy_loaded: HashSet::new(),
+            lazy_loaded: HashSet::default(),
             lazy_viewport_bottom: 0.0,
             lazy_deferred_top: None,
-            decoded_fonts: HashMap::new(),
+            decoded_fonts: HashMap::default(),
             font_face_rules: None,
         }
     }
@@ -957,7 +958,7 @@ impl RenderResourceCache {
             .iter()
             .map(|(&nid, value)| (nid, value.clone()))
             .collect::<Vec<_>>();
-        let mut seeded = HashSet::with_capacity(remembered.len());
+        let mut seeded = HashSet::with_capacity_and_hasher(remembered.len(), Default::default());
         for (nid, value) in remembered {
             let is_live_image = tree.get_node(nid).is_some_and(|node| {
                 node.as_element()
@@ -1283,7 +1284,7 @@ pub struct PreparedRender {
     base_url: Option<String>,
     has_dynamic_fonts: bool,
     content_size: (f32, f32),
-    viewport_fixed: std::collections::HashSet<obscura_dom::tree::NodeId>,
+    viewport_fixed: crate::HashSet<obscura_dom::tree::NodeId>,
     sticky: crate::StickyLayout,
     scroll_tree: crate::dom::ScrollTree,
     selected_images: HashMap<obscura_dom::tree::NodeId, SelectedImage>,
@@ -1449,7 +1450,7 @@ impl PreparedRender {
         self.content_size
     }
 
-    pub fn viewport_fixed_nodes(&self) -> &std::collections::HashSet<obscura_dom::tree::NodeId> {
+    pub fn viewport_fixed_nodes(&self) -> &crate::HashSet<obscura_dom::tree::NodeId> {
         &self.viewport_fixed
     }
 
@@ -1600,7 +1601,7 @@ impl PreparedRender {
             tree: &DomTree,
             laid: &crate::DomLayout,
             movement: &[(f32, f32)],
-            viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
+            viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
             id: obscura_dom::tree::NodeId,
             inherited: Option<crate::dom::OverflowClip>,
             out: &mut [Option<crate::dom::OverflowClip>],
@@ -2929,7 +2930,7 @@ impl PreparedRender {
             }
             false
         };
-        let mut chain = std::collections::HashSet::new();
+        let mut chain = crate::HashSet::default();
         for mutation in mutations {
             let crate::dom::RetainedStyleMutation::Attribute(attribute) = mutation else {
                 return false;
@@ -3033,7 +3034,7 @@ impl PreparedRender {
 pub(crate) fn non_geometric_computed_style(
     style: &crate::LayoutStyle,
 ) -> HashMap<&'static str, String> {
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
 
     out.insert("display", computed_display(style).to_string());
     out.insert(
@@ -3903,7 +3904,7 @@ fn verify_against_scratch(
     // frame built from scratch: no stale boxes, glyph runs or clips.
     #[cfg(feature = "scene")]
     if difference.is_none() {
-        let no_scroll = HashMap::new();
+        let no_scroll = HashMap::default();
         let frame = |render: &mut PreparedRender, resources: &mut RenderResourceCache| {
             scene::build_scene_prepared(
                 tree,
@@ -4179,7 +4180,7 @@ fn retained_animation_restyle_mutations(
         .filter_map(|(node, style)| {
             (style.animation_name.is_some() && style.animation_has_render_effect).then_some(*node)
         })
-        .collect::<std::collections::HashSet<_>>();
+        .collect::<crate::HashSet<_>>();
     css_nodes.retain(|node| connected(*node));
     let mut mutations = css_nodes
         .into_iter()
@@ -4304,7 +4305,7 @@ fn prepare_dom_internal_unverified(
     let mut deferred_images: HashMap<
         obscura_dom::tree::NodeId,
         (crate::ReplacedIntrinsic, Option<SelectedImage>),
-    > = HashMap::new();
+    > = HashMap::default();
     for nid in lazy_images {
         if let Some(value) = intrinsic.remove(&nid) {
             deferred_images.insert(nid, (value, selected_images.remove(&nid)));
@@ -5257,7 +5258,7 @@ fn paint_laid_dom_scrolled(
     canvas_surfaces: &dyn CanvasSurfaceSource,
     svg_fonts: &Arc<usvg::fontdb::Database>,
     content_size: (f32, f32),
-    viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
+    viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
     sticky: &crate::StickyLayout,
     scroll_tree: &crate::dom::ScrollTree,
     laid: &mut crate::DomLayout,
@@ -5342,24 +5343,24 @@ fn paint_laid_dom_scrolled(
     // their painting is owned by that raster, so they are skipped in both the
     // box/text loop below and the inline-formatting loop after it (an svg
     // `<text>` element must not also paint its glyphs on top of the raster).
-    let mut svg_subtree_skip: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut svg_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> =
+        crate::HashSet::default();
     // Text is painted in a second pass, after the box-order loop. Remember
     // every subtree already painted into an opacity layer so its shaped text
     // is not drawn a second time at full opacity in the outer pass.
-    let mut opacity_subtree_skip: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut opacity_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> =
+        crate::HashSet::default();
     // External sprite symbols, keyed by "url#id", extracted from a fetched
     // sprite file so a `<use href="url#id">` resolves. One sprite backs many
     // icons (a whole logo/icon band), so cache the parsed symbol across every
     // inline svg on the page rather than re-parsing the sprite per icon.
-    let mut sprite_cache: std::collections::HashMap<String, Option<String>> =
-        std::collections::HashMap::new();
+    let mut sprite_cache: crate::HashMap<String, Option<String>> =
+        crate::HashMap::default();
     // An overflow clip is inherited by every descendant until another clip
     // joins the chain. Rasterizing the same full-surface alpha mask per child
     // made clipped long pages scale as surface area times descendant count.
     // Cache immutable masks for this one paint surface and share them by Arc.
-    let mut overflow_mask_cache: OverflowClipMaskCache = HashMap::new();
+    let mut overflow_mask_cache: OverflowClipMaskCache = HashMap::default();
     // Whether any element carries a `transform: translate()`. When none does
     // (the overwhelmingly common case), every node's accumulated offset is
     // zero, so skip the per-node ancestor walk entirely and keep the paint
@@ -5382,12 +5383,12 @@ fn paint_laid_dom_scrolled(
     let mut pos_layers: Vec<(i32, Vec<obscura_dom::tree::NodeId>)> = Vec::new();
     let mut float_layers: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
-    let mut consumed: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut consumed: crate::HashSet<obscura_dom::tree::NodeId> =
+        crate::HashSet::default();
     // Members of z >= 0 layers (Appendix E step 8 and up): the inline
     // content of this context paints before them.
-    let mut positive_members: std::collections::HashSet<obscura_dom::tree::NodeId> =
-        std::collections::HashSet::new();
+    let mut positive_members: crate::HashSet<obscura_dom::tree::NodeId> =
+        crate::HashSet::default();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -5469,20 +5470,20 @@ fn paint_laid_dom_scrolled(
     // that actually materialized a generated box. A reverse DOM-preorder pass
     // propagates each node's paint index to its parent once, deriving subtree
     // endpoints in O(nodes + generated boxes), including reordered z layers.
-    let mut generated_before: std::collections::HashMap<
+    let mut generated_before: crate::HashMap<
         obscura_dom::tree::NodeId,
         Vec<crate::dom::GeneratedBox>,
-    > = std::collections::HashMap::new();
+    > = crate::HashMap::default();
     let mut generated_after_at: Vec<Vec<crate::dom::GeneratedBox>> =
         vec![Vec::new(); paint_order.len()];
     if !laid.generated_boxes.is_empty() {
-        let paint_indices: std::collections::HashMap<obscura_dom::tree::NodeId, usize> =
+        let paint_indices: crate::HashMap<obscura_dom::tree::NodeId, usize> =
             paint_order
                 .iter()
                 .enumerate()
                 .map(|(index, &nid)| (nid, index))
                 .collect();
-        let mut last_index: std::collections::HashMap<obscura_dom::tree::NodeId, usize> =
+        let mut last_index: crate::HashMap<obscura_dom::tree::NodeId, usize> =
             paint_indices.clone();
         let dom_preorder = paint_nodes.clone();
         for nid in dom_preorder.into_iter().rev() {
@@ -7695,11 +7696,11 @@ struct ScrollPaintState<'a> {
     tree: &'a DomTree,
     viewport: (f32, f32),
     scroll: (f32, f32),
-    viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
-    sticky: Arc<std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
-    sticky_clips: Arc<std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
+    viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
+    sticky: Arc<crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
+    sticky_clips: Arc<crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>>,
     viewport_fixed_clips:
-        Arc<std::collections::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>>,
+        Arc<crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>>,
     resolved: Option<&'a ResolvedScrollState>,
     clip_scope_root: Option<obscura_dom::tree::NodeId>,
     surface_extent: Option<(f32, f32)>,
@@ -7710,17 +7711,17 @@ struct ScrollPaintState<'a> {
 fn viewport_fixed_clip_map(
     tree: &DomTree,
     laid: &crate::DomLayout,
-    viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
-    sticky: &std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
-) -> std::collections::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>> {
+    viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
+    sticky: &crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
+) -> crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>> {
     fn walk(
         tree: &DomTree,
         laid: &crate::DomLayout,
-        viewport_fixed: &std::collections::HashSet<obscura_dom::tree::NodeId>,
-        sticky: &std::collections::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
+        viewport_fixed: &crate::HashSet<obscura_dom::tree::NodeId>,
+        sticky: &crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
         id: obscura_dom::tree::NodeId,
         inherited: Option<crate::dom::OverflowClip>,
-        out: &mut std::collections::HashMap<
+        out: &mut crate::HashMap<
             obscura_dom::tree::NodeId,
             Option<crate::dom::OverflowClip>,
         >,
@@ -7752,7 +7753,7 @@ fn viewport_fixed_clip_map(
         }
     }
 
-    let mut out = std::collections::HashMap::with_capacity(viewport_fixed.len());
+    let mut out = crate::HashMap::with_capacity_and_hasher(viewport_fixed.len(), Default::default());
     for &id in viewport_fixed {
         let starts_subtree = crate::dom::rendered_parent(tree, id)
             .is_none_or(|parent| !viewport_fixed.contains(&parent));
@@ -7769,7 +7770,7 @@ impl<'a> ScrollPaintState<'a> {
         viewport: (f32, f32),
         requested: (f32, f32),
         content: (f32, f32),
-        viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
+        viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
         sticky_layout: &crate::StickyLayout,
         scroll_tree: &crate::dom::ScrollTree,
         laid: &crate::DomLayout,
@@ -7806,7 +7807,7 @@ impl<'a> ScrollPaintState<'a> {
             let sticky = Arc::new(if active {
                 sticky_layout.resolved_root_translations(viewport, scroll_tree, scroll)
             } else {
-                std::collections::HashMap::new()
+                crate::HashMap::default()
             });
             let sticky_clips = Arc::new(sticky_layout.clip_translations_from(&sticky));
             let viewport_fixed_clips =
@@ -7832,7 +7833,7 @@ impl<'a> ScrollPaintState<'a> {
     fn from_resolved(
         tree: &'a DomTree,
         viewport: (f32, f32),
-        viewport_fixed: &'a std::collections::HashSet<obscura_dom::tree::NodeId>,
+        viewport_fixed: &'a crate::HashSet<obscura_dom::tree::NodeId>,
         resolved: &'a ResolvedScrollState,
         clip_scope_root: Option<obscura_dom::tree::NodeId>,
         surface_extent: Option<(f32, f32)>,
@@ -7843,9 +7844,9 @@ impl<'a> ScrollPaintState<'a> {
             viewport,
             scroll: resolved.root_offset(),
             viewport_fixed,
-            sticky: Arc::new(std::collections::HashMap::new()),
-            sticky_clips: Arc::new(std::collections::HashMap::new()),
-            viewport_fixed_clips: Arc::new(std::collections::HashMap::new()),
+            sticky: Arc::new(crate::HashMap::default()),
+            sticky_clips: Arc::new(crate::HashMap::default()),
+            viewport_fixed_clips: Arc::new(crate::HashMap::default()),
             resolved: Some(resolved),
             clip_scope_root,
             surface_extent,
@@ -10088,7 +10089,7 @@ fn collect_web_fonts(
     cache: &mut RenderResourceCache,
     dynamic_fonts: &[DynamicFontFace],
 ) -> Vec<crate::inline::WebFont> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::HashSet::default();
     let mut fonts = Vec::new();
 
     // Author style sheets in document order: `<style>` text, and linked
@@ -10208,7 +10209,7 @@ fn collect_web_fonts(
 
     // Bytes already fetched per source, so two @font-face rules sharing a
     // `src` (one file under two families or weights) both register a face.
-    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::new();
+    let mut fetched: HashMap<String, Arc<Vec<u8>>> = HashMap::default();
     for rule in rules {
         if fonts.len() >= MAX_WEB_FONT_FACES {
             break;
@@ -12976,8 +12977,8 @@ fn collect_image_intrinsics(
         VideoPoster(String),
         VideoFrame(String),
     }
-    let mut out = std::collections::HashMap::new();
-    let mut selected = HashMap::new();
+    let mut out = crate::HashMap::default();
+    let mut selected = HashMap::default();
     for nid in crate::dom::rendered_descendants(tree, tree.document()) {
         let source = tree
             .with_node(nid, |node| match node.as_element()?.local.as_ref() {
@@ -13053,17 +13054,17 @@ fn collect_image_intrinsics(
 /// entry was added and layout therefore needs one resource-aware retry.
 fn collect_content_image_intrinsics(
     tree: &DomTree,
-    styles: &std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
-    out: &mut std::collections::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
+    out: &mut crate::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     selected: &mut HashMap<obscura_dom::tree::NodeId, SelectedImage>,
     source_intrinsic: &HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     source_selected: &HashMap<obscura_dom::tree::NodeId, SelectedImage>,
     seeded: &HashSet<obscura_dom::tree::NodeId>,
 ) -> bool {
     let mut changed = false;
-    let mut active = HashSet::new();
+    let mut active = HashSet::default();
     for (&nid, style) in styles {
         if !tree
             .with_node(nid, |node| {
@@ -14364,10 +14365,10 @@ fn serialize_svg(tree: &DomTree, root: obscura_dom::tree::NodeId) -> String {
 fn serialize_svg_styled(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: &std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
-    custom_properties: &std::collections::HashMap<
+    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    custom_properties: &crate::HashMap<
         obscura_dom::tree::NodeId,
-        std::rc::Rc<std::collections::HashMap<String, String>>,
+        std::rc::Rc<crate::HashMap<String, String>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
 ) -> String {
@@ -14408,11 +14409,11 @@ fn serialize_svg_node(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
+        &crate::HashMap<
             obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
+            std::rc::Rc<crate::HashMap<String, String>>,
         >,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
@@ -14440,11 +14441,11 @@ fn serialize_svg_node_impl(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
+        &crate::HashMap<
             obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
+            std::rc::Rc<crate::HashMap<String, String>>,
         >,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
@@ -14506,7 +14507,7 @@ fn serialize_svg_node_impl(
                 continue;
             }
             let value = if styles.is_some() && svg_css_presentation_attribute(aname) {
-                let empty = std::collections::HashMap::new();
+                let empty = crate::HashMap::default();
                 let properties = custom_properties
                     .and_then(|all| all.get(&nid))
                     .map_or(&empty, std::rc::Rc::as_ref);
@@ -14549,7 +14550,7 @@ fn serialize_svg_node_impl(
             declarations.push_str("!important;");
         };
         if let Some(computed) = styles.and_then(|all| all.get(&nid)) {
-            let empty = std::collections::HashMap::new();
+            let empty = crate::HashMap::default();
             let properties = custom_properties
                 .and_then(|all| all.get(&nid))
                 .map_or(&empty, std::rc::Rc::as_ref);
@@ -14771,7 +14772,7 @@ fn svg_css_presentation_attribute(name: &str) -> bool {
 fn resolve_svg_presentation_value<'a>(
     name: &str,
     value: &'a str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> Option<std::borrow::Cow<'a, str>> {
     if !value.contains("var(") {
         return Some(std::borrow::Cow::Borrowed(value));
@@ -14940,17 +14941,17 @@ fn inline_svg_image_hrefs(
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: Option<&std::collections::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &std::collections::HashMap<
+        &crate::HashMap<
             obscura_dom::tree::NodeId,
-            std::rc::Rc<std::collections::HashMap<String, String>>,
+            std::rc::Rc<crate::HashMap<String, String>>,
         >,
     >,
     base_url: Option<&str>,
     markup: &mut String,
     cache: &mut RenderResourceCache,
-    sprite_cache: &mut std::collections::HashMap<String, Option<String>>,
+    sprite_cache: &mut crate::HashMap<String, Option<String>>,
 ) {
     // Distinct external references (full href, url, fragment id), in first-seen
     // order. Dedupe so one symbol referenced by several `<use>` is fetched and
@@ -14995,9 +14996,9 @@ fn inject_external_sprites(
     }
     let mut defs = String::new();
     let mut rewrites: Vec<(String, String)> = Vec::new();
-    let wanted_local: std::collections::HashSet<&str> =
+    let wanted_local: crate::HashSet<&str> =
         local_fragments.iter().map(String::as_str).collect();
-    let mut local_nodes = std::collections::HashMap::new();
+    let mut local_nodes = crate::HashMap::default();
     if !wanted_local.is_empty() {
         for nid in tree.descendants(tree.document()) {
             let Some(node) = tree.get_node(nid) else {
@@ -15044,7 +15045,7 @@ fn inject_external_sprites(
             })
             .clone();
         let Some(symbol) = symbol else { continue };
-        let empty = std::collections::HashMap::new();
+        let empty = crate::HashMap::default();
         let properties = custom_properties
             .and_then(|all| all.get(&root))
             .map_or(&empty, std::rc::Rc::as_ref);
@@ -15076,7 +15077,7 @@ fn inject_external_sprites(
 /// XML-only attributes byte-for-byte.
 fn resolve_svg_markup_presentation_vars(
     markup: &str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> String {
     if !markup.contains("var(") {
         return markup.to_string();
@@ -15122,7 +15123,7 @@ fn svg_markup_tag_end(markup: &str, start: usize) -> Option<usize> {
 
 fn resolve_svg_tag_presentation_vars(
     tag: &str,
-    properties: &std::collections::HashMap<String, String>,
+    properties: &crate::HashMap<String, String>,
 ) -> String {
     let bytes = tag.as_bytes();
     if bytes.len() < 3 || bytes[0] != b'<' || matches!(bytes[1], b'/' | b'!' | b'?') {
@@ -15548,7 +15549,7 @@ mod tests {
             ));
             let mut cache = RenderResourceCache::default();
             let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut cache).unwrap();
-            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
             let under = tree.get_element_by_id("under").unwrap();
             let over = tree.get_element_by_id("over").unwrap();
             for (x, y, expected) in [
@@ -15589,7 +15590,7 @@ mod tests {
                 </style><div id="switch">{children}</div>"#));
             let mut cache = RenderResourceCache::default();
             let prepared = prepare_dom(&tree, (800.0, 600.0), None, &mut cache).unwrap();
-            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+            let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
             let label = tree.query_selector("label").unwrap().unwrap();
             let input = tree.get_element_by_id("control").unwrap();
             assert_eq!(prepared.layout.rects[&label].height, 16.0);
@@ -19043,7 +19044,7 @@ mod tests {
             </body></html>"#,
         );
         let viewport = (100.0, 80.0);
-        let counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::new()));
+        let counts = Arc::new(std::sync::Mutex::new(HashMap::<String, usize>::default()));
         let loader_counts = Arc::clone(&counts);
         let mut resources = RenderResourceCache::with_loader(move |url: &str| {
             *loader_counts
@@ -20316,7 +20317,7 @@ mod tests {
         // The first cascade exposes the style image. Feeding its decoded
         // dimensions back through the ordinary intrinsic map must give the
         // source-less replaced element its 30x20 CSS box.
-        let mut intrinsic = std::collections::HashMap::new();
+        let mut intrinsic = crate::HashMap::default();
         let first = layout_dom_with_web_fonts(&tree, (120.0, 80.0), &intrinsic, &[]);
         let host_id = tree
             .query_selector("#host")
@@ -20345,7 +20346,7 @@ mod tests {
             (0.0, 0.0, 100.0, 40.0)
         );
         let mut cache = RenderResourceCache::default();
-        let mut selected = HashMap::new();
+        let mut selected = HashMap::default();
         assert!(collect_content_image_intrinsics(
             &tree,
             &first.styles,
@@ -20353,9 +20354,9 @@ mod tests {
             &mut cache,
             &mut intrinsic,
             &mut selected,
-            &HashMap::new(),
-            &HashMap::new(),
-            &HashSet::new(),
+            &HashMap::default(),
+            &HashMap::default(),
+            &HashSet::default(),
         ));
         let laid = layout_dom_with_web_fonts(&tree, (120.0, 80.0), &intrinsic, &[]);
         let image_id = tree
@@ -22216,7 +22217,7 @@ mod tests {
         let mut markup = serialize_svg(&tree, svg);
         let before = markup.clone();
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22243,7 +22244,7 @@ mod tests {
         let svg = tree.query_selector("#icon").unwrap().unwrap();
         let mut markup = serialize_svg(&tree, svg);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22280,7 +22281,7 @@ mod tests {
         let mut markup =
             serialize_svg_styled(&tree, svg, &laid.styles, &laid.custom_properties, None);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22317,7 +22318,7 @@ mod tests {
         let mut markup =
             serialize_svg_styled(&tree, svg, &laid.styles, &laid.custom_properties, None);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::from([(
+        let mut sprite_cache = crate::HashMap::from_iter([(
             "icons.svg#badge".to_string(),
             Some(
                 r##"<symbol id="badge" viewBox="0 0 10 10"><rect width="10" height="10" fill="var(--icon-fill, #ff0000)" stroke="var(--missing, #224466)"/><path d="var(--xml-only)"/></symbol>"##
@@ -22359,7 +22360,7 @@ mod tests {
         let svg = tree.query_selector("#icon").unwrap().unwrap();
         let mut markup = serialize_svg(&tree, svg);
         let mut cache = RenderResourceCache::default();
-        let mut sprite_cache = std::collections::HashMap::new();
+        let mut sprite_cache = crate::HashMap::default();
         inject_external_sprites(
             &tree,
             svg,
@@ -22790,7 +22791,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (360.0, 240.0), None, &mut resources).expect("prepared render");
-        let top_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let top_outer = prepared
             .viewport_rect_with_scroll(outer, &top_state)
             .expect("top outer");
@@ -22800,7 +22801,7 @@ mod tests {
         let top = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &top_state)
             .expect("top paint");
 
-        let offsets = HashMap::from([(outer, (9999.0, 9999.0)), (inner, (9999.0, 9999.0))]);
+        let offsets = HashMap::from_iter([(outer, (9999.0, 9999.0)), (inner, (9999.0, 9999.0))]);
         let scrolled_state = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &offsets);
         let outer_metrics = prepared
             .element_scroll_metrics(outer, &scrolled_state)
@@ -22909,7 +22910,7 @@ mod tests {
         let mut prepared =
             prepare_dom(&tree, (480.0, 120.0), None, &mut resources).expect("prepared");
 
-        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         assert_eq!(
             prepared
                 .viewport_rect_with_scroll(plain_sticky, &top)
@@ -22917,7 +22918,7 @@ mod tests {
                 .y,
             40.0,
         );
-        let offsets = HashMap::from([
+        let offsets = HashMap::from_iter([
             (plain, (0.0, 60.0)),
             (padded, (0.0, 80.0)),
             (fixed_scroller, (0.0, 60.0)),
@@ -23055,7 +23056,7 @@ mod tests {
             "clips created inside a viewport-fixed subtree must still apply: {internal_clip_pixel:?}",
         );
 
-        let offsets = HashMap::from([(scroller, (0.0, 60.0))]);
+        let offsets = HashMap::from_iter([(scroller, (0.0, 60.0))]);
         let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &offsets);
         assert!(
             scroll.inherited_clip_for(fixed).is_none(),
@@ -23099,13 +23100,13 @@ mod tests {
         let live = prepared.resolve_scroll_state_for_viewport(
             &tree,
             (0.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             (200.0, 200.0),
         );
         let page = prepared.resolve_scroll_state_for_viewport(
             &tree,
             (0.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             (200.0, 100.0),
         );
 
@@ -23152,7 +23153,7 @@ mod tests {
         assert!(prepared.scroll_container_nodes().any(|node| node == hidden));
         assert!(!prepared.scroll_container_nodes().any(|node| node == clip));
 
-        let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::new());
+        let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::default());
         assert_eq!(
             prepared
                 .viewport_rect_with_scroll(hidden_sticky, &scrolled)
@@ -23194,7 +23195,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (120.0, 100.0), None, &mut resources).expect("prepared");
-        let offsets = HashMap::from([(inner_scroller, (0.0, 40.0))]);
+        let offsets = HashMap::from_iter([(inner_scroller, (0.0, 40.0))]);
         let scrolled = prepared.resolve_scroll_state(&tree, (0.0, 60.0), &offsets);
 
         assert_eq!(
@@ -23250,7 +23251,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (240.0, 100.0), None, &mut resources).expect("prepared");
-        let resolved = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let resolved = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         assert_eq!(prepared.viewport_rect(sticky, (0.0, 0.0)).unwrap().y, 60.0);
         assert_eq!(
             prepared.viewport_rect(fixed_sticky, (0.0, 0.0)).unwrap().y,
@@ -23311,7 +23312,7 @@ mod tests {
         )
         .expect("prepared render");
         assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 100.0), &HashMap::default());
         let fixed = tree.get_element_by_id("fixed").expect("fixed");
         let before_fixed = prepared
             .viewport_rect_with_scroll(fixed, &scroll)
@@ -23408,7 +23409,7 @@ mod tests {
         let mut resources = RenderResourceCache::default();
         let mut prepared = prepare_dom(&tree, (120.0, 220.0), None, &mut resources)
             .expect("prepared print fixture");
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let region = CaptureRegion::new(0.0, 0.0, 120.0, 220.0, 1.0);
 
         let screen_before = screenshot_prepared_region_with_scroll_and_backgrounds(
@@ -23467,7 +23468,7 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (20.0, 20.0), None, &mut resources).expect("prepared render");
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
 
         for invalid in [
             CaptureRegion::new(0.0, 0.0, 0.0, 10.0, 1.0),
@@ -23549,7 +23550,7 @@ mod tests {
             native_raster_scale_supported(&tree, &prepared.layout),
             "solid boxes and shaped text should use direct device-scale paint"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23622,7 +23623,7 @@ mod tests {
             native_raster_scale_supported(&tree, &prepared.layout),
             "direct non-repeating linear/radial gradients should use device-scale paint"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23752,7 +23753,7 @@ mod tests {
             !native_raster_scale_supported(&tree, &prepared.layout),
             "sampled conic gradients must retain the logical-pixel fallback"
         );
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let one_x = paint_prepared_region_with_scroll(
             &tree,
             &mut prepared,
@@ -23936,13 +23937,13 @@ mod tests {
         let mut resources = RenderResourceCache::with_loader(|_url: &str| None);
         let mut prepared =
             prepare_dom(&tree, (120.0, 80.0), None, &mut resources).expect("prepared render");
-        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::new());
+        let top = prepared.resolve_scroll_state(&tree, (0.0, 0.0), &HashMap::default());
         let top_pixmap = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &top)
             .expect("top paint");
         let translated = top_pixmap.pixel(15, 15).expect("translated pixel");
         assert!(translated.red() > 240 && translated.green() < 20);
 
-        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 990.0), &HashMap::new());
+        let scroll = prepared.resolve_scroll_state(&tree, (0.0, 990.0), &HashMap::default());
         let pixmap = paint_prepared_with_scroll(&tree, &mut prepared, &mut resources, &scroll)
             .expect("scrolled paint");
         let fixed = pixmap.pixel(45, 15).expect("fixed pixel");
@@ -23981,11 +23982,11 @@ mod tests {
         timeline.register_waapi(animation(3, detached));
         assert_eq!(
             timeline.waapi_nodes(),
-            std::collections::HashSet::from([connected, detached]),
+            crate::HashSet::from_iter([connected, detached]),
             "the timeline accessor must return the exact deduplicated target set"
         );
 
-        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::new(), &timeline);
+        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::default(), &timeline);
         assert_eq!(
             mutations,
             vec![crate::dom::RetainedStyleMutation::WaapiAnimation { node: connected }],
@@ -24198,7 +24199,7 @@ mod tests {
                 format!("{:?}", oracle.layout.styles[&node]),
             );
         }
-        let element_offsets = HashMap::from([(scroller, (9999.0, 9999.0))]);
+        let element_offsets = HashMap::from_iter([(scroller, (9999.0, 9999.0))]);
         let candidate_scroll = candidate.resolve_scroll_state(&tree, (0.0, 80.0), &element_offsets);
         let oracle_scroll = oracle.resolve_scroll_state(&tree, (0.0, 80.0), &element_offsets);
         assert_eq!(candidate_scroll.root_offset, oracle_scroll.root_offset);
@@ -24235,7 +24236,7 @@ mod tests {
             candidate
                 .sticky
                 .translations(viewport, candidate_scroll.root_offset),
-            HashMap::new(),
+            HashMap::default(),
         );
         let candidate_pixels = paint_prepared_with_scroll(
             &tree,
@@ -24489,7 +24490,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24516,7 +24517,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &redrob_scene_raster::ResourceStore::new(),
-            &HashMap::new(),
+            &HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24590,7 +24591,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24685,7 +24686,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24710,7 +24711,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::new(),
+            &HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24759,7 +24760,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,
@@ -24776,7 +24777,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::new(),
+            &HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24834,7 +24835,7 @@ mod scene_text_tests {
             &mut prepared,
             &mut resources,
             (0.0, 0.0),
-            &HashMap::new(),
+            &HashMap::default(),
             [255, 255, 255, 255],
             &EMPTY_CANVAS_SURFACES,
             1.0,

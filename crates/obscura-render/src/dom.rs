@@ -6,7 +6,7 @@
 //! height. Block and flex structure, plus explicit sizes and box model, are
 //! correct.
 
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 use std::sync::Arc;
 
 use obscura_dom::tree::{DomTree, NodeId};
@@ -541,8 +541,8 @@ fn retain_taffy_tree(
     if !taffy_reuse_enabled() {
         return;
     }
-    let mut measures = HashMap::new();
-    let mut ifc_templates = HashMap::new();
+    let mut measures = HashMap::default();
+    let mut ifc_templates = HashMap::default();
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if let Some(&ctx) = tree.get_node_context(node) {
@@ -1209,7 +1209,7 @@ impl StickyLayout {
             let cumulative = root_only_cumulative_scroll(scroll_tree, scroll);
             return self.resolved_frame_offsets(viewport, scroll_tree, &cumulative);
         }
-        let mut frame_offsets = HashMap::with_capacity(self.frames.len());
+        let mut frame_offsets = HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
         for frame in &self.frames {
             let inherited = frame
                 .parent_sticky
@@ -1291,7 +1291,7 @@ impl StickyLayout {
         scroll_tree: &ScrollTree,
         cumulative_scroll: &[(f32, f32)],
     ) -> HashMap<NodeId, (f32, f32)> {
-        let mut frame_offsets = HashMap::with_capacity(self.frames.len());
+        let mut frame_offsets = HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
         for frame in &self.frames {
             let inherited = frame
                 .parent_sticky
@@ -1634,7 +1634,7 @@ impl DomLayout {
     /// chain, which avoids underflow making a deep fractional-opacity subtree
     /// incorrectly disappear.
     pub(crate) fn refresh_effective_visibility(&mut self, tree: &DomTree) {
-        let mut inherited: HashMap<NodeId, (bool, bool)> = HashMap::new();
+        let mut inherited: HashMap<NodeId, (bool, bool)> = HashMap::default();
         for id in rendered_descendants(tree, tree.document()) {
             let parent_state = rendered_parent(tree, id)
                 .and_then(|parent| inherited.get(&parent).copied())
@@ -1743,8 +1743,8 @@ impl DomLayout {
     /// transformed/filter/contain ancestor remains in the document scrolling
     /// coordinate space instead.
     pub fn viewport_fixed_nodes(&self, tree: &DomTree) -> HashSet<NodeId> {
-        let mut fixed = HashSet::new();
-        let mut has_fixed_cb: HashMap<NodeId, bool> = HashMap::new();
+        let mut fixed = HashSet::default();
+        let mut has_fixed_cb: HashMap<NodeId, bool> = HashMap::default();
 
         for id in rendered_descendants(tree, tree.document()) {
             let parent = rendered_parent(tree, id);
@@ -2129,8 +2129,8 @@ impl DomLayout {
             height: content.1,
         };
         let mut layout = StickyLayout::default();
-        let mut nearest_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::new();
-        let mut inherited_clip_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::new();
+        let mut nearest_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::default();
+        let mut inherited_clip_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::default();
         // Propagate the nearest authored scroll container once in rendered
         // preorder. The boolean distinguishes a supported ScrollTree owner
         // from a real but affine/otherwise unsupported scrolling coordinate
@@ -3750,8 +3750,8 @@ fn fresh_style_ancestors(tree: &DomTree, fresh: &HashSet<NodeId>) -> HashSet<Nod
                 .map_or(parent, |root| root.host),
         )
     };
-    let mut flat = HashSet::new();
-    let mut light = HashSet::new();
+    let mut flat = HashSet::default();
+    let mut light = HashSet::default();
     for &node in fresh {
         let mut current = rendered_parent(tree, node);
         while let Some(parent) = current {
@@ -4153,7 +4153,7 @@ fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::Layo
 
 /// Lay out a DOM tree within `viewport` (width, height) in CSS pixels.
 pub fn layout_dom(tree: &DomTree, viewport: (f32, f32)) -> DomLayout {
-    layout_dom_with_images(tree, viewport, &HashMap::new())
+    layout_dom_with_images(tree, viewport, &HashMap::default())
 }
 
 /// Like [`layout_dom`], but `intrinsic` supplies fetched intrinsic pixel sizes
@@ -4507,7 +4507,7 @@ fn add_relational_tree_invalidation(
     if map.relational_invalidations().is_empty() {
         return true;
     }
-    let mut candidates = HashSet::new();
+    let mut candidates = HashSet::default();
     match *mutation {
         TreeStyleMutation::Insert {
             node, old_parent, ..
@@ -4970,10 +4970,10 @@ fn retained_style_plan_for_sheet(
     mutations: &[RetainedStyleMutation],
     sheet_appended: bool,
 ) -> RetainedStylePlan {
-    let mut dirty = HashSet::new();
-    let mut batched_insert_parents = HashSet::new();
-    let mut checked_empty_parents = HashSet::new();
-    let mut insertion_counts = HashMap::new();
+    let mut dirty = HashSet::default();
+    let mut batched_insert_parents = HashSet::default();
+    let mut checked_empty_parents = HashSet::default();
+    let mut insertion_counts = HashMap::default();
     for mutation in mutations {
         if let RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
             node, new_parent, ..
@@ -5241,7 +5241,7 @@ fn retained_style_plan_for_sheet(
                 && !reaches.contains(crate::css::InvalidationReaches::CONSERVATIVE)
             {
                 let anchors = relational_anchors.get_or_insert_with(|| {
-                    let mut anchors = HashSet::new();
+                    let mut anchors = HashSet::default();
                     add_inserted_relational_anchor_candidates(tree, mutation.node, &mut anchors);
                     anchors
                 });
@@ -5706,7 +5706,7 @@ fn collect_shadow_stylesheets(
     let external = tree.external_stylesheets();
     let mut roots = Vec::new();
     let mut stack = vec![tree.document()];
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     while let Some(node) = stack.pop() {
         if !visited.insert(node) {
             continue;
@@ -5850,9 +5850,9 @@ impl NonGeometricStyleCache {
             sheet,
             viewport,
             quirks,
-            styles: HashMap::new(),
-            custom_properties: HashMap::new(),
-            ancestors: HashMap::new(),
+            styles: HashMap::default(),
+            custom_properties: HashMap::default(),
+            ancestors: HashMap::default(),
             path: Vec::new(),
         }
     }
@@ -5901,14 +5901,14 @@ impl NonGeometricStyleCache {
         }
         self.path.extend_from_slice(&path[common..]);
         let mut matcher = tree.matcher();
-        let mut props = std::rc::Rc::new(HashMap::new());
+        let mut props = std::rc::Rc::new(HashMap::default());
         let mut cell_padding = None;
         let mut dark = false;
         let mut color = None;
         let mut pointer_events = false;
         let mut cursor = crate::Cursor::Auto;
         let mut visibility_hidden = false;
-        let shadow_sheets = HashMap::new();
+        let shadow_sheets = HashMap::default();
         let mut timeline = crate::AnimationTimelineState::default();
         let mut ancestor_display_none = false;
         let mut parent_is_item_container = false;
@@ -6045,7 +6045,7 @@ pub fn accessibility_styles_without_layout(
             ))
         });
     let mut cascade = NonGeometricStyleCache::from_sheet(tree, viewport, sheet);
-    let mut result = HashMap::new();
+    let mut result = HashMap::default();
     for id in tree.descendants(tree.document()) {
         if !tree
             .with_node(id, |node| node.is_element())
@@ -6484,7 +6484,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     // `descendants` is preorder, so every parent depth is available before
     // its children. Keep this O(nodes): walking every ancestor separately
     // makes a deeply nested document quadratic before layout even starts.
-    let mut element_depths = HashMap::new();
+    let mut element_depths = HashMap::default();
     element_depths.insert(tree.document(), 0usize);
     let mut max_dom_depth = 1usize;
     for id in rendered_descendants(tree, tree.document()) {
@@ -6660,9 +6660,9 @@ fn layout_dom_once(
     let mut matcher = tree.matcher();
     let (mut styles, mut custom_properties, fresh_styles) = match retained {
         Some((retained, fresh)) => (retained.styles, retained.custom_properties, Some(fresh)),
-        None => (HashMap::new(), HashMap::new(), None),
+        None => (HashMap::default(), HashMap::default(), None),
     };
-    let root_props = std::rc::Rc::new(HashMap::new());
+    let root_props = std::rc::Rc::new(HashMap::default());
     let mut evaluator =
         snapshot.map(|snapshot| crate::css::ContainerQueryEvaluator::new(tree, snapshot));
     let mut evaluator_ref = evaluator.as_mut();
@@ -6742,7 +6742,7 @@ fn layout_dom_once(
     // The leaf context is the index of a cosmic-text inline formatting
     // context in `engine`; leaves without text carry no context.
     let mut taffy_tree: TaffyTree<usize> = crate::new_taffy_tree();
-    let mut id_map: HashMap<taffy::NodeId, NodeId> = HashMap::new();
+    let mut id_map: HashMap<taffy::NodeId, NodeId> = HashMap::default();
     let mut engine = crate::inline::TextEngine::for_document_layout(fonts, needs_emoji_font);
     let mut ifc_items = IfcRegistry {
         ifc: crate::ifc::IfcStore::new(fonts, needs_emoji_font),
@@ -6757,15 +6757,15 @@ fn layout_dom_once(
             .unwrap_or(false)
     });
 
-    let mut rects = HashMap::new();
-    let mut grid_overflow = HashMap::new();
-    let mut grid_tracks = HashMap::new();
-    let mut used_auto_margins = HashMap::new();
-    let mut fractional_sizes = HashMap::new();
-    let mut fractional_rects = HashMap::new();
-    let mut inline_fragments = HashMap::new();
-    let mut column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>> = HashMap::new();
-    let mut text_runs = HashMap::new();
+    let mut rects = HashMap::default();
+    let mut grid_overflow = HashMap::default();
+    let mut grid_tracks = HashMap::default();
+    let mut used_auto_margins = HashMap::default();
+    let mut fractional_sizes = HashMap::default();
+    let mut fractional_rects = HashMap::default();
+    let mut inline_fragments = HashMap::default();
+    let mut column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>> = HashMap::default();
+    let mut text_runs = HashMap::default();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
     if let Some(root_id) = root {
         // Headless Chromium's classic scrollbar gutter is 15 CSS pixels.
@@ -6954,7 +6954,7 @@ fn layout_dom_once(
         // containing-block chain. Merely retaining `height:Percent` is not
         // sufficient: under an auto-height containing block it computes to
         // auto and must never become a post-layout percentage basis.
-        let mut definite_height_nodes = HashSet::new();
+        let mut definite_height_nodes = HashSet::default();
         phase_marks.push(("pre", std::time::Instant::now()));
         let mut queue = vec![(root_id, root_inh)];
         while let Some((id, mut inh)) = queue.pop() {
@@ -8831,7 +8831,7 @@ fn layout_dom_once(
                         group_end += 1;
                     }
                     let group = &tables[table_index..group_end];
-                    let mut available_widths: HashMap<taffy::NodeId, f32> = HashMap::new();
+                    let mut available_widths: HashMap<taffy::NodeId, f32> = HashMap::default();
                     let needs_layout_snapshot = group.iter().any(|(tnode, dom, _)| {
                         anonymous_tables.contains_key(tnode)
                             || table_style_of(*tnode, *dom).is_some_and(|style| {
@@ -9929,10 +9929,10 @@ fn layout_dom_once(
     sync_positioned_pseudo_percentage_padding(&rects, &mut styles);
 
     phase_marks.push(("rects", std::time::Instant::now()));
-    let mut clip_rects = HashMap::new();
-    let mut translates = HashMap::new();
-    let mut transforms = HashMap::new();
-    let mut projective_transforms = HashMap::new();
+    let mut clip_rects = HashMap::default();
+    let mut translates = HashMap::default();
+    let mut transforms = HashMap::default();
+    let mut projective_transforms = HashMap::default();
     if let Some(root_id) = root {
         let root_font_size = styles
             .get(&root_id)
@@ -10050,7 +10050,7 @@ fn place_inline_content(
     text_runs: &mut HashMap<NodeId, Vec<(Rect, String)>>,
     generated_rects: &mut Vec<Option<Rect>>,
 ) -> HashMap<NodeId, Vec<Rect>> {
-    let mut fragments: HashMap<NodeId, Vec<Rect>> = HashMap::new();
+    let mut fragments: HashMap<NodeId, Vec<Rect>> = HashMap::default();
     let mut pseudo_rects: Vec<(NodeId, GeneratedBoxKind, Rect)> = Vec::new();
     let store = &mut ifc_items.ifc;
     store.by_node.clear();
@@ -10525,7 +10525,7 @@ fn resolve_grid_areas(
                 pad(&mut style.grid_template_rows, &auto_rows, area_rows);
             }
             // name -> (row_start, row_end, col_start, col_end) in 0-based track indices.
-            let mut spans: HashMap<String, (usize, usize, usize, usize)> = HashMap::new();
+            let mut spans: HashMap<String, (usize, usize, usize, usize)> = HashMap::default();
             for (r, row) in areas.iter().enumerate() {
                 for (c, name) in row.iter().enumerate() {
                     if name == "." {
@@ -11069,7 +11069,7 @@ fn collect_fractional_rects(
     // Blink converts CSS lengths to LayoutUnits by truncation (13.9px is
     // 13.890625); the epsilon keeps float noise on exact values.
     let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
-    let mut out = HashMap::new();
+    let mut out = HashMap::default();
     // An explicit stack: (node, parent's absolute unrounded origin).
     let mut stack = vec![(root, initial_cb_x, 0.0f32)];
     while let Some((node, parent_x, parent_y)) = stack.pop() {
@@ -11307,8 +11307,8 @@ fn reparent_inset_positioned_nodes(
         .iter()
         .map(|(&taffy_id, &dom_id)| (dom_id, taffy_id))
         .collect();
-    let mut nearest_abs_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::new();
-    let mut nearest_fixed_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::new();
+    let mut nearest_abs_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::default();
+    let mut nearest_fixed_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::default();
     let mut static_candidates = Vec::new();
 
     for dom_id in rendered_descendants(tree, tree.document()) {
@@ -12241,7 +12241,7 @@ fn apply_multicol_fragmentation(
                 .cmp(&b.pieces.start)
                 .then(b.pieces.end.cmp(&a.pieces.end))
         });
-        let mut line_shifts: HashMap<usize, Vec<(f32, f32)>> = HashMap::new();
+        let mut line_shifts: HashMap<usize, Vec<(f32, f32)>> = HashMap::default();
         for group in &groups {
             if group.pieces.is_empty() || handled[group.pieces.start] {
                 continue;
@@ -12336,7 +12336,7 @@ fn apply_table_cell_baseline_alignment(
 ) -> bool {
     // First-line baseline of an IFC, relative to its Taffy node's border box.
     // The IFCs are lent to the active layout while it runs.
-    let mut ifc_baseline: HashMap<taffy::NodeId, f32> = HashMap::new();
+    let mut ifc_baseline: HashMap<taffy::NodeId, f32> = HashMap::default();
     for &index in &ifc_items.ifc_nodes {
         let found = crate::ifc::with_active_ifc(index, |ifc| {
             let node = ifc.node?;
@@ -12389,7 +12389,7 @@ fn apply_table_cell_baseline_alignment(
         }
         None
     }
-    let mut rows: HashMap<(taffy::NodeId, i16), Vec<(taffy::NodeId, f32)>> = HashMap::new();
+    let mut rows: HashMap<(taffy::NodeId, i16), Vec<(taffy::NodeId, f32)>> = HashMap::default();
     for (&node, &dom_id) in id_map {
         let Some(style) = styles.get(&dom_id) else {
             continue;
@@ -13362,7 +13362,7 @@ fn synthesize_column_rects(
         let start_x = |index: usize| {
             x0 + widths[..index.min(widths.len())].iter().sum::<f32>() + gap * index as f32
         };
-        let mut groups: HashMap<NodeId, Rect> = HashMap::new();
+        let mut groups: HashMap<NodeId, Rect> = HashMap::default();
         for &(element, group, start, span) in columns {
             if start >= widths.len() || span == 0 {
                 continue;
@@ -13412,7 +13412,7 @@ fn synthesize_row_rects(
 ) {
     let mut rows = Vec::new();
     let mut sections = Vec::new();
-    let mut table_inline: HashMap<NodeId, Rect> = HashMap::new();
+    let mut table_inline: HashMap<NodeId, Rect> = HashMap::default();
     for id in rendered_descendants(tree, tree.document()) {
         let local = match tree
             .borrow_node(id)
@@ -13576,7 +13576,7 @@ fn synthesize_row_rects(
                 height: 0.0,
             })
         };
-    let mut previous_in_table: HashMap<NodeId, Rect> = HashMap::new();
+    let mut previous_in_table: HashMap<NodeId, Rect> = HashMap::default();
     for &id in &rows {
         let table = table_of(id);
         if !rects.contains_key(&id) {
@@ -13590,7 +13590,7 @@ fn synthesize_row_rects(
         }
     }
 
-    let mut previous_section: HashMap<NodeId, Rect> = HashMap::new();
+    let mut previous_section: HashMap<NodeId, Rect> = HashMap::default();
     for id in sections {
         let table = table_of(id);
         if rects.contains_key(&id) {
@@ -14328,7 +14328,7 @@ fn collect_css_table(
         real: Vec::new(),
         captions: Vec::new(),
         groups: Vec::new(),
-        anonymous_cells: HashMap::new(),
+        anonymous_cells: HashMap::default(),
     };
     // A row's cells; any other box inside a row goes into an anonymous cell.
     let row_cells = |table: &mut CssTable, row: NodeId| -> Option<Vec<NodeId>> {
@@ -14793,7 +14793,7 @@ fn resolve_collapsed_table_borders(
             row[c_end] = row[c_end].max(b.right);
         }
     }
-    let mut cells = HashMap::new();
+    let mut cells = HashMap::default();
     for &(cell, r, c, rs, cs) in placed {
         let (r_end, c_end) = clip(r, c, rs, cs);
         let max_h = |row: usize| {
@@ -14977,7 +14977,7 @@ fn build_table_box(
     let mut row_real: Vec<bool> = Vec::new();
     let mut css_captions: Vec<NodeId> = Vec::new();
     let mut css_groups: Vec<(NodeId, std::ops::Range<usize>)> = Vec::new();
-    let mut anonymous_cells: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    let mut anonymous_cells: HashMap<NodeId, Vec<NodeId>> = HashMap::default();
     if native_html_table {
         collect_table_rows(tree, id, styles, &mut rows);
         if rows.is_empty() {
@@ -15036,7 +15036,7 @@ fn build_table_box(
             })
             .unwrap_or(1)
     };
-    let mut occupied: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+    let mut occupied: crate::HashSet<(usize, usize)> = crate::HashSet::default();
     let mut placed: Vec<(NodeId, usize, usize, usize, usize)> = Vec::new();
     let mut ncols = 0usize;
     for (r, &(_, group_end)) in rows.iter().enumerate() {
@@ -16522,7 +16522,7 @@ where
         .filter(|entry| matches!(entry.source, DeferredCyclicInlineSource::Expression(_)))
         .map(|entry| entry.node)
         .collect();
-    let mut rank_cache = HashMap::<NodeId, usize>::new();
+    let mut rank_cache = HashMap::<NodeId, usize>::default();
     let mut functional: Vec<(usize, &DeferredCyclicInlineSize)> = deferred
         .iter()
         .filter(|entry| matches!(entry.source, DeferredCyclicInlineSource::Expression(_)))
@@ -17959,7 +17959,7 @@ mod tests {
             </div>"#,
         );
         let laid = layout_dom(&tree, (400.0, 400.0));
-        let scroll = laid.scroll_tree(&tree, (400.0, 400.0), (400.0, 400.0), &HashSet::new());
+        let scroll = laid.scroll_tree(&tree, (400.0, 400.0), (400.0, 400.0), &HashSet::default());
         let grid = tree.get_element_by_id("grid").unwrap();
         let clipped = tree.get_element_by_id("clipped").unwrap();
         assert_eq!(scroll.node_content_size[grid.index()], Some((200.0, 300.0)));
@@ -17991,7 +17991,7 @@ mod tests {
             let grid = tree.get_element_by_id("grid").unwrap();
             let laid = layout_dom(&tree, (100.0, 100.0));
             let root_size = laid.scrolling_content_size(&tree, (100.0, 100.0));
-            let scroll = laid.scroll_tree(&tree, (100.0, 100.0), root_size, &HashSet::new());
+            let scroll = laid.scroll_tree(&tree, (100.0, 100.0), root_size, &HashSet::default());
             assert_eq!(
                 scroll.node_content_size[grid.index()],
                 Some((content, content)),
@@ -18712,7 +18712,7 @@ mod tests {
             </body></html>"#,
         );
         let (laid, telemetry) =
-            layout_dom_with_web_fonts_measured(&tree, (1280.0, 720.0), &HashMap::new(), &[]);
+            layout_dom_with_web_fonts_measured(&tree, (1280.0, 720.0), &HashMap::default(), &[]);
         let container = tree.get_element_by_id("container").unwrap();
         let target = tree.get_element_by_id("target").unwrap();
         assert!((laid.rects[&container].width - 500.0).abs() < 0.1);
@@ -19651,7 +19651,7 @@ mod tests {
             <div id="container"><div id="child"></div></div>"#,
         );
         let (laid, telemetry) =
-            layout_dom_with_web_fonts_measured(&tree, (600.0, 200.0), &HashMap::new(), &[]);
+            layout_dom_with_web_fonts_measured(&tree, (600.0, 200.0), &HashMap::default(), &[]);
         let container = laid.rects[&tree.get_element_by_id("container").unwrap()];
         let child = tree.get_element_by_id("child").unwrap();
         assert!(container.width.abs() < 0.01, "{container:?}");
@@ -19679,7 +19679,7 @@ mod tests {
         let (laid, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (600.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             Some(2),
             None,
@@ -19716,7 +19716,7 @@ mod tests {
         }
         let tree = parse_html(&format!("<style>{css}</style>{body}"));
         let (laid, telemetry) =
-            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::new(), &[]);
+            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::default(), &[]);
         let target = tree.get_element_by_id("target").unwrap();
         assert_eq!(laid.styles[&target].width, crate::Dimension::Px(77.0));
         assert!(
@@ -19737,7 +19737,7 @@ mod tests {
                <body><div id="target"></div></body></html>"#,
         );
         let (_, telemetry) =
-            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::new(), &[]);
+            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::default(), &[]);
         assert_eq!(
             telemetry,
             ContainerLayoutTelemetry {
@@ -19760,7 +19760,7 @@ mod tests {
             </style></head><body><div id="target"></div></body></html>"#,
         );
         let (laid, telemetry) =
-            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::new(), &[]);
+            layout_dom_with_web_fonts_measured(&tree, (800.0, 600.0), &HashMap::default(), &[]);
         let target = tree.get_element_by_id("target").unwrap();
         assert_eq!(laid.styles[&target].width, crate::Dimension::Px(25.0));
         assert_eq!(
@@ -19799,7 +19799,7 @@ mod tests {
             let (mut initial, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 (400.0, 300.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -19827,7 +19827,7 @@ mod tests {
             let (mut active, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 (400.0, 300.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -19867,7 +19867,7 @@ mod tests {
             let (inactive, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 (400.0, 300.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -19919,7 +19919,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (300.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -19965,7 +19965,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (300.0, 200.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20038,7 +20038,7 @@ mod tests {
         else {
             panic!("WAAPI target damage must remain retainable")
         };
-        assert_eq!(dirty, HashSet::from([target]));
+        assert_eq!(dirty, HashSet::from_iter([target]));
         assert!(has_animation_damage);
     }
 
@@ -20069,7 +20069,7 @@ mod tests {
         let (mut initial, _) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20086,7 +20086,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20100,7 +20100,7 @@ mod tests {
         let (full, _) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20153,7 +20153,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (500.0, 300.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20185,7 +20185,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (500.0, 300.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20223,7 +20223,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (500.0, 300.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20237,7 +20237,7 @@ mod tests {
         let (_, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (500.0, 300.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20288,7 +20288,7 @@ mod tests {
             let _ = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 viewport,
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -20345,7 +20345,7 @@ mod tests {
             let _ = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 viewport,
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -20412,7 +20412,7 @@ mod tests {
         let _ = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             viewport,
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20459,7 +20459,7 @@ mod tests {
             let _ = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 viewport,
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -20523,7 +20523,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20537,7 +20537,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20618,7 +20618,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (320.0, 240.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20636,7 +20636,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (320.0, 240.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -20960,7 +20960,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -20974,7 +20974,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -21027,7 +21027,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(cache),
@@ -21089,7 +21089,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21120,7 +21120,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21152,7 +21152,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21191,7 +21191,7 @@ mod tests {
             let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21226,7 +21226,7 @@ mod tests {
             let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21255,7 +21255,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21300,7 +21300,7 @@ mod tests {
             let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21338,7 +21338,7 @@ mod tests {
             let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21371,7 +21371,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21403,7 +21403,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21432,7 +21432,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21477,7 +21477,7 @@ mod tests {
             let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21507,7 +21507,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21539,7 +21539,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21569,7 +21569,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21611,7 +21611,7 @@ mod tests {
             let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21651,7 +21651,7 @@ mod tests {
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -21701,7 +21701,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21736,7 +21736,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21769,7 +21769,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21810,7 +21810,7 @@ mod tests {
             let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 &mut cache,
             );
@@ -21859,7 +21859,7 @@ mod tests {
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 (360.0, 260.0),
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -21908,7 +21908,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -21971,7 +21971,7 @@ mod tests {
         let initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (360.0, 260.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -22017,7 +22017,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -22029,7 +22029,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -22066,7 +22066,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -22078,7 +22078,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -22121,7 +22121,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -22133,7 +22133,7 @@ mod tests {
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
             (800.0, 600.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             None,
             Some(&mut cache),
@@ -22613,7 +22613,7 @@ mod tests {
                <main id="shell"><div id="item"><img id="art" src="hero.png"></div></main>"#,
         );
         let art = tree.get_element_by_id("art").unwrap();
-        let mut intrinsic = HashMap::new();
+        let mut intrinsic = HashMap::default();
         intrinsic.insert(art, (100.0, 50.0));
         let laid = layout_dom_with_images(&tree, (800.0, 300.0), &intrinsic);
         let node = |id: &str| tree.get_element_by_id(id).unwrap();
@@ -22648,7 +22648,7 @@ mod tests {
                <div class=c style="position:relative"><a style="position:absolute;display:block;top:0;bottom:0;width:500px"><yt-image><img id=d src=a.png></yt-image></a></div>
                <div class=c><span><div id=e style="height:100%">x</div></span></div>"#,
         );
-        let mut intrinsic = HashMap::new();
+        let mut intrinsic = HashMap::default();
         for id in ["a", "b", "c", "d"] {
             intrinsic.insert(tree.get_element_by_id(id).unwrap(), (720.0, 404.0));
         }
@@ -22728,7 +22728,7 @@ mod tests {
                <span style="display:inline-block;width:36px;height:36px"><img id=img style="display:block;width:100%;height:100%" src=a.png></span>
                </div><div style="flex:1;height:20px"></div></div>"#,
         );
-        let mut intrinsic = HashMap::new();
+        let mut intrinsic = HashMap::default();
         intrinsic.insert(tree.get_element_by_id("img").unwrap(), (88.0, 88.0));
         let laid = layout_dom_with_images(&tree, (1280.0, 800.0), &intrinsic);
         let rect = |id: &str| laid.rects[&tree.get_element_by_id(id).unwrap()];
@@ -22870,7 +22870,7 @@ mod tests {
         let mut initial = layout_dom_with_web_fonts_and_stylesheet_cache(
             &tree,
             viewport,
-            &HashMap::new(),
+            &HashMap::default(),
             &[],
             &mut cache,
         );
@@ -22890,7 +22890,7 @@ mod tests {
             let (incremental, _) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
                 viewport,
-                &HashMap::new(),
+                &HashMap::default(),
                 &[],
                 None,
                 Some(&mut cache),
@@ -24050,7 +24050,7 @@ mod tests {
                  <p><img id=a style='padding-right:5px'> text</p>"
             ));
             let a = tree.get_element_by_id("a").unwrap();
-            let intrinsic = HashMap::from([(a, (13.0, 14.0))]);
+            let intrinsic = HashMap::from_iter([(a, (13.0, 14.0))]);
             let laid = layout_dom_with_images(&tree, (800.0, 600.0), &intrinsic);
             let rect = laid.rects[&a];
             assert_eq!((rect.width, rect.height), (18.0, 14.0), "{box_sizing}");
@@ -24482,7 +24482,7 @@ mod tests {
         let loaded = layout_dom_with_web_fonts(
             &tree,
             (500.0, 150.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[crate::inline::WebFont {
                 data: std::sync::Arc::new(
                     include_bytes!("../assets/liberation-serif.ttf").to_vec(),
@@ -24535,7 +24535,7 @@ mod tests {
         let loaded = layout_dom_with_web_fonts(
             &tree,
             (500.0, 150.0),
-            &HashMap::new(),
+            &HashMap::default(),
             &[crate::inline::WebFont {
                 data: std::sync::Arc::new(
                     include_bytes!("../assets/liberation-serif.ttf").to_vec(),

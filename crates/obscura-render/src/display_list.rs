@@ -14,7 +14,7 @@
 //! intermediate image there.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use crate::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
@@ -620,13 +620,13 @@ impl RecordingCanvas {
         Self {
             frames: Vec::new(),
             images: Vec::new(),
-            image_ids: HashMap::new(),
-            masks: HashMap::new(),
+            image_ids: HashMap::default(),
+            masks: HashMap::default(),
             next_version: 0,
             scratch: None,
             scene_images: Vec::new(),
-            scene_image_ids: HashMap::new(),
-            mask_sizes: HashMap::new(),
+            scene_image_ids: HashMap::default(),
+            mask_sizes: HashMap::default(),
         }
     }
 
@@ -1436,7 +1436,7 @@ pub(crate) fn clip_shape_of(path: &Path, fill_rule: FillRule, transform: Transfo
 thread_local! {
     static SCENE: Cell<bool> = const { Cell::new(false) };
     static CURRENT_NODE: Cell<u64> = const { Cell::new(0) };
-    static REFERENCES: RefCell<HashMap<usize, Reference>> = RefCell::new(HashMap::new());
+    static REFERENCES: RefCell<HashMap<usize, Reference>> = RefCell::new(HashMap::default());
     static SCENE_GENERATION: Cell<u64> = const { Cell::new(0) };
     static SCENE_RASTER_SCALE: Cell<f32> = const { Cell::new(1.0) };
     static SCENE_IMAGE_CACHE: RefCell<SceneImageCache> = RefCell::new(SceneImageCache::default());

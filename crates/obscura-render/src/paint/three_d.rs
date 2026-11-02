@@ -394,8 +394,8 @@ pub(crate) fn draw_projective(
 
 thread_local! {
     /// Subtrees the current paint pass leaves to other 3D planes.
-    static EXCLUDED: std::cell::RefCell<std::collections::HashSet<NodeId>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static EXCLUDED: std::cell::RefCell<crate::HashSet<NodeId>> =
+        std::cell::RefCell::new(crate::HashSet::default());
 }
 
 pub(crate) fn is_excluded(id: NodeId) -> bool {

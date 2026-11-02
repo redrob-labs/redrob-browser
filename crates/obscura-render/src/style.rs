@@ -5357,8 +5357,8 @@ fn expand_track_token(
     *line += 1;
 }
 
-pub(crate) fn build_line_map(pairs: Vec<(String, i16)>) -> std::collections::HashMap<String, i16> {
-    let mut m = std::collections::HashMap::new();
+pub(crate) fn build_line_map(pairs: Vec<(String, i16)>) -> crate::HashMap<String, i16> {
+    let mut m = crate::HashMap::default();
     for (name, line) in pairs {
         m.entry(name).or_insert(line);
     }

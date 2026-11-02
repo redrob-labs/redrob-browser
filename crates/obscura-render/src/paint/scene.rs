@@ -15,7 +15,7 @@
 //! scroll (`overflow: hidden`) stays painted at its live offset.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -335,7 +335,7 @@ impl PreparedRender {
         let mut axes = vec![(false, false); containers.len()];
         compositor[0] = true;
         axes[0] = self.root_user_axes(tree);
-        let mut unclipped = HashSet::new();
+        let mut unclipped = HashSet::default();
         for (index, container) in containers.iter().enumerate().skip(1) {
             let Some(node) = container.node else {
                 continue;
@@ -412,7 +412,7 @@ impl PreparedRender {
         }
 
         let mut inherited_clips = vec![None; node_len];
-        let mut sticky_clips = HashMap::new();
+        let mut sticky_clips = HashMap::default();
         #[allow(clippy::too_many_arguments)]
         fn resolve_clips(
             tree: &DomTree,
@@ -732,20 +732,20 @@ impl<'a> Builder<'a> {
                 },
                 root_scroll,
             ],
-            by_key: HashMap::new(),
-            box_spatial: HashMap::new(),
-            tag_spatial: HashMap::new(),
-            boundaries: HashMap::new(),
+            by_key: HashMap::default(),
+            box_spatial: HashMap::default(),
+            tag_spatial: HashMap::default(),
+            boundaries: HashMap::default(),
             items: Vec::new(),
             hits: Vec::new(),
             refs: Vec::new(),
             clip_counts: Vec::new(),
             active_boundary: Vec::new(),
-            used_images: HashSet::new(),
+            used_images: HashSet::default(),
             extra_images: Vec::new(),
-            used_fonts: HashSet::new(),
+            used_fonts: HashSet::default(),
             scroll_nodes: vec![(0, 1)],
-            link_cache: HashMap::new(),
+            link_cache: HashMap::default(),
         }
     }
 

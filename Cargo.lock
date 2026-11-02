@@ -4601,6 +4601,7 @@ dependencies = [
  "avif-parse",
  "base64 0.22.1",
  "cssparser",
+ "foldhash 0.2.0",
  "fontique",
  "gstreamer",
  "gstreamer-app",

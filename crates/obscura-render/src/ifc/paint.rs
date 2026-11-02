@@ -1,7 +1,7 @@
 //! Painting inline formatting contexts: Parley glyph runs rasterized with
 //! swash into the CPU pixmap, or recorded as scene glyph runs.
 
-use std::collections::HashMap;
+use crate::HashMap;
 use std::hash::{Hash, Hasher};
 
 use obscura_dom::tree::NodeId;
@@ -826,7 +826,7 @@ impl Ifc {
             bottom >= 0.0 && top <= ph as f32
         };
         // Gradient bounds per clip-text fill.
-        let mut fill_bounds: HashMap<u32, (f32, f32, f32, f32)> = HashMap::new();
+        let mut fill_bounds: HashMap<u32, (f32, f32, f32, f32)> = HashMap::default();
         for run in &runs {
             if let Some(fill) = self.paints.get(run.paint).and_then(|paint| paint.clip_fill) {
                 let bounds = (run.x0, run.line_top, run.x1, run.line_bottom);

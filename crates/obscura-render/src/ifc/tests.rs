@@ -4,7 +4,7 @@
 //! heights from getBoundingClientRect, faces from comparing advance widths.
 //! They replace the cosmic-text engine tests of the same names.
 
-use std::collections::HashMap;
+use crate::HashMap;
 use std::sync::Arc;
 
 use obscura_dom::tree::{DomTree, NodeId};
@@ -28,7 +28,7 @@ struct RunFace {
 fn layout(html: &str, fonts: &[WebFont]) -> (DomTree, DomLayout) {
     let tree = obscura_dom::parse_html(html);
     let laid =
-        crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &HashMap::new(), fonts);
+        crate::dom::layout_dom_with_web_fonts(&tree, (1280.0, 800.0), &HashMap::default(), fonts);
     (tree, laid)
 }
 
@@ -816,7 +816,7 @@ fn shrink_to_fit_treats_percentage_atomic_widths_as_auto() {
          <div id=d style='position:absolute;text-align:center'>\
          <span id=s><img id=i src=a.png style='width:30%'></span></div></div>",
     );
-    let mut intrinsic = HashMap::new();
+    let mut intrinsic = HashMap::default();
     intrinsic.insert(
         element(&tree, "i"),
         crate::ReplacedIntrinsic::from_dimensions(2400.0, 538.0),
@@ -889,7 +889,7 @@ fn percentage_images_in_shrink_to_fit_boxes_resolve_against_the_used_width() {
          <div style='display:flex;width:810px'><div id=a><img id=ia src=a.png style='width:95%;height:220px'></div></div>\
          <div id=f style='float:left'><img id=ie src=a.png style='width:95%'></div>",
     );
-    let mut intrinsic = HashMap::new();
+    let mut intrinsic = HashMap::default();
     for id in ["ia", "ie"] {
         intrinsic.insert(
             element(&tree, id),
@@ -997,7 +997,7 @@ fn block_level_images_apply_their_ratio_to_the_content_box() {
          <img id=i src=a.png width=420 height=868 \
          style='display:block;width:120px;height:auto;box-sizing:border-box;border:6px solid'></div>",
     );
-    let mut intrinsic = HashMap::new();
+    let mut intrinsic = HashMap::default();
     intrinsic.insert(
         element(&tree, "i"),
         crate::ReplacedIntrinsic::from_dimensions(420.0, 868.0),
