@@ -13,7 +13,9 @@ use crate::cdp::Event;
 use crate::cef::keys::Shortcut;
 use crate::cef::Sink;
 
-/// Chrome's command ids (`include/cef_command_ids.h`).
+/// Chrome's command ids (`include/cef_command_ids.h`), the ones the window
+/// names; not every one has a caller in every build.
+#[allow(dead_code)]
 pub mod id {
     pub const BACK: i32 = 33000;
     pub const FORWARD: i32 = 33001;

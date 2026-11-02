@@ -60,8 +60,13 @@ wrap_app! {
             // (chrome.rs DISTILL_PAGE).
             switch("enable-dom-distiller");
             // Middle-click autoscroll, as Chrome on Windows has it; Chromium
-            // turns it on there only.
-            value("enable-blink-features", "MiddleClickAutoscroll");
+            // turns it on there only. Web Bluetooth on Linux too: Chrome has
+            // it on everywhere else, and its device chooser works here.
+            if cfg!(target_os = "linux") {
+                value("enable-blink-features", "MiddleClickAutoscroll,WebBluetooth");
+            } else {
+                value("enable-blink-features", "MiddleClickAutoscroll");
+            }
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {

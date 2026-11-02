@@ -431,6 +431,21 @@ impl SiteSettings {
             .ok()
     }
 
+    /// Every choice saved for `origin` whose key starts with `prefix`.
+    pub fn entries(&self, origin: &str, prefix: &str) -> Vec<(String, String)> {
+        let Ok(db) = self.db.lock() else {
+            return Vec::new();
+        };
+        let Ok(mut q) = db.prepare(
+            "SELECT key, value FROM site_settings WHERE origin = ?1 AND substr(key, 1, length(?2)) = ?2 ORDER BY key",
+        ) else {
+            return Vec::new();
+        };
+        q.query_map(params![origin, prefix], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+    }
+
     /// Save `value`, or forget the choice when it is None.
     pub fn set(&self, origin: &str, key: &str, value: Option<&str>) {
         let Ok(db) = self.db.lock() else {

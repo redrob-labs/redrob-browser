@@ -90,6 +90,43 @@ impl Kind {
         format!("permission.{name}")
     }
 
+    /// The kind saved under `key` ([`Kind::key`]).
+    pub fn from_key(key: &str) -> Option<Kind> {
+        const KINDS: [Kind; 24] = [
+            Kind::Camera,
+            Kind::Microphone,
+            Kind::Screen,
+            Kind::Location,
+            Kind::Notifications,
+            Kind::Clipboard,
+            Kind::Midi,
+            Kind::Downloads,
+            Kind::Storage,
+            Kind::Fonts,
+            Kind::Windows,
+            Kind::Idle,
+            Kind::Protocols,
+            Kind::Files,
+            Kind::Keyboard,
+            Kind::Pointer,
+            Kind::LocalNetwork,
+            Kind::Sensors,
+            Kind::ProtectedMedia,
+            Kind::Xr,
+            Kind::Identity,
+            Kind::Install,
+            Kind::CapturedSurface,
+            Kind::Other(0),
+        ];
+        if let Some(bit) = key
+            .strip_prefix("permission.other.")
+            .and_then(|b| b.parse().ok())
+        {
+            return Some(Kind::Other(bit));
+        }
+        KINDS.into_iter().find(|k| k.key() == key)
+    }
+
     /// What the prompt says the site wants to do (English; ui.rs translates).
     pub fn label(self) -> &'static str {
         match self {

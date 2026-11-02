@@ -100,6 +100,11 @@ impl Sink {
         }
     }
 
+    /// Have the window run its loop (work the engine queued for itself).
+    pub fn wake_window(&self) {
+        (self.wake)(None);
+    }
+
     /// Report an event that belongs to no tab (downloads use tab 0).
     #[allow(dead_code)]
     pub fn send_global(&self, event: Event) {
@@ -489,6 +494,12 @@ pub fn take_devtools() -> Option<DevTools> {
         DevTools::Port(0) => None,
         _ => d.take(),
     }
+}
+
+/// The profile's Chromium folder (its extensions, preferences); `None` for
+/// an incognito window, which keeps nothing.
+pub(crate) fn profile_dir() -> Option<PathBuf> {
+    CACHE.get().cloned().flatten()
 }
 
 /// The request context for the window's tabs: the profile's cookies,

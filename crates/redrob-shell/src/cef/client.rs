@@ -29,6 +29,12 @@ use crate::model::TabId;
 /// above the ones the window hands out.
 static NEXT_POPUP: AtomicU64 = AtomicU64::new(1 << 40);
 
+/// A tab id of the same kind for a page the window opens over a tab (an
+/// extension's popup).
+pub fn next_popup_tab() -> TabId {
+    NEXT_POPUP.fetch_add(1, Ordering::SeqCst)
+}
+
 /// What every handler of one tab shares.
 #[derive(Clone)]
 pub struct TabCtx {
@@ -63,6 +69,22 @@ thread_local! {
     /// Where each tab's page sits (the engine keeps it current), so a
     /// page a tab opens is born in the same window.
     static PLACES: RefCell<HashMap<TabId, Place>> = RefCell::new(HashMap::new());
+    /// Pages that asked for a size of their own (`set_auto_resize_enabled`),
+    /// in points.
+    static RESIZED: RefCell<Vec<(TabId, i32, i32)>> = const { RefCell::new(Vec::new()) };
+    /// Pages the DevTools debugger paused (`Debugger.paused`).
+    static PAUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Pages paused in the debugger since the last call (an extension popup
+/// before its first script, cdp.rs).
+pub fn take_paused() -> Vec<TabId> {
+    PAUSED.with_borrow_mut(std::mem::take)
+}
+
+/// Sizes pages asked for since the last call (cef/handlers/extensions.rs).
+pub fn take_resized() -> Vec<(TabId, i32, i32)> {
+    RESIZED.with_borrow_mut(std::mem::take)
 }
 
 /// Where `tab`'s page was made or last placed.
@@ -253,6 +275,17 @@ wrap_display_handler! {
             }
         }
 
+        fn on_auto_resize(&self, _browser: Option<&mut Browser>, new_size: Option<&cef::Size>) -> ::std::os::raw::c_int {
+            // Only an extension's popup asks (cdp.rs): it is as big as what
+            // it draws, as in Chrome.
+            if let Some(s) = new_size {
+                let tab = self.ctx.tab;
+                RESIZED.with_borrow_mut(|r| r.push((tab, s.width, s.height)));
+                self.ctx.sink.wake_window();
+            }
+            1
+        }
+
         fn on_status_message(&self, _browser: Option<&mut Browser>, value: Option<&CefString>) {
             // The link under the pointer, for the window's status bubble.
             let v = text(value);
@@ -435,6 +468,30 @@ pub fn run_replies() -> bool {
     any
 }
 
+/// [`devtools`] in a session `browser`'s page attached to (a worker of an
+/// extension, cef/handlers/extensions.rs).
+pub fn devtools_in(
+    browser: &Browser,
+    session: &str,
+    method: &str,
+    params: Value,
+    reply: impl FnOnce(bool, Value) + 'static,
+) {
+    let Some(host) = browser.host() else {
+        reply(false, Value::Null);
+        return;
+    };
+    let id = NEXT_MESSAGE.fetch_add(1, Ordering::SeqCst);
+    let message =
+        json!({ "id": id, "sessionId": session, "method": method, "params": params }).to_string();
+    PENDING.with_borrow_mut(|p| p.insert(id, Box::new(reply)));
+    if host.send_dev_tools_message(Some(message.as_bytes())) != 1 {
+        if let Some(r) = PENDING.with_borrow_mut(|p| p.remove(&id)) {
+            r(false, Value::Null);
+        }
+    }
+}
+
 /// Fire and forget.
 pub fn devtools_send(browser: &Browser, method: &str, params: Value) {
     devtools(browser, method, params, |_, _| {});
@@ -491,6 +548,10 @@ wrap_dev_tools_message_observer! {
                             .unwrap_or_default();
                         sink.send_tab(tab, Event::Navigated(url.to_string()));
                     }
+                }
+                "Debugger.paused" => {
+                    PAUSED.with_borrow_mut(|p| p.push(tab));
+                    sink.wake_window();
                 }
                 "Page.navigatedWithinDocument" => {
                     if let Some(url) = p["url"].as_str() {

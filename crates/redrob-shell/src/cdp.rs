@@ -103,6 +103,21 @@ pub enum Op {
     /// Ctrl +, Ctrl -, Ctrl 0. The level is remembered for the site.
     Zoom(crate::cef::handlers::zoom::Step),
     Print,
+    /// Run extension `id`'s toolbar action on this tab's page: its popup
+    /// page (`popup`) opens over the page under `anchor`, the icon's
+    /// rectangle in physical pixels of the window; without one its
+    /// `onClicked` listeners run (cef/handlers/extensions.rs).
+    Extension {
+        id: String,
+        popup: Option<String>,
+        anchor: [i32; 4],
+    },
+    /// Close the extension popup over this tab, if one is open.
+    ClosePopup,
+    /// What the page info bubble shows: answered with `Event::SiteInfo`.
+    SiteInfo,
+    /// Delete the cookies and stored data of this site (`origin`).
+    ClearSiteData(String),
 }
 
 /// The browser window a command came from. A tab belongs to the window that
@@ -211,6 +226,11 @@ pub enum Event {
     TakeFocus,
     /// The link under the pointer, for the status bubble.
     Status(Option<String>),
+    /// The page's connection and certificate (`Op::SiteInfo`).
+    SiteInfo(crate::cef::handlers::site_info::SiteInfo),
+    /// The extension popup over this tab closed (`window.close()`, or the
+    /// window closed it).
+    PopupClosed,
     Error(String),
 }
 
@@ -248,6 +268,41 @@ struct Engine {
     tab_window: HashMap<TabId, WindowId>,
     /// Agent tabs (`Op::Agent`).
     agents: HashSet<TabId>,
+    /// The extension popup open over a tab, at most one.
+    popup: Option<Popup>,
+}
+
+/// An extension's popup page: a page of its own over the page it acts on,
+/// right-aligned under the toolbar icon that opened it, as big as what it
+/// draws (Chrome's limits: 25 x 25 to 800 x 600 points).
+struct Popup {
+    tab: TabId,
+    /// The tab it acts on.
+    page: TabId,
+    window: WindowId,
+    anchor: [i32; 4],
+    url: String,
+    place: Place,
+    browser: Option<Browser>,
+    native: Option<Handle>,
+    _devtools: Option<Registration>,
+    /// Its `chrome.tabs` fix (`extensions::popup_script`), run when its page
+    /// stops before its first script.
+    script: Option<String>,
+}
+
+impl Popup {
+    /// Where a popup `w` x `h` (physical pixels) sits: under the icon, its
+    /// right edge at the icon's, inside the page area.
+    fn rect(&self, area: [i32; 4], w: i32, h: i32) -> [i32; 4] {
+        let [ax, ay, aw, ah] = self.anchor;
+        let [px, py, pw, ph] = area;
+        let w = w.min(pw).max(1);
+        let h = h.min(ph).max(1);
+        let x = (ax + aw - w).clamp(px, (px + pw - w).max(px));
+        let y = (ay + ah + 2).max(py);
+        [x, y, w, h]
+    }
 }
 
 thread_local! {
@@ -267,6 +322,7 @@ pub fn init(sink: Sink) {
             places: HashMap::new(),
             tab_window: HashMap::new(),
             agents: HashSet::new(),
+            popup: None,
         })
     });
 }
@@ -278,9 +334,17 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
     loop {
         let created = client::take_created();
         let closed = client::take_closed();
+        let resized = client::take_resized();
+        let paused = client::take_paused();
         let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
-        if created.is_empty() && closed.is_empty() && cmd.is_none() && !replied {
+        if created.is_empty()
+            && closed.is_empty()
+            && resized.is_empty()
+            && paused.is_empty()
+            && cmd.is_none()
+            && !replied
+        {
             break;
         }
         ENGINE.with_borrow_mut(|e| {
@@ -288,7 +352,18 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
             for c in created {
                 e.adopt(c);
             }
+            for (tab, w, h) in resized {
+                e.resize_popup(tab, w, h);
+            }
+            for tab in paused {
+                e.popup_paused(tab);
+            }
             for tab in closed {
+                if e.popup.as_ref().is_some_and(|p| p.tab == tab) {
+                    if let Some(p) = e.popup.take() {
+                        e.sink.send_tab(p.page, Event::PopupClosed);
+                    }
+                }
                 e.closing.remove(&tab);
                 if e.tabs.remove(&tab).is_some() {
                     e.tab_window.remove(&tab);
@@ -314,7 +389,15 @@ pub fn close_all(limit: Duration) {
         e.unplaced.clear();
         let ids: Vec<TabId> = e.tabs.keys().copied().collect();
         e.closing.extend(ids);
-        e.tabs.drain().map(|(_, t)| t.browser).collect()
+        let popup = e.popup.take().and_then(|p| {
+            e.closing.insert(p.tab);
+            p.browser
+        });
+        e.tabs
+            .drain()
+            .map(|(_, t)| t.browser)
+            .chain(popup)
+            .collect()
     });
     for b in &browsers {
         if let Some(h) = b.host() {
@@ -353,6 +436,10 @@ pub fn close_all(limit: Duration) {
 
 impl Engine {
     fn adopt(&mut self, c: client::Created) {
+        if self.popup.as_ref().is_some_and(|p| p.tab == c.tab) {
+            self.adopt_popup(c);
+            return;
+        }
         let browser = c.browser.clone();
         let devtools = c.observe();
         // A page another page opened lives in its opener's window.
@@ -657,12 +744,45 @@ impl Engine {
                 return;
             }
         }
+        if let Op::ClosePopup = op {
+            if self.popup.as_ref().is_some_and(|p| p.page == tab) {
+                self.close_popup();
+            }
+            return;
+        }
         let Some(browser) = self.tabs.get(&tab).map(|t| t.browser.clone()) else {
             return;
         };
         match op {
-            Op::Open(_) | Op::Activate | Op::Agent => {}
+            Op::Open(_) | Op::Activate | Op::Agent | Op::ClosePopup => {}
+            Op::Extension {
+                id, popup: None, ..
+            } => {
+                self.close_popup();
+                crate::cef::handlers::extensions::run_action(&browser, &id);
+            }
+            Op::Extension {
+                id,
+                popup: Some(url),
+                anchor,
+            } => {
+                crate::cef::handlers::extensions::prepare_popup(&browser, &id);
+                self.open_popup(window, tab, url, anchor);
+            }
+            Op::SiteInfo => {
+                let info = crate::cef::handlers::site_info::of(&browser);
+                trace(format_args!("tab {tab}: site info {info:?}"));
+                self.sink.send_tab(tab, Event::SiteInfo(info));
+            }
+            Op::ClearSiteData(origin) => client::devtools_send(
+                &browser,
+                "Storage.clearDataForOrigin",
+                json!({ "origin": origin, "storageTypes": "all" }),
+            ),
             Op::Close => {
+                if self.popup.as_ref().is_some_and(|p| p.page == tab) {
+                    self.close_popup();
+                }
                 if let Some(t) = self.tabs.remove(&tab) {
                     // Out of sight at once; Chromium destroys it later.
                     if let Some(child) = t.native {
@@ -738,6 +858,191 @@ impl Engine {
             }
             op => crate::cef::handlers::run_op(&self.sink, &browser, op),
         }
+    }
+
+    /// Open extension popup `url` over `page`, under `anchor`.
+    fn open_popup(&mut self, window: WindowId, page: TabId, url: String, anchor: [i32; 4]) {
+        self.close_popup();
+        let Some((area, _)) = self.places.get(&window).copied() else {
+            return;
+        };
+        let tab = client::next_popup_tab();
+        let mut popup = Popup {
+            tab,
+            page,
+            window,
+            anchor,
+            url,
+            place: area,
+            browser: None,
+            native: None,
+            _devtools: None,
+            script: None,
+        };
+        // Small until it says how big it is (`on_auto_resize`).
+        let s = area.scale.max(0.1);
+        let rect = popup.rect(area.rect, (64.0 * s) as i32, (32.0 * s) as i32);
+        popup.place = Place { rect, ..area };
+        client::set_place(tab, Some(popup.place));
+        let mut c = client::new(TabCtx {
+            tab,
+            sink: self.sink.clone(),
+        });
+        // Alloy style: a Chrome style page would be a Chrome window of its
+        // own, the one Chrome then calls "last focused", and an extension's
+        // background would act on the popup instead of the page.
+        let mut info = native::child_info(popup.place, true);
+        info.runtime_style = cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into();
+        let settings = client::browser_settings();
+        let mut context = crate::cef::request_context();
+        let ok = cef::browser_host_create_browser(
+            Some(&info),
+            Some(&mut c),
+            Some(&CefString::from("about:blank")),
+            Some(&settings),
+            None,
+            context.as_mut(),
+        ) == 1;
+        if ok {
+            self.popup = Some(popup);
+        } else {
+            client::set_place(tab, None);
+            self.sink.send_tab(page, Event::PopupClosed);
+        }
+    }
+
+    /// The popup's browser exists: over the page, with the keyboard, its
+    /// window script in place, then its page.
+    fn adopt_popup(&mut self, c: client::Created) {
+        let devtools = c.observe();
+        let page = self
+            .popup
+            .as_ref()
+            .and_then(|p| self.tabs.get(&p.page))
+            .map(|t| t.browser.clone());
+        let Some(p) = self.popup.as_mut() else { return };
+        let browser = c.browser.clone();
+        p.native = native::of(&browser);
+        p.browser = Some(browser.clone());
+        p._devtools = devtools;
+        if let Some(n) = p.native {
+            native::raise(n);
+            native::focus(n);
+        }
+        if let Some(h) = browser.host() {
+            h.set_auto_resize_enabled(
+                1,
+                Some(&cef::Size {
+                    width: 25,
+                    height: 25,
+                }),
+                Some(&cef::Size {
+                    width: 800,
+                    height: 600,
+                }),
+            );
+            h.set_focus(1);
+        }
+        let url = p.url.clone();
+        let load = move |b: &Browser| {
+            if let Some(f) = b.main_frame() {
+                f.load_url(Some(&CefString::from(url.as_str())));
+            }
+        };
+        let Some(page) = page else {
+            load(&browser);
+            return;
+        };
+        let b = browser.clone();
+        let tab = c.tab;
+        client::devtools(
+            &page,
+            "Browser.getWindowForTarget",
+            json!({}),
+            move |_, r| {
+                let Some(w) = r["windowId"].as_i64() else {
+                    load(&b);
+                    return;
+                };
+                // Stop before the popup's first script: the fix goes in there
+                // (`popup_paused`). A script added for new documents does not
+                // run in an extension's pages.
+                ENGINE.with_borrow_mut(|e| {
+                    if let Some(p) = e.as_mut().and_then(|e| e.popup.as_mut()) {
+                        if p.tab == tab {
+                            p.script = Some(crate::cef::handlers::extensions::popup_script(w));
+                        }
+                    }
+                });
+                client::devtools_send(&b, "Debugger.enable", json!({}));
+                let b2 = b.clone();
+                client::devtools(
+                    &b,
+                    "DOMDebugger.setInstrumentationBreakpoint",
+                    json!({ "eventName": "scriptFirstStatement" }),
+                    move |_, _| load(&b2),
+                );
+            },
+        );
+    }
+
+    /// The popup's page stopped before its first script: fix `chrome.tabs`
+    /// there, then let it run.
+    fn popup_paused(&mut self, tab: TabId) {
+        let Some(p) = self.popup.as_mut().filter(|p| p.tab == tab) else {
+            return;
+        };
+        let Some(b) = p.browser.clone() else { return };
+        if let Some(script) = p.script.take() {
+            client::devtools_send(&b, "Runtime.evaluate", json!({ "expression": script }));
+            client::devtools_send(
+                &b,
+                "DOMDebugger.removeInstrumentationBreakpoint",
+                json!({ "eventName": "scriptFirstStatement" }),
+            );
+        }
+        client::devtools_send(&b, "Debugger.resume", json!({}));
+        if p.script.is_none() {
+            client::devtools_send(&b, "Debugger.disable", json!({}));
+        }
+    }
+
+    /// The popup asked for `w` x `h` points.
+    fn resize_popup(&mut self, tab: TabId, w: i32, h: i32) {
+        let Some(p) = self.popup.as_mut().filter(|p| p.tab == tab) else {
+            return;
+        };
+        let Some((area, _)) = self.places.get(&p.window).copied() else {
+            return;
+        };
+        let s = area.scale.max(0.1);
+        let rect = p.rect(
+            area.rect,
+            (w as f32 * s).round() as i32,
+            (h as f32 * s).round() as i32,
+        );
+        p.place = Place { rect, ..area };
+        client::set_place(tab, Some(p.place));
+        if let Some(n) = p.native {
+            native::place(n, p.place);
+            native::raise(n);
+        }
+        if let Some(h) = p.browser.as_ref().and_then(|b| b.host()) {
+            h.was_resized();
+        }
+    }
+
+    /// Close the extension popup, if one is open.
+    fn close_popup(&mut self) {
+        let Some(p) = self.popup.take() else { return };
+        if let Some(n) = p.native {
+            native::set_visible(n, false, None);
+        }
+        if let Some(h) = p.browser.as_ref().and_then(|b| b.host()) {
+            self.closing.insert(p.tab);
+            h.close_browser(1);
+        }
+        self.sink.send_tab(p.page, Event::PopupClosed);
     }
 
     /// `tab` is now the page on screen in `window`, which may take it from

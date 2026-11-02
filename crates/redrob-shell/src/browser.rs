@@ -441,6 +441,12 @@ impl Browser {
             tab_drag: None,
             top_sites: None,
             new_tab_query: String::new(),
+            ext_popup: None,
+            ext_toggled: false,
+            ext_icons: Default::default(),
+            ext_read_at: 0.0,
+            site_info: None,
+            site_cert: false,
             last_title: String::new(),
         }
     }
