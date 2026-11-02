@@ -77,6 +77,8 @@ pub fn shortcut(vk: i32, flags: u32) -> Option<Shortcut> {
         _ if cmd && shift && vk == 0x22 => MoveTabRight,
         _ if ctrl && shift && vk == 0x09 => PrevTab,
         _ if ctrl && !shift && vk == 0x09 => NextTab,
+        // Ctrl++ is Ctrl+Shift+= on most layouts.
+        _ if cmd && (vk == 0xBB || vk == 0x6B) => ZoomIn,
         _ if cmd && shift => return None,
         _ if cmd && ch(b'T') => NewTab,
         _ if cmd && (ch(b'W') || vk == 0x73) => CloseTab,

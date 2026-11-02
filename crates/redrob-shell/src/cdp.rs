@@ -432,9 +432,6 @@ impl Engine {
             // window): out of sight until it has.
             if let Some((p, true)) = t.at {
                 native::set_visible(child, false, None);
-                if let Some(h) = t.browser.host() {
-                    h.was_hidden(1);
-                }
                 t.at = Some((p, false));
             }
             return;
@@ -458,11 +455,11 @@ impl Engine {
             (Some(false), false) => {}
             (_, false) => native::set_visible(child, false, None),
         }
+        // No `was_hidden` (it is for off-screen pages): Chromium follows its
+        // window being shown or hidden, and a hidden page still answers an
+        // agent's screenshot, which `was_hidden` would leave waiting.
         let host = t.browser.host();
         if let Some(h) = &host {
-            if before.map(|(_, s)| s) != Some(shown) {
-                h.was_hidden((!shown) as _);
-            }
             if before.is_some_and(|(p, _)| p.scale != place.scale) {
                 h.notify_screen_info_changed();
             }
