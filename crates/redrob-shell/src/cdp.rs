@@ -738,9 +738,11 @@ fn run(window: WindowId, cmd: Command) {
                     h.set_focus(0);
                 }
             }
+            trace(format_args!("focus window {window}: page let go"));
             if let Some((p, _)) = e.places.get(&window) {
                 native::focus(p.parent);
             }
+            trace(format_args!("focus window {window}: done"));
         }
         Command::Detach => e.detach(window),
         Command::Tab(tab, op) => e.handle(window, tab, op),

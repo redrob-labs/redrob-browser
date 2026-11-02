@@ -54,6 +54,37 @@ fn main() -> anyhow::Result<()> {
     }
     // Before anything opens a file: fds 3 and 4 become Chromium's DevTools pipe.
     cef::reserve_devtools_pipe();
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("TMP_PTRACER").is_some() {
+        extern "C" fn dump(_: libc::c_int) {
+            eprintln!(
+                "TMP main thread stuck:\n{}",
+                std::backtrace::Backtrace::force_capture()
+            );
+        }
+        // SAFETY: debug only.
+        unsafe {
+            libc::signal(
+                libc::SIGURG,
+                dump as extern "C" fn(libc::c_int) as libc::sighandler_t,
+            );
+            let main = libc::pthread_self();
+            let main = main as usize;
+            std::thread::spawn(move || {
+                let mut last = 0;
+                let mut same = 0;
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    let now = cef::pumps();
+                    same = if now == last && now > 0 { same + 1 } else { 0 };
+                    last = now;
+                    if same == 3 {
+                        libc::pthread_kill(main as libc::pthread_t, libc::SIGURG);
+                    }
+                }
+            });
+        }
+    }
     startup::init();
     run().inspect_err(|e| startup::fail(e))
 }
@@ -503,8 +534,13 @@ impl Window {
                 }
                 continue;
             }
-            // Only the tab on screen can have the keyboard or the pointer.
-            let on_screen = self.active_id() == Some(tab);
+            // Only the tab on screen can have the keyboard or the pointer,
+            // and only while its page shows (not under the new tab page or
+            // settings, where Chromium still focuses a page it creates).
+            let on_screen = self
+                .model
+                .active_tab()
+                .is_some_and(|t| t.id == tab && t.url != NEW_TAB && !internal::is_internal(&t.url));
             let event = match event {
                 Event::Shortcut(s) => {
                     cdp::trace(format_args!("page {tab}: shortcut {s:?}"));

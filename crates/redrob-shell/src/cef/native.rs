@@ -91,9 +91,10 @@ mod imp {
 
     use x11rb::connection::Connection as _;
     use x11rb::protocol::xproto::{
-        AtomEnum, ConfigureWindowAux, ConnectionExt as _, InputFocus, Window,
+        AtomEnum, ConfigureWindowAux, ConnectionExt as _, InputFocus, PropMode, Window,
     };
     use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
 
     use super::{Handle, Place, AWAY};
 
@@ -113,14 +114,23 @@ mod imp {
     }
 
     fn atom(x: &X, name: &str) -> Option<u32> {
-        Some(
-            x.conn
-                .intern_atom(false, name.as_bytes())
-                .ok()?
-                .reply()
-                .ok()?
-                .atom,
-        )
+        use std::collections::HashMap;
+        use std::sync::Mutex;
+        static ATOMS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+        let mut cache = ATOMS.lock().unwrap_or_else(|e| e.into_inner());
+        let cache = cache.get_or_insert_with(HashMap::new);
+        if let Some(a) = cache.get(name) {
+            return Some(*a);
+        }
+        let a = x
+            .conn
+            .intern_atom(false, name.as_bytes())
+            .ok()?
+            .reply()
+            .ok()?
+            .atom;
+        cache.insert(name.to_string(), a);
+        Some(a)
     }
 
     fn property(x: &X, w: Window, prop: u32, kind: u32) -> Option<Vec<u8>> {
@@ -187,9 +197,32 @@ mod imp {
         let _ = x.conn.flush();
     }
 
+    /// Chromium decides whether a page is hidden (no painting, timers
+    /// slowed, `document.hidden`) from its window's `_NET_WM_STATE`, as
+    /// cefclient sets it; unmapping alone leaves the page running.
+    fn set_hidden_state(x: &X, w: Window, hidden: bool) {
+        let (Some(state), Some(hidden_atom)) =
+            (atom(x, "_NET_WM_STATE"), atom(x, "_NET_WM_STATE_HIDDEN"))
+        else {
+            return;
+        };
+        let data: Vec<u32> = if hidden {
+            vec![hidden_atom]
+        } else {
+            Vec::new()
+        };
+        if let Ok(c) = x
+            .conn
+            .change_property32(PropMode::REPLACE, w, state, AtomEnum::ATOM, &data)
+        {
+            c.ignore_error();
+        }
+    }
+
     pub fn set_visible(child: Handle, visible: bool, p: Option<Place>) {
         let Some(x) = x() else { return };
         let w = child.0 as Window;
+        set_hidden_state(x, w, !visible);
         if visible {
             if let Some(p) = p {
                 place(child, p);

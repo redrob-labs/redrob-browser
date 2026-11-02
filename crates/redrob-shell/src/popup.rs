@@ -93,6 +93,10 @@ fn is_open(ctx: &Context, id: Id) -> bool {
 }
 
 fn set_open(ctx: &Context, id: Option<Id>) {
+    crate::cdp::trace(format_args!(
+        "menu {}",
+        if id.is_some() { "opens" } else { "closes" }
+    ));
     ctx.data_mut(|d| match id {
         Some(id) => {
             d.insert_temp(open_id(), id);
@@ -196,7 +200,9 @@ pub fn context_menu(r: &Response, add: impl FnOnce(&mut Ui)) {
     let at_id = id.with("at");
     if r.secondary_clicked() {
         let p = r.interact_pointer_pos().unwrap_or(r.rect.left_bottom());
-        ctx.data_mut(|d| d.insert_temp(at_id, to_screen(&ctx, p)));
+        // Not inside data_mut: to_screen reads the context too.
+        let at = to_screen(&ctx, p);
+        ctx.data_mut(|d| d.insert_temp(at_id, at));
         set_open(&ctx, Some(id));
         toggled(&ctx);
     }
