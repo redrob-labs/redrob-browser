@@ -2799,6 +2799,25 @@ impl AnimationTimelineState {
         out
     }
 
+    /// `css_animations` for one element: an element runs at most one
+    /// instance, and getComputedStyle asks about its own target on every read.
+    pub fn css_animation_of(
+        &self,
+        node: obscura_dom::tree::NodeId,
+        document_time_ms: f32,
+    ) -> Option<(String, bool, f32)> {
+        self.instances.get(&node).map(|instance| {
+            let current = instance
+                .hold_time_ms
+                .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+            (
+                instance.key.name.clone(),
+                instance.script_paused || instance.was_paused,
+                current,
+            )
+        })
+    }
+
     /// Script control of one CSS animation instance (CSSAnimation): pause,
     /// play, or seek to `local_ms`. Returns whether the instance exists.
     pub fn control_css_animation(

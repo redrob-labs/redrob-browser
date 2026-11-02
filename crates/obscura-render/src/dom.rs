@@ -424,27 +424,30 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
             )
         })
         .or_else(|| {
+            // NaN != NaN: equal Debug output is the same value.
             first_map_difference(
                 "clip_rects",
                 &incremental.clip_rects,
                 &scratch.clip_rects,
-                |a, b| a == b,
+                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
             )
         })
         .or_else(|| {
+            // NaN != NaN: equal Debug output is the same value.
             first_map_difference(
                 "translates",
                 &incremental.translates,
                 &scratch.translates,
-                |a, b| a == b,
+                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
             )
         })
         .or_else(|| {
+            // NaN != NaN: equal Debug output is the same value.
             first_map_difference(
                 "transforms",
                 &incremental.transforms,
                 &scratch.transforms,
-                |a, b| a == b,
+                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
             )
         })
         .or_else(|| {
@@ -6716,11 +6719,11 @@ fn layout_dom_once(
     let needs_emoji_font = descendants.iter().any(|id| {
         tree.with_node(*id, |node| match &node.data {
             obscura_dom::tree::NodeData::Text { contents } => {
-                crate::inline::text_may_need_emoji_font(contents)
-                    && !node.parent.is_some_and(|parent| {
-                        element_local_name(tree, parent)
-                            .is_some_and(|name| name == "style" || name == "script")
-                    })
+                // Parent first: style and script text is often megabytes.
+                !node.parent.is_some_and(|parent| {
+                    element_local_name(tree, parent)
+                        .is_some_and(|name| name == "style" || name == "script")
+                }) && crate::inline::text_may_need_emoji_font(contents)
             }
             _ => false,
         })
@@ -12952,14 +12955,45 @@ pub(crate) fn rendered_parent(tree: &DomTree, id: NodeId) -> Option<NodeId> {
 /// The live-node bound and visited set are defense in depth against a corrupt
 /// assignment/tree graph; a valid flat tree visits every generated node once.
 pub(crate) fn rendered_descendants(tree: &DomTree, root: NodeId) -> Vec<NodeId> {
+    // One layout walks the whole rendered tree a dozen times (cascade, box
+    // construction, row rects, scroll and sticky trees, paint order). The
+    // walk is a pure function of the DOM, so the document's is computed once
+    // per tree state.
+    thread_local! {
+        static DOCUMENT_WALK: std::cell::RefCell<Option<(u64, std::rc::Rc<Vec<NodeId>>)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+    if root != tree.document() {
+        return rendered_descendants_uncached(tree, root);
+    }
+    let generation = tree.mutation_generation();
+    if let Some(walk) = DOCUMENT_WALK.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .filter(|(cached, _)| *cached == generation)
+            .map(|(_, walk)| walk.clone())
+    }) {
+        return walk.as_ref().clone();
+    }
+    let walk = rendered_descendants_uncached(tree, root);
+    DOCUMENT_WALK.with(|cache| {
+        *cache.borrow_mut() = Some((generation, std::rc::Rc::new(walk.clone())));
+    });
+    walk
+}
+
+fn rendered_descendants_uncached(tree: &DomTree, root: NodeId) -> Vec<NodeId> {
     let limit = tree.len();
     let mut result = Vec::new();
-    let mut visited = HashSet::new();
+    let mut visited = vec![false; tree.node_slot_count()];
     let mut stack = rendered_children(tree, root);
     stack.reverse();
     while let Some(id) = stack.pop() {
-        if !visited.insert(id) {
-            continue;
+        match visited.get_mut(id.index()) {
+            Some(seen) if *seen => continue,
+            Some(seen) => *seen = true,
+            None => continue,
         }
         result.push(id);
         if result.len() >= limit {

@@ -271,6 +271,11 @@ pub struct FormControlState {
     pub indeterminate: bool,
 }
 
+fn next_mutation_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 pub(crate) struct DomTreeInner {
     pub(crate) nodes: Vec<Option<Node>>,
     pub(crate) free_list: Vec<u32>,
@@ -294,6 +299,8 @@ pub(crate) struct DomTreeInner {
     /// Nodes the streaming parser inserted since the last drain, as
     /// (parent, node). `None` when no streaming parse is recording.
     pub(crate) parser_insertions: Option<Vec<(NodeId, NodeId)>>,
+    /// Bumped on every mutable access (see `DomTree::mutation_generation`).
+    mutation_generation: u64,
 }
 
 impl DomTree {
@@ -323,6 +330,7 @@ impl DomTree {
                 allow_declarative_shadow_roots: false,
                 quirks: false,
                 parser_insertions: None,
+                mutation_generation: next_mutation_generation(),
             })),
         }
     }
@@ -339,14 +347,28 @@ impl DomTree {
         Rc::ptr_eq(&self.inner, &other.inner)
     }
 
+    /// A value no other tree state of this process has had: every mutable
+    /// access (conservatively any mutation, including hover state) takes a
+    /// fresh one from a process-wide counter. It keys a cache of anything
+    /// derived from the tree, across documents.
+    pub fn mutation_generation(&self) -> u64 {
+        self.inner.borrow().mutation_generation
+    }
+
+    fn inner_mut(&self) -> std::cell::RefMut<'_, DomTreeInner> {
+        let mut inner = self.inner.borrow_mut();
+        inner.mutation_generation = next_mutation_generation();
+        inner
+    }
+
     pub(crate) fn record_parser_insertion(&self, parent: NodeId, node: NodeId) {
-        if let Some(log) = self.inner.borrow_mut().parser_insertions.as_mut() {
+        if let Some(log) = self.inner_mut().parser_insertions.as_mut() {
             log.push((parent, node));
         }
     }
 
     pub(crate) fn set_parser_insertion_log(&self, enabled: bool) {
-        self.inner.borrow_mut().parser_insertions = enabled.then(Vec::new);
+        self.inner_mut().parser_insertions = enabled.then(Vec::new);
     }
 
     pub fn has_parser_insertions(&self) -> bool {
@@ -386,7 +408,7 @@ impl DomTree {
         source: String,
         origin_clean: bool,
     ) -> bool {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if inner
             .nodes
             .get(owner.index())
@@ -413,7 +435,7 @@ impl DomTree {
         source: String,
         origin_clean: bool,
     ) -> bool {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if inner
             .nodes
             .get(owner.index())
@@ -437,7 +459,7 @@ impl DomTree {
     }
 
     pub fn remove_external_stylesheet(&self, owner: NodeId) -> bool {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         let removed = inner.external_stylesheets.remove(&owner).is_some();
         if removed {
             inner.external_stylesheet_generation =
@@ -466,7 +488,7 @@ impl DomTree {
         rules: Vec<String>,
         reset: bool,
     ) -> bool {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         let Some(element) = inner
             .nodes
             .get(owner.index())
@@ -505,7 +527,7 @@ impl DomTree {
     }
 
     pub fn clear_cssom_stylesheet(&self, owner: NodeId) -> bool {
-        Self::clear_cssom_stylesheet_inner(&mut self.inner.borrow_mut(), owner)
+        Self::clear_cssom_stylesheet_inner(&mut self.inner_mut(), owner)
     }
 
     fn clear_cssom_stylesheet_inner(inner: &mut DomTreeInner, owner: NodeId) -> bool {
@@ -585,7 +607,7 @@ impl DomTree {
     }
 
     pub fn set_hovered(&self, node: Option<NodeId>) -> bool {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if inner.hovered == node {
             return false;
         }
@@ -614,7 +636,7 @@ impl DomTree {
         node: NodeId,
         update: impl FnOnce(&mut FormControlState),
     ) {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if inner
             .nodes
             .get(node.index())
@@ -626,7 +648,7 @@ impl DomTree {
 
     /// Record whether the document was parsed in (full) quirks mode.
     pub fn set_quirks(&self, quirks: bool) {
-        self.inner.borrow_mut().quirks = quirks;
+        self.inner_mut().quirks = quirks;
     }
 
     /// Whether the document is in (full) quirks mode, in which CSS class and id
@@ -636,7 +658,7 @@ impl DomTree {
     }
 
     pub(crate) fn set_allow_declarative_shadow_roots(&self, allow: bool) {
-        self.inner.borrow_mut().allow_declarative_shadow_roots = allow;
+        self.inner_mut().allow_declarative_shadow_roots = allow;
     }
 
     pub(crate) fn allows_declarative_shadow_roots(&self) -> bool {
@@ -689,7 +711,7 @@ impl DomTree {
         root: NodeId,
         mode: ShadowRootMode,
     ) -> Result<(), AttachShadowError> {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         let host_is_element = inner
             .nodes
             .get(host.index())
@@ -933,7 +955,7 @@ impl DomTree {
     }
 
     pub fn new_node(&self, data: NodeData) -> NodeId {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         let id = if let Some(slot) = inner.free_list.pop() {
             NodeId(slot)
         } else {
@@ -989,7 +1011,7 @@ impl DomTree {
     where
         F: FnOnce(&mut Node) -> R,
     {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if inner
             .nodes
             .get(id.index())
@@ -1057,7 +1079,7 @@ impl DomTree {
         };
         self.detach_for_reparent(child_id, child_connected && !parent_connected);
 
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         Self::invalidate_cssom_source(&mut inner, parent_id);
 
         let old_last = inner
@@ -1152,7 +1174,7 @@ impl DomTree {
                 .and_then(|n| n.prev_sibling)
         };
 
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
 
         if let Some(Some(node)) = inner.nodes.get_mut(new_sibling_id.index()) {
             node.parent = Some(parent_id);
@@ -1182,7 +1204,7 @@ impl DomTree {
     }
 
     fn detach_for_reparent(&self, node_id: NodeId, disconnect: bool) {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
 
         // The document and registered ShadowRoots have no ordinary parent and
         // cannot be detached through light-tree mutation APIs.
@@ -1261,7 +1283,7 @@ impl DomTree {
 
         self.detach(node_id);
 
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         for id_str in &ids_to_remove {
             inner.id_index.remove(id_str);
         }
@@ -1273,7 +1295,7 @@ impl DomTree {
             return;
         }
         self.detach(node_id);
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
 
         let mut ids_to_remove = Vec::new();
         for &id in &nodes_to_remove {
@@ -1728,7 +1750,7 @@ impl DomTree {
         // Borrow released above: `new_node` takes its own mutable borrow.
         // Matches what the tree sink allocates for a parsed template.
         let contents = self.new_node(NodeData::Document);
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if let Some(Some(node)) = inner.nodes.get_mut(node_id.index()) {
             if let NodeData::Element {
                 template_contents, ..
@@ -1833,7 +1855,7 @@ impl DomTree {
                     .and_then(|n| n.last_child)
             };
             if let Some(last_child_id) = last_child_id {
-                let mut inner = self.inner.borrow_mut();
+                let mut inner = self.inner_mut();
                 if let Some(Some(node)) = inner.nodes.get_mut(last_child_id.index()) {
                     if let NodeData::Text { contents } = &mut node.data {
                         contents.push_str(text);
@@ -2015,7 +2037,7 @@ impl DomTree {
             if let Some(src_contents) = src_contents {
                 let dest_contents = self.new_node(NodeData::Document);
                 {
-                    let mut inner = self.inner.borrow_mut();
+                    let mut inner = self.inner_mut();
                     if let Some(Some(node)) = inner.nodes.get_mut(new_id.index()) {
                         if let NodeData::Element {
                             template_contents, ..
@@ -2047,7 +2069,7 @@ impl DomTree {
     // descendants() uses to cap a tree walk. A well-formed subtree has at most
     // this many nodes, so it is a safe ceiling for iterative walkers that need a
     // cycle backstop.
-    pub(crate) fn node_slot_count(&self) -> usize {
+    pub fn node_slot_count(&self) -> usize {
         self.inner.borrow().nodes.len()
     }
 
@@ -2056,7 +2078,7 @@ impl DomTree {
     }
 
     pub fn update_id_index(&self, node_id: NodeId, old_id: Option<&str>, new_id: Option<&str>) {
-        let mut inner = self.inner.borrow_mut();
+        let mut inner = self.inner_mut();
         if let Some(old) = old_id {
             inner.id_index.remove(old);
         }

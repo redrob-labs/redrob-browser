@@ -4368,8 +4368,40 @@ globalThis._watchAnimationStart = function (el) {
   _animationStartWatched.add(el);
   if (_animationStartTimer == null) _animationStartTimer = setTimeout(_animationStartTick, 16);
 };
+const _cssAnimationKeyOf = new Map();
+// One element's CSS animations, sharing the wrappers _cssAnimations() keeps.
+// getComputedStyle() asks this for its target on every read; listing every
+// animation of the document there cost YouTube ~2 ms per read.
+function _cssAnimationsOf(nid) {
+  if (typeof __obscuraCore.ops.op_css_animation_of !== 'function') {
+    return _cssAnimations().filter(animation => animation._nid === nid);
+  }
+  let rows = [];
+  try { rows = JSON.parse(__obscuraCore.ops.op_css_animation_of(nid >>> 0)) || []; }
+  catch (_e) { rows = []; }
+  const live = [];
+  // An element runs at most one instance: drop the wrapper of one that ended
+  // or changed name, so a later instance gets a new object.
+  const previous = _cssAnimationKeyOf.get(nid);
+  const current = rows.length ? rows[0][0] + ' ' + rows[0][1] : undefined;
+  if (previous !== undefined && previous !== current) _cssAnimationWrappers.delete(previous);
+  if (current === undefined) _cssAnimationKeyOf.delete(nid);
+  else _cssAnimationKeyOf.set(nid, current);
+  for (const [rowNid, name, paused, time] of rows) {
+    const key = rowNid + ' ' + name;
+    let wrapper = _cssAnimationWrappers.get(key);
+    if (!wrapper) {
+      wrapper = new CSSAnimation(rowNid, name);
+      _cssAnimationWrappers.set(key, wrapper);
+    }
+    wrapper._paused = !!paused;
+    wrapper._current = Number(time) || 0;
+    live.push(wrapper);
+  }
+  return live;
+}
 function _animationsForTarget(target) {
-  const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
+  const css = _cssAnimationsOf(target?._nid | 0);
   return css.concat(Array.from(_waapiAnimations).filter(animation => {
     if (animation.effect?.target !== target || animation.playState === 'idle') return false;
     return animation.playState !== 'finished' || animation.effect._timing.fill === 'forwards' || animation.effect._timing.fill === 'both';

@@ -8807,6 +8807,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_waapi_create());
         ops.push(op_waapi_control());
         ops.push(op_css_animations());
+        ops.push(op_css_animation_of());
         ops.push(op_css_animation_control());
     }
     Extension {
@@ -9007,6 +9008,28 @@ fn op_css_animations(state: &OpState) -> String {
         })
         .collect();
     serde_json::Value::Array(rows).to_string()
+}
+
+/// `[[nid, animation-name, paused, currentTime]]` (or `[]`) for one element:
+/// what `op_css_animations` lists for it, without serializing every
+/// animation of the document on each getComputedStyle()/getAnimations().
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_css_animation_of(state: &OpState, nid: u32) -> String {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    if gs.prepared_render.is_none() {
+        let _ = ensure_prepared_render(&mut gs);
+    }
+    let now = waapi_document_time_ms(&gs);
+    let node = NodeId::new(nid);
+    match gs.animation_timeline.css_animation_of(node, now) {
+        Some((name, paused, current)) => {
+            serde_json::json!([[node.index(), name, paused, current]]).to_string()
+        }
+        None => "[]".to_string(),
+    }
 }
 
 #[cfg(feature = "render")]
