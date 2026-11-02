@@ -202,7 +202,10 @@ pub fn after_pass(ctx: &egui::Context, focused: bool) {
 
 impl Fcitx {
     fn connect() -> zbus::Result<Self> {
-        let conn = Connection::session()?;
+        // A stuck input method must not stop the window.
+        let conn = zbus::blocking::connection::Builder::session()?
+            .method_timeout(std::time::Duration::from_millis(400))
+            .build()?;
         let hints: Vec<(&str, &str)> = vec![("program", "redrob-browser"), ("display", "x11:")];
         let reply = conn.call_method(
             Some(SERVICE),

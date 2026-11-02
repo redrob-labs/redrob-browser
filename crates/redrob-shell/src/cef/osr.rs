@@ -465,7 +465,7 @@ const CARET_JS: &str = r#"(() => {
     const top = er.top + px(cs.borderTopWidth) + px(cs.paddingTop);
     const width = el.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight);
     let before = el.value.substring(0, el.selectionEnd);
-    if (el.type === 'password') before = '•'.repeat(before.length);
+    if (el.type === 'password') before = '\u2022'.repeat(before.length);
     const fontSize = px(cs.fontSize) || 16;
     const lineHeight = px(cs.lineHeight) || fontSize * 1.2;
     if (el.tagName === 'INPUT') {
@@ -473,8 +473,7 @@ const CARET_JS: &str = r#"(() => {
       rect = [x, er.top + (er.height - lineHeight) / 2, 1, lineHeight];
     } else {
       let line = 0, last = '';
-      for (const l of before.split('
-')) {
+      for (const l of before.split('\n')) {
         let rest = l;
         while (width > 0 && rest.length > 1 && ctx.measureText(rest).width > width) {
           let n = rest.length;
