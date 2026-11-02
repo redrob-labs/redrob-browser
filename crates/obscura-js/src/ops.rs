@@ -2165,6 +2165,13 @@ pub(crate) fn queue_retained_style_mutation(
     if is_resource && has_resource {
         return true;
     }
+    if matches!(mutation, obscura_render::RetainedStyleMutation::Stylesheet)
+        && pending
+            .iter()
+            .any(|queued| matches!(queued, obscura_render::RetainedStyleMutation::Stylesheet))
+    {
+        return true;
+    }
     if let obscura_render::RetainedStyleMutation::Animation { node } = &mutation {
         if pending.iter().any(|queued| {
             matches!(
@@ -2498,11 +2505,7 @@ fn op_external_stylesheet_set(
     if changed && connected {
         state.activity_generation = state.activity_generation.wrapping_add(1);
         #[cfg(feature = "render")]
-        {
-            state.prepared_render = None;
-            state.pending_style_mutations.clear();
-            state.resolved_scroll = None;
-        }
+        invalidate_stylesheet_render(&mut state);
     }
     changed
 }
@@ -2565,11 +2568,24 @@ fn op_cssom_stylesheet_has(state: &OpState, owner_nid: u32, frame_id: u32) -> bo
 fn invalidate_cssom_render(state: &mut ObscuraState) {
     state.activity_generation = state.activity_generation.wrapping_add(1);
     #[cfg(feature = "render")]
+    invalidate_stylesheet_render(state);
+}
+
+/// A style sheet changed outside the DOM. Keep the retained layout: the next
+/// flush restyles only what rules appended to the cached parse can match.
+#[cfg(feature = "render")]
+fn invalidate_stylesheet_render(state: &mut ObscuraState) {
+    if state.prepared_render.is_some()
+        && !queue_retained_style_mutation(
+            &mut state.pending_style_mutations,
+            obscura_render::RetainedStyleMutation::Stylesheet,
+        )
     {
         state.prepared_render = None;
         state.pending_style_mutations.clear();
-        state.resolved_scroll = None;
     }
+    state.style_query_cache = None;
+    state.resolved_scroll = None;
 }
 
 #[op2]
@@ -10171,6 +10187,7 @@ fn op_resize_observer_measurements(
     let shared = frame_state(state, frame_id);
     let mut gs = shared.borrow_mut();
     sample_live_document_animations(&mut gs);
+    let profile_started = std::time::Instant::now();
     if ensure_resolved_scroll_for_geometry(&mut gs).is_none() {
         return serde_json::to_string(&vec![serde_json::Value::Null; nids.len()])
             .unwrap_or_else(|_| "[]".to_string());
@@ -10184,6 +10201,8 @@ fn op_resize_observer_measurements(
             .unwrap_or_else(|_| "[]".to_string());
     };
 
+    let layout_done = std::time::Instant::now();
+    let target_count = nids.len();
     let style_value = |snapshot: &std::collections::HashMap<&'static str, String>,
                        name: &'static str| {
         snapshot.get(name).cloned().unwrap_or_default()
@@ -10213,6 +10232,13 @@ fn op_resize_observer_measurements(
             }))
         })
         .collect::<Vec<_>>();
+    if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] resize-observer targets={target_count} layout={:?} measure={:?}",
+            layout_done.duration_since(profile_started),
+            layout_done.elapsed()
+        );
+    }
     serde_json::to_string(&measurements).unwrap_or_else(|_| "[]".to_string())
 }
 

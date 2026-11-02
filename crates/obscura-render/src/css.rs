@@ -153,6 +153,10 @@ enum RelationalSelectorKey {
 pub(crate) struct RelationalInvalidation {
     pub rule_order: usize,
     anchor_key: Option<RelationalSelectorKey>,
+    /// Keys of the compounds joined to the anchor compound by descendant or
+    /// child combinators (`.list :has(> .icon)` gives `.list`). Each must be
+    /// present on some ancestor of an anchor whose match can change.
+    anchor_ancestor_keys: Vec<RelationalSelectorKey>,
     relative_keys: Vec<RelationalSelectorKey>,
     pub anchor_reaches: InvalidationReaches,
     pub unkeyed_subject: bool,
@@ -335,6 +339,11 @@ fn relational_key_may_match(
 impl RelationalInvalidation {
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
+            && self.anchor_ancestor_keys.iter().all(|key| {
+                tree.ancestors(node)
+                    .into_iter()
+                    .any(|ancestor| relational_key_may_match(Some(key), tree, ancestor))
+            })
     }
 
     /// Whether `node` may be the subject of this `:has()` argument. Falls back
@@ -1298,10 +1307,16 @@ fn note_compound_dependencies(
     reaches: InvalidationReaches,
     rule_order: usize,
     inside_relational: bool,
+    subject_anchor: Option<&RelationalSelectorKey>,
+    ancestor_keys: &[RelationalSelectorKey],
 ) {
     if let Some(local_name) = compound_local_name(compound) {
         map.push_local_name(local_name, rule_order, reaches);
     }
+    // A `:has()` nested in `:is()`/`:where()`/`:not()` at the subject position
+    // still anchors on the element the outer compound matches, so a key of
+    // that compound is a sound anchor filter for it.
+    let anchor_key = relational_anchor_key(compound).or_else(|| subject_anchor.cloned());
     let chars: Vec<char> = compound.chars().collect();
     let mut index = 0usize;
     while index < chars.len() {
@@ -1420,6 +1435,8 @@ fn note_compound_dependencies(
                                 reaches,
                                 rule_order,
                                 !inside_relational,
+                                anchor_key.as_ref(),
+                                ancestor_keys,
                             );
                         }
                     }
@@ -1478,7 +1495,8 @@ fn note_compound_dependencies(
                         });
                         map.push_relational_invalidation(RelationalInvalidation {
                             rule_order,
-                            anchor_key: relational_anchor_key(compound),
+                            anchor_key: anchor_key.clone(),
+                            anchor_ancestor_keys: ancestor_keys.to_vec(),
                             relative_keys,
                             anchor_reaches: reaches,
                             unkeyed_subject: unkeyed,
@@ -1507,6 +1525,8 @@ fn note_compound_dependencies(
                                 argument_reaches,
                                 rule_order,
                                 false,
+                                None,
+                                &[],
                             );
                         }
                     }
@@ -1530,6 +1550,8 @@ fn note_compound_dependencies(
                                     InvalidationReaches::CONSERVATIVE,
                                     rule_order,
                                     !inside_relational,
+                                    None,
+                                    &[],
                                 );
                             }
                         }
@@ -1564,6 +1586,8 @@ fn note_selector_dependencies(
     outer_reaches: InvalidationReaches,
     rule_order: usize,
     record_tree_siblings: bool,
+    subject_anchor: Option<&RelationalSelectorKey>,
+    outer_ancestor_keys: &[RelationalSelectorKey],
 ) {
     if record_tree_siblings {
         let (adjacent, general) = selector_sibling_combinators(selector);
@@ -1574,7 +1598,25 @@ fn note_selector_dependencies(
     if malformed {
         map.mark_conservative(rule_order);
     }
-    for (compound, local_reaches) in compounds {
+    let subject_index = compounds.len().saturating_sub(1);
+    // Ancestors of the subject: the keyed compounds before it, back to the
+    // first sibling combinator, plus those of an enclosing `:is()` subject.
+    let mut subject_ancestor_keys = outer_ancestor_keys.to_vec();
+    for (compound, local_reaches) in compounds[..subject_index]
+        .iter()
+        .rev()
+        .take_while(|_| !malformed)
+    {
+        if !local_reaches.contains(InvalidationReaches::DESCENDANTS)
+            || local_reaches.contains(InvalidationReaches::SIBLINGS)
+        {
+            break;
+        }
+        if let Some(key) = relational_anchor_key(compound) {
+            push_relational_selector_key(&mut subject_ancestor_keys, key);
+        }
+    }
+    for (position, (compound, local_reaches)) in compounds.into_iter().enumerate() {
         if record_tree_siblings
             && local_reaches.contains(InvalidationReaches::SIBLINGS)
             && !relative_selector_subject_has_key(&compound)
@@ -1585,12 +1627,32 @@ fn note_selector_dependencies(
             map.mark_conservative(rule_order);
         }
         let reaches = compose_invalidation_reach(map, local_reaches, outer_reaches, rule_order);
-        note_compound_dependencies(map, &compound, reaches, rule_order, !record_tree_siblings);
+        note_compound_dependencies(
+            map,
+            &compound,
+            reaches,
+            rule_order,
+            !record_tree_siblings,
+            subject_anchor.filter(|_| position == subject_index),
+            if position == subject_index {
+                &subject_ancestor_keys
+            } else {
+                &[]
+            },
+        );
     }
 }
 
 fn note_selector_for_invalidation(map: &mut InvalidationMap, selector: &str, rule_order: usize) {
-    note_selector_dependencies(map, selector, InvalidationReaches::SELF, rule_order, true);
+    note_selector_dependencies(
+        map,
+        selector,
+        InvalidationReaches::SELF,
+        rule_order,
+        true,
+        None,
+        &[],
+    );
 }
 
 /// Record element attributes read from declaration values.
@@ -1761,6 +1823,7 @@ struct ParsedRule {
     layer: Option<LayerOrder>,
 }
 
+#[derive(Clone)]
 struct Rule {
     sel: CompiledSelector,
     specificity: u32,
@@ -1848,6 +1911,7 @@ fn declaration_stream_flags(css: &str) -> DeclarationStreamFlags {
     flags
 }
 
+#[derive(Clone)]
 struct PseudoRule {
     sel: CompiledSelector,
     specificity: u32,
@@ -1861,7 +1925,7 @@ struct PseudoRule {
     layer: Option<LayerOrder>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct PseudoRuleMap {
     rules: Vec<PseudoRule>,
     by_root: Vec<usize>,
@@ -1990,7 +2054,7 @@ struct LayerOrder(Vec<u32>);
 /// Global author-layer name table for one `Stylesheet` parse. Layer ordering
 /// spans all style sources in document order, so this registry must outlive
 /// each individual `<style>`/linked stylesheet source.
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct LayerRegistry {
     named: HashMap<(Vec<u32>, String), LayerOrder>,
     next_child: HashMap<Vec<u32>, u32>,
@@ -2549,6 +2613,15 @@ fn evaluate_container_query_expr(
 }
 
 /// An indexed set of author rules ready for fast per-element matching.
+/// The parse state carried from one source to the next.
+#[derive(Clone, Default)]
+struct ParseFold {
+    order: usize,
+    layers: LayerRegistry,
+    keyframe_winners: HashMap<String, (Option<LayerOrder>, bool, usize)>,
+}
+
+#[derive(Clone)]
 pub struct Stylesheet {
     rules: Vec<Rule>,
     /// Rules whose subject can match this stylesheet's featureless shadow
@@ -2599,10 +2672,156 @@ pub struct StylesheetCache {
     entry: Option<CachedStylesheet>,
     hits: u64,
     misses: u64,
+    /// How the sheet of the latest miss continued an earlier parse.
+    last_resume: Option<SheetResume>,
+}
+
+/// The rule counts of the parse a sheet continued from: every rule at or
+/// past these indexes was parsed after the sources the two sheets share.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SheetResume {
+    rules: usize,
+    before: usize,
+    after: usize,
+    placeholder: usize,
+    /// The continued parse left `@keyframes` and `@property` unchanged.
+    globals_unchanged: bool,
+}
+
+/// Selector keys of the rules a sheet gained over the parse it continued.
+/// An element can match one of those rules only if it has one of the keys.
+pub(crate) struct AppendedRuleKeys {
+    ids: std::collections::HashSet<String>,
+    classes: std::collections::HashSet<String>,
+    attributes: std::collections::HashSet<String>,
+    locals: std::collections::HashSet<String>,
+}
+
+impl AppendedRuleKeys {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+            && self.classes.is_empty()
+            && self.attributes.is_empty()
+            && self.locals.is_empty()
+    }
+
+    /// Whether `node` has one of the keys (ASCII case-insensitively, which
+    /// is never narrower than the matcher's own comparison).
+    pub(crate) fn may_match(&self, tree: &DomTree, node: NodeId) -> bool {
+        let Some(dom_node) = tree.borrow_node(node) else {
+            return false;
+        };
+        let Some(element) = dom_node.as_element() else {
+            return false;
+        };
+        if self
+            .locals
+            .contains(&element.local.as_ref().to_ascii_lowercase())
+        {
+            return true;
+        }
+        if !self.ids.is_empty() {
+            if let Some(id) = dom_node.get_attribute("id") {
+                if self.ids.contains(&id.to_ascii_lowercase()) {
+                    return true;
+                }
+            }
+        }
+        if !self.classes.is_empty() {
+            if let Some(classes) = dom_node.get_attribute("class") {
+                if classes
+                    .split_ascii_whitespace()
+                    .any(|class| self.classes.contains(&class.to_ascii_lowercase()))
+                {
+                    return true;
+                }
+            }
+        }
+        if !self.attributes.is_empty() {
+            if let Some(attributes) = dom_node.attrs() {
+                if attributes.iter().any(|attribute| {
+                    self.attributes
+                        .contains(&attribute.name.local.as_ref().to_ascii_lowercase())
+                }) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+impl Stylesheet {
+    /// Keys of the rules this sheet holds past `resume`, or `None` when one
+    /// of them can match any element (no subject key, `:root`, host or
+    /// slotted rules) or the continued parse changed `@keyframes`/`@property`.
+    pub(crate) fn appended_rule_keys(&self, resume: &SheetResume) -> Option<AppendedRuleKeys> {
+        if !resume.globals_unchanged {
+            return None;
+        }
+        let mut keys = AppendedRuleKeys {
+            ids: Default::default(),
+            classes: Default::default(),
+            attributes: Default::default(),
+            locals: Default::default(),
+        };
+        let first = resume.rules;
+        if self.host_rules.iter().any(|&index| index >= first)
+            || self.slotted_rules.iter().any(|&index| index >= first)
+        {
+            return None;
+        }
+        let selectors = self
+            .rules
+            .get(first..)?
+            .iter()
+            .map(|rule| &rule.sel)
+            .chain(
+                self.before_rules
+                    .rules
+                    .get(resume.before..)?
+                    .iter()
+                    .map(|rule| &rule.sel),
+            )
+            .chain(
+                self.after_rules
+                    .rules
+                    .get(resume.after..)?
+                    .iter()
+                    .map(|rule| &rule.sel),
+            )
+            .chain(
+                self.placeholder_rules
+                    .rules
+                    .get(resume.placeholder..)?
+                    .iter()
+                    .map(|rule| &rule.sel),
+            );
+        for sel in selectors {
+            for key in sel.candidate_keys() {
+                match key {
+                    SelectorKey::Root | SelectorKey::Universal => return None,
+                    SelectorKey::Id(value) => keys.ids.insert(value.to_ascii_lowercase()),
+                    SelectorKey::Class(value) => keys.classes.insert(value.to_ascii_lowercase()),
+                    SelectorKey::Attribute(value) => {
+                        keys.attributes.insert(value.to_ascii_lowercase())
+                    }
+                    SelectorKey::Local(value) => keys.locals.insert(value.to_ascii_lowercase()),
+                };
+            }
+        }
+        Some(keys)
+    }
 }
 
 struct CachedStylesheet {
     sources: Vec<String>,
+    /// The parse state after the last source, so a source list that only
+    /// appends to this one continues from here.
+    fold: ParseFold,
+    /// The sheet and parse state before the last source. Pages commonly
+    /// insert new sheets just before a trailing one.
+    before_last: Option<(Arc<Stylesheet>, ParseFold)>,
     viewport_bits: (u32, u32),
     media_type: CssMediaType,
     source_bytes: usize,
@@ -2633,15 +2852,73 @@ impl StylesheetCache {
         media_type: CssMediaType,
     ) -> (Arc<Stylesheet>, bool) {
         let viewport_bits = (viewport.0.to_bits(), viewport.1.to_bits());
+        self.last_resume = None;
         if let Some(sheet) = self.get(sources, viewport, media_type) {
             self.hits = self.hits.saturating_add(1);
             return (sheet, true);
         }
 
         self.misses = self.misses.saturating_add(1);
-        let sheet = Arc::new(Stylesheet::parse_for_viewport_and_media(
-            tree, sources, viewport, media_type,
-        ));
+        if crate::prof::enabled() {
+            if let Some(entry) = self.entry.as_ref() {
+                let first_diff = entry.sources.iter().zip(sources).position(|(a, b)| a != b);
+                eprintln!(
+                    "[timing] sheet-miss old_sources={} new_sources={} first_diff={first_diff:?} diff_lens={:?}",
+                    entry.sources.len(),
+                    sources.len(),
+                    first_diff.map(|i| (entry.sources[i].len(), sources[i].len()))
+                );
+            }
+        }
+        // Pages add style sheets one at a time as components register. When
+        // the cached sources are a prefix of the new ones, continue the
+        // cached parse instead of parsing every sheet again.
+        let resume = self
+            .entry
+            .as_ref()
+            .filter(|entry| entry.viewport_bits == viewport_bits && entry.media_type == media_type)
+            .and_then(|entry| {
+                let old = entry.sources.len();
+                if old < sources.len() && entry.sources[..] == sources[..old] {
+                    return Some((old, Arc::clone(&entry.sheet), entry.fold.clone()));
+                }
+                let (sheet, fold) = entry.before_last.as_ref()?;
+                let kept = old.checked_sub(1)?;
+                (kept < sources.len() && entry.sources[..kept] == sources[..kept])
+                    .then(|| (kept, Arc::clone(sheet), fold.clone()))
+            });
+        let (done, mut sheet, mut fold) = match resume {
+            Some((done, sheet, fold)) => (done, (*sheet).clone(), fold),
+            None => (
+                0,
+                Stylesheet::empty(crate::AnimationSampleTime::default()),
+                ParseFold::default(),
+            ),
+        };
+        let resumed = (done > 0).then(|| {
+            (
+                SheetResume {
+                    rules: sheet.rules.len(),
+                    before: sheet.before_rules.rules.len(),
+                    after: sheet.after_rules.rules.len(),
+                    placeholder: sheet.placeholder_rules.rules.len(),
+                    globals_unchanged: false,
+                },
+                sheet.keyframes.clone(),
+                sheet.registered_custom_properties.clone(),
+            )
+        });
+        let last = sources.len().saturating_sub(1).max(done);
+        sheet.parse_sources(tree, &sources[done..last], viewport, media_type, &mut fold);
+        let before_last = (last == sources.len().saturating_sub(1) && !sources.is_empty())
+            .then(|| (Arc::new(sheet.clone()), fold.clone()));
+        sheet.parse_sources(tree, &sources[last..], viewport, media_type, &mut fold);
+        self.last_resume = resumed.map(|(mut resume, keyframes, properties)| {
+            resume.globals_unchanged =
+                keyframes == sheet.keyframes && properties == sheet.registered_custom_properties;
+            resume
+        });
+        let sheet = Arc::new(sheet);
         let source_bytes = sources
             .iter()
             .try_fold(0usize, |total, source| total.checked_add(source.len()));
@@ -2655,6 +2932,8 @@ impl StylesheetCache {
             let source_bytes = source_bytes.unwrap_or_default();
             self.entry = Some(CachedStylesheet {
                 sources: sources.to_vec(),
+                fold,
+                before_last,
                 viewport_bits,
                 media_type,
                 source_bytes,
@@ -2664,6 +2943,12 @@ impl StylesheetCache {
             self.entry = None;
         }
         (sheet, false)
+    }
+
+    /// How the sheet of the latest `get_or_parse` miss continued an earlier
+    /// parse (`None` after a hit or a parse from scratch).
+    pub(crate) fn take_resume(&mut self) -> Option<SheetResume> {
+        self.last_resume.take()
     }
 
     pub fn hit_count(&self) -> u64 {
@@ -2902,7 +3187,14 @@ impl Stylesheet {
         media_type: CssMediaType,
         animation_sample_time: crate::AnimationSampleTime,
     ) -> Self {
-        let mut sheet = Stylesheet {
+        let mut sheet = Self::empty(animation_sample_time);
+        let mut fold = ParseFold::default();
+        sheet.parse_sources(tree, sources, viewport, media_type, &mut fold);
+        sheet
+    }
+
+    fn empty(animation_sample_time: crate::AnimationSampleTime) -> Self {
+        Stylesheet {
             rules: Vec::new(),
             host_rules: Vec::new(),
             slotted_rules: Vec::new(),
@@ -2924,11 +3216,32 @@ impl Stylesheet {
             before_rules: PseudoRuleMap::default(),
             after_rules: PseudoRuleMap::default(),
             placeholder_rules: PseudoRuleMap::default(),
-        };
-        let mut order = 0usize;
-        let mut layers = LayerRegistry::default();
-        let mut keyframe_winners = HashMap::<String, (Option<LayerOrder>, bool, usize)>::new();
+        }
+    }
+
+    /// Append the rules of `sources` after those already in the sheet. A
+    /// sheet is a left fold over its sources, so parsing `a` and then `b`
+    /// equals parsing `a + b` when `fold` carries the state in between.
+    fn parse_sources(
+        &mut self,
+        tree: &DomTree,
+        sources: &[String],
+        viewport: (f32, f32),
+        media_type: CssMediaType,
+        fold: &mut ParseFold,
+    ) {
+        let sheet = self;
+        let mut order = fold.order;
+        let mut layers = std::mem::take(&mut fold.layers);
+        let mut keyframe_winners = std::mem::take(&mut fold.keyframe_winners);
+        let profiling = crate::prof::enabled();
+        let mut t_text = std::time::Duration::ZERO;
+        let mut t_compile = std::time::Duration::ZERO;
+        let mut t_notes = std::time::Duration::ZERO;
+        let mut t_decls = std::time::Duration::ZERO;
+        let started = std::time::Instant::now();
         for src in sources {
+            let text_started = profiling.then(std::time::Instant::now);
             let parsed = parse_stylesheet_for_viewport_preserving_containers_in_layer(
                 src,
                 viewport,
@@ -2938,6 +3251,9 @@ impl Stylesheet {
                 &mut layers,
                 None,
             );
+            if let Some(at) = text_started {
+                t_text += at.elapsed();
+            }
             for ParsedRule {
                 selector,
                 declarations: decls,
@@ -3079,7 +3395,12 @@ impl Stylesheet {
                     order += 1;
                     continue;
                 }
-                let Some(sel) = tree.compile_rule_selector(&selector) else {
+                let compile_started = profiling.then(std::time::Instant::now);
+                let compiled = tree.compile_rule_selector(&selector);
+                if let Some(at) = compile_started {
+                    t_compile += at.elapsed();
+                }
+                let Some(sel) = compiled else {
                     if selector_requires_conservative_tracking(&selector) {
                         note_selector_for_invalidation(
                             &mut sheet.invalidation_map,
@@ -3090,12 +3411,20 @@ impl Stylesheet {
                     }
                     continue;
                 };
+                let notes_started = profiling.then(std::time::Instant::now);
                 note_selector_for_invalidation(&mut sheet.invalidation_map, &selector, order);
                 note_declaration_attribute_dependencies(&mut sheet.invalidation_map, &decls, order);
+                let decls_started = profiling.then(std::time::Instant::now);
+                if let (Some(a), Some(b)) = (notes_started, decls_started) {
+                    t_notes += b - a;
+                }
                 let (normal_decls, important_decls) = crate::style::partition_declarations(&decls);
                 let specificity = sel.specificity();
                 let normal_flags = declaration_stream_flags(&normal_decls);
                 let important_flags = declaration_stream_flags(&important_decls);
+                if let Some(at) = decls_started {
+                    t_decls += at.elapsed();
+                }
                 let idx = sheet.rules.len();
                 if sel.matches_featureless_host() {
                     sheet.host_rules.push(idx);
@@ -3142,7 +3471,16 @@ impl Stylesheet {
                 order += 1;
             }
         }
-        sheet
+        if profiling {
+            eprintln!(
+                "[timing] sheet-parse total={:?} text={t_text:?} compile={t_compile:?} notes={t_notes:?} decls={t_decls:?} rules={}",
+                started.elapsed(),
+                sheet.rules.len()
+            );
+        }
+        fold.order = order;
+        fold.layers = layers;
+        fold.keyframe_winners = keyframe_winners;
     }
 
     pub fn pseudo_styles(

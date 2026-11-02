@@ -390,6 +390,12 @@ fn effective_v8_flags(user: Option<&str>) -> String {
     }
 }
 
+// Layout and the DOM allocate heavily on the page's thread; jemalloc's
+// thread caches cut that cost against glibc malloc.
+#[cfg(unix)]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 const CLI_STACK_BYTES: usize = 512 * 1024 * 1024;
 
 fn main() -> anyhow::Result<()> {
