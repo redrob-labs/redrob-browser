@@ -634,5 +634,7 @@ pub async fn relay(
     };
     let relay_url = crate::relay::start(devtools.into(), window).await?;
     crate::write_private(&endpoint_file, &relay_url);
+    // The relay's tasks live on this runtime: keep it for the process.
+    std::future::pending::<()>().await;
     Ok(())
 }

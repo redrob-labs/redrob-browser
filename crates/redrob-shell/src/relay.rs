@@ -112,7 +112,11 @@ impl From<crate::cef::DevTools> for Upstream {
 // tungstenite fixes the handshake callback's error type.
 #[allow(clippy::result_large_err)]
 pub async fn start(upstream: Upstream, window: Window) -> anyhow::Result<String> {
-    let hub = Hub::connect(upstream).await?;
+    listen(Hub::connect(upstream).await?, window).await
+}
+
+#[allow(clippy::result_large_err)]
+async fn listen(hub: Arc<Hub>, window: Window) -> anyhow::Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr = listener.local_addr()?;
     let mut secret = [0u8; 16];
@@ -887,17 +891,31 @@ pub(crate) mod tests {
         let Some(mut chrome) = chromium() else { return };
         let f = fake();
         let places = f.window.places.clone();
-        let relay = start(chrome.upstream.take().unwrap(), f.window)
-            .await
-            .unwrap();
+        let hub = Hub::connect(chrome.upstream.take().unwrap()).await.unwrap();
+        let relay = listen(hub.clone(), f.window).await.unwrap();
         let mut c = Client {
             ws: connect(&relay).await.unwrap(),
             next: 0,
         };
-        // A second client opens the window's tab on Chromium directly, as
-        // the CEF window would, and answers the relay with its id.
+        // The window opens its tab on Chromium itself, as the CEF window
+        // does, and answers the relay with its id: here through a relay
+        // that passes Target.createTarget through.
+        let (login, _) = std::sync::mpsc::channel();
+        let (open_window, _) = std::sync::mpsc::channel();
+        let direct = listen(
+            hub,
+            Window {
+                login,
+                open_window,
+                tabs: None,
+                places: Default::default(),
+                wake: Arc::new(|| {}),
+            },
+        )
+        .await
+        .unwrap();
         let mut w = Client {
-            ws: connect(&relay).await.unwrap(),
+            ws: connect(&direct).await.unwrap(),
             next: 0,
         };
         let page = "data:text/html,<title>t</title><input id=q><button onclick=\"document.title='clicked'\">Go</button>";
