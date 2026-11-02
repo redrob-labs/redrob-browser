@@ -266,7 +266,7 @@ pub(crate) struct IfcStore {
     /// The IFCs are lent to the thread's active layout.
     active: bool,
     /// Root element -> its IFCs, in document order (filled after layout).
-    pub(crate) by_node: std::collections::HashMap<NodeId, Vec<usize>>,
+    pub(crate) by_node: crate::HashMap<NodeId, Vec<usize>>,
     #[cfg(feature = "paint")]
     pub(crate) raster: paint::GlyphRaster,
     /// The shaped, not yet laid out IFCs this store created, with what they
@@ -314,7 +314,7 @@ impl IfcStore {
     pub(crate) fn standalone(
         &mut self,
         tree: &obscura_dom::tree::DomTree,
-        styles: &std::collections::HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::HashMap<NodeId, crate::LayoutStyle>,
         owner: NodeId,
         style: &crate::LayoutStyle,
         text: &str,

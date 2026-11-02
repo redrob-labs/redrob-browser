@@ -4,7 +4,7 @@
 //! Portions derived from Blitz (https://github.com/DioxusLabs/blitz), MIT OR Apache-2.0
 //! (`blitz-dom/src/layout/construct.rs`).
 
-use std::collections::HashMap;
+use crate::HashMap;
 
 use obscura_dom::tree::{DomTree, NodeId};
 use taffy::TaffyTree;

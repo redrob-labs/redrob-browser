@@ -7,10 +7,10 @@
 //! of rules). The indexed cascade is closer to how real browsers match: bucket
 //! rules, gather candidates per element, then match and sort by specificity.
 
+use crate::HashMap;
 use obscura_dom::selector::{CompiledSelector, Matcher, SelectorKey};
 use obscura_dom::tree::{DomTree, NodeId};
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::LayoutStyle;
@@ -2365,7 +2365,7 @@ impl<'a> ContainerQueryEvaluator<'a> {
         Self {
             tree,
             snapshot,
-            cache: HashMap::new(),
+            cache: HashMap::default(),
             stats: ContainerQueryStats::default(),
         }
     }
@@ -2695,10 +2695,10 @@ pub(crate) struct SheetResume {
 /// Selector keys of the rules a sheet gained over the parse it continued.
 /// An element can match one of those rules only if it has one of the keys.
 pub(crate) struct AppendedRuleKeys {
-    ids: std::collections::HashSet<String>,
-    classes: std::collections::HashSet<String>,
-    attributes: std::collections::HashSet<String>,
-    locals: std::collections::HashSet<String>,
+    ids: crate::HashSet<String>,
+    classes: crate::HashSet<String>,
+    attributes: crate::HashSet<String>,
+    locals: crate::HashSet<String>,
 }
 
 impl AppendedRuleKeys {
@@ -3221,18 +3221,18 @@ impl Stylesheet {
             host_rules: Vec::new(),
             slotted_rules: Vec::new(),
             invalidation_map: InvalidationMap::default(),
-            registered_custom_properties: HashMap::new(),
+            registered_custom_properties: HashMap::default(),
             container_conditions: vec![ContainerConditionNode {
                 parent: ContainerConditionId::NONE,
                 alternatives: Vec::new(),
             }],
-            keyframes: HashMap::new(),
+            keyframes: HashMap::default(),
             animation_sample_time,
             by_root: Vec::new(),
-            by_id: HashMap::new(),
-            by_class: HashMap::new(),
-            by_attribute: HashMap::new(),
-            by_local: HashMap::new(),
+            by_id: HashMap::default(),
+            by_class: HashMap::default(),
+            by_attribute: HashMap::default(),
+            by_local: HashMap::default(),
             universal: Vec::new(),
             candidate_slot_count: 0,
             before_rules: PseudoRuleMap::default(),
@@ -4357,7 +4357,7 @@ impl Stylesheet {
             }
             let registration_changed_props = registrations_change_parent;
             let has_own = !own.is_empty();
-            let mut own_names = std::collections::HashSet::new();
+            let mut own_names = crate::HashSet::default();
             for (k, v) in own {
                 own_names.insert(k.clone());
                 let registration = self.registered_custom_properties.get(&k);
@@ -4891,11 +4891,11 @@ fn compile_keyframe_body(css: &str) -> Keyframes {
         return Keyframes::default();
     }
 
-    let mut tracks = HashMap::<AnimatedProperty, Vec<PropertyTrackStop>>::new();
+    let mut tracks = HashMap::<AnimatedProperty, Vec<PropertyTrackStop>>::default();
     for (offset, stop) in normalized_keyframe_offsets(&stops) {
         // CSS Animations ignores important declarations in keyframes.
         let (normal, _) = crate::style::partition_declarations(&stop.declarations);
-        let mut declarations = HashMap::<AnimatedProperty, AnimatedDeclaration>::new();
+        let mut declarations = HashMap::<AnimatedProperty, AnimatedDeclaration>::default();
         for raw in crate::style::split_declarations(&normal) {
             let Some((name, value)) = raw.trim().split_once(':') else {
                 continue;
@@ -8447,7 +8447,7 @@ mod tests {
                 &["target".to_string()],
                 "div",
                 &mut style,
-                &HashMap::new(),
+                &HashMap::default(),
                 inline_css,
             )
             .unwrap_or_default();
@@ -8516,7 +8516,7 @@ mod tests {
         let plain_flags = declaration_stream_flags(plain);
         assert_eq!(plain_flags, DeclarationStreamFlags::default());
         assert!(matches!(
-            substitute_declarations(plain, &HashMap::new(), plain_flags.has_var),
+            substitute_declarations(plain, &HashMap::default(), plain_flags.has_var),
             Cow::Borrowed(value) if value == plain
         ));
 
@@ -8526,7 +8526,7 @@ mod tests {
         assert!(flags.has_var);
         assert!(flags.has_color_scheme);
         assert!(flags.has_animation);
-        let props = HashMap::from([("--tone".to_string(), "rebeccapurple".to_string())]);
+        let props = HashMap::from_iter([("--tone".to_string(), "rebeccapurple".to_string())]);
         let expanded = substitute_declarations(dynamic, &props, flags.has_var);
         assert!(matches!(&expanded, Cow::Owned(_)));
         assert!(expanded.contains("color:rebeccapurple;"));
@@ -8572,7 +8572,7 @@ mod tests {
             &[],
             "html",
             &mut root_style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         assert_eq!(root_style.width, crate::Dimension::Px(321.0));
@@ -8587,7 +8587,7 @@ mod tests {
             &[],
             "body",
             &mut body_style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         assert_ne!(body_style.height, crate::Dimension::Px(123.0));
@@ -8601,7 +8601,7 @@ mod tests {
             &["card".to_string()],
             "div",
             &mut card_style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         assert_eq!(card_style.height, crate::Dimension::Px(123.0));
@@ -8638,7 +8638,7 @@ mod tests {
                     &tree,
                     &mut tree.matcher(),
                     target,
-                    &HashMap::new(),
+                    &HashMap::default(),
                     &LayoutStyle::default(),
                 )
                 .0
@@ -8664,7 +8664,7 @@ mod tests {
                 &tree,
                 &mut tree.matcher(),
                 target,
-                &HashMap::new(),
+                &HashMap::default(),
                 &LayoutStyle::default(),
             )
             .0
@@ -8699,7 +8699,7 @@ mod tests {
             &["alpha".to_string()],
             "div",
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         assert_eq!(style.width, crate::Dimension::Px(47.0));
@@ -8787,7 +8787,8 @@ mod tests {
             "#
             .to_string()],
         );
-        let parent_props = HashMap::from([("--inherited-size".to_string(), "37px".to_string())]);
+        let parent_props =
+            HashMap::from_iter([("--inherited-size".to_string(), "37px".to_string())]);
         let mut matcher = tree.matcher();
         let mut style = LayoutStyle::default();
         let effective = sheet.apply(
@@ -8992,7 +8993,7 @@ mod tests {
             &[],
             element.local.as_ref(),
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         style
@@ -9255,7 +9256,7 @@ mod tests {
             &[],
             element.local.as_ref(),
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             node.get_attribute("style"),
             crate::AnimationSample::document(50.0),
             &mut timeline,
@@ -9299,7 +9300,7 @@ mod tests {
             &[],
             "div",
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             node.get_attribute("style"),
             crate::AnimationSample::document(100.0),
             &mut timeline,
@@ -9349,7 +9350,7 @@ mod tests {
                 &[],
                 "div",
                 &mut style,
-                &HashMap::new(),
+                &HashMap::default(),
                 node.get_attribute("style"),
                 crate::AnimationSample::document(time),
                 timeline,
@@ -9411,7 +9412,7 @@ mod tests {
             &[],
             "div",
             &mut important_style,
-            &HashMap::new(),
+            &HashMap::default(),
             node.get_attribute("style"),
             crate::AnimationSample::document(0.0),
             &mut important_timeline,
@@ -9719,7 +9720,7 @@ mod tests {
                 &classes,
                 element.local.as_ref(),
                 &mut style,
-                &HashMap::new(),
+                &HashMap::default(),
                 None,
             );
             assert_opacity(style.opacity.unwrap(), if frame == 0 { 1.0 } else { 0.0 });
@@ -9957,14 +9958,14 @@ mod tests {
         let child = tree.get_element_by_id("child").unwrap();
         let initial = tree.get_element_by_id("initial").unwrap();
         let (_, parent_props) =
-            apply_registered_property_test_style(&sheet, &tree, parent, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, parent, &HashMap::default());
         let (child_style, _) =
             apply_registered_property_test_style(&sheet, &tree, child, &parent_props);
         assert_eq!(child_style.width, crate::Dimension::Percent(0.75));
         assert_eq!(child_style.height, crate::Dimension::Percent(0.30));
 
         let (initial_style, _) =
-            apply_registered_property_test_style(&sheet, &tree, initial, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, initial, &HashMap::default());
         assert_eq!(initial_style.width, crate::Dimension::Percent(0.75));
         assert_eq!(initial_style.height, crate::Dimension::Percent(0.25));
     }
@@ -9987,7 +9988,7 @@ mod tests {
         "#;
         let sheet = Stylesheet::parse(&tree, &[css.to_string()]);
         let target = tree.get_element_by_id("target").unwrap();
-        let parent_props = HashMap::from([
+        let parent_props = HashMap::from_iter([
             ("--private".to_string(), "75%".to_string()),
             ("--shared".to_string(), "30%".to_string()),
         ]);
@@ -10008,7 +10009,7 @@ mod tests {
         assert_eq!(style.width, crate::Dimension::Percent(0.75));
         assert_eq!(style.height, crate::Dimension::Percent(0.30));
 
-        let overridden_parent = HashMap::from([
+        let overridden_parent = HashMap::from_iter([
             ("--private".to_string(), "60%".to_string()),
             ("--shared".to_string(), "30%".to_string()),
         ]);
@@ -10063,15 +10064,15 @@ mod tests {
         let reset_id = tree.get_element_by_id("reset").unwrap();
         let invalid_id = tree.get_element_by_id("invalid").unwrap();
         let (overridden, _) =
-            apply_registered_property_test_style(&sheet, &tree, override_id, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, override_id, &HashMap::default());
         assert_eq!(overridden.width, crate::Dimension::Percent(0.60));
         assert_eq!(overridden.height, crate::Dimension::Percent(0.12));
         let (reset, _) =
-            apply_registered_property_test_style(&sheet, &tree, reset_id, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, reset_id, &HashMap::default());
         assert_eq!(reset.width, crate::Dimension::Percent(0.75));
         assert_eq!(reset.height, crate::Dimension::Percent(0.12));
         let (invalid, invalid_props) =
-            apply_registered_property_test_style(&sheet, &tree, invalid_id, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, invalid_id, &HashMap::default());
         assert_eq!(invalid.width, crate::Dimension::Percent(0.75));
         assert_eq!(
             invalid_props.get("--registered").map(String::as_str),
@@ -10082,7 +10083,7 @@ mod tests {
 
     #[test]
     fn var_substitution_preserves_neighboring_token_boundaries() {
-        let props = HashMap::from([
+        let props = HashMap::from_iter([
             ("--stroke".to_string(), "2px".to_string()),
             ("--amount".to_string(), "10".to_string()),
         ]);
@@ -10123,7 +10124,7 @@ mod tests {
         let sheet = Stylesheet::parse(&tree, &[css.to_string()]);
         let target = tree.get_element_by_id("target").unwrap();
         let (style, _) =
-            apply_registered_property_test_style(&sheet, &tree, target, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, target, &HashMap::default());
         assert_eq!(
             style.border,
             crate::Edges {
@@ -10180,13 +10181,13 @@ mod tests {
         let wild_fallback = tree.get_element_by_id("wild-fallback").unwrap();
         let typed = tree.get_element_by_id("typed").unwrap();
         let (wild_style, _) =
-            apply_registered_property_test_style(&sheet, &tree, wild, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, wild, &HashMap::default());
         assert_eq!(wild_style.width, crate::Dimension::Px(20.0));
         let (fallback_style, _) =
-            apply_registered_property_test_style(&sheet, &tree, wild_fallback, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, wild_fallback, &HashMap::default());
         assert_eq!(fallback_style.width, crate::Dimension::Px(7.0));
         let (typed_style, typed_props) =
-            apply_registered_property_test_style(&sheet, &tree, typed, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, typed, &HashMap::default());
         assert_eq!(typed_style.opacity, Some(2.0));
         assert_eq!(typed_style.height, crate::Dimension::Px(11.0));
         assert_eq!(
@@ -10222,7 +10223,7 @@ mod tests {
         let sheet = Stylesheet::parse(&tree, &[css.to_string()]);
         let pulse = tree.get_element_by_id("pulse").unwrap();
         let (style, props) =
-            apply_registered_property_test_style(&sheet, &tree, pulse, &HashMap::new());
+            apply_registered_property_test_style(&sheet, &tree, pulse, &HashMap::default());
         assert_eq!(props.get("--pulse-outer").map(String::as_str), Some("75%"));
         let (_, stops) = style
             .background_radial_gradient
@@ -10369,7 +10370,7 @@ mod tests {
             &classes,
             element.local.as_ref(),
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
             &mut evaluator,
         );
@@ -10780,13 +10781,13 @@ mod tests {
             &[],
             "div",
             &mut style,
-            &HashMap::new(),
+            &HashMap::default(),
             None,
         );
         assert_eq!(style.width, crate::Dimension::Px(10.0));
         assert_eq!(style.height, crate::Dimension::Px(20.0));
         let (before, after) =
-            sheet.pseudo_styles(&tree, &mut matcher, target, &HashMap::new(), &style);
+            sheet.pseudo_styles(&tree, &mut matcher, target, &HashMap::default(), &style);
         assert!(before.is_none() && after.is_none());
     }
 

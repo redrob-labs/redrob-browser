@@ -4368,8 +4368,40 @@ globalThis._watchAnimationStart = function (el) {
   _animationStartWatched.add(el);
   if (_animationStartTimer == null) _animationStartTimer = setTimeout(_animationStartTick, 16);
 };
+const _cssAnimationKeyOf = new Map();
+// One element's CSS animations, sharing the wrappers _cssAnimations() keeps.
+// getComputedStyle() asks this for its target on every read; listing every
+// animation of the document there cost YouTube ~2 ms per read.
+function _cssAnimationsOf(nid) {
+  if (typeof __obscuraCore.ops.op_css_animation_of !== 'function') {
+    return _cssAnimations().filter(animation => animation._nid === nid);
+  }
+  let rows = [];
+  try { rows = JSON.parse(__obscuraCore.ops.op_css_animation_of(nid >>> 0)) || []; }
+  catch (_e) { rows = []; }
+  const live = [];
+  // An element runs at most one instance: drop the wrapper of one that ended
+  // or changed name, so a later instance gets a new object.
+  const previous = _cssAnimationKeyOf.get(nid);
+  const current = rows.length ? rows[0][0] + ' ' + rows[0][1] : undefined;
+  if (previous !== undefined && previous !== current) _cssAnimationWrappers.delete(previous);
+  if (current === undefined) _cssAnimationKeyOf.delete(nid);
+  else _cssAnimationKeyOf.set(nid, current);
+  for (const [rowNid, name, paused, time] of rows) {
+    const key = rowNid + ' ' + name;
+    let wrapper = _cssAnimationWrappers.get(key);
+    if (!wrapper) {
+      wrapper = new CSSAnimation(rowNid, name);
+      _cssAnimationWrappers.set(key, wrapper);
+    }
+    wrapper._paused = !!paused;
+    wrapper._current = Number(time) || 0;
+    live.push(wrapper);
+  }
+  return live;
+}
 function _animationsForTarget(target) {
-  const css = _cssAnimations().filter(animation => animation._nid === (target?._nid | 0));
+  const css = _cssAnimationsOf(target?._nid | 0);
   return css.concat(Array.from(_waapiAnimations).filter(animation => {
     if (animation.effect?.target !== target || animation.playState === 'idle') return false;
     return animation.playState !== 'finished' || animation.effect._timing.fill === 'forwards' || animation.effect._timing.fill === 'both';
@@ -12714,9 +12746,14 @@ function _runIntersectionRenderCheckpoint() {
   }
   for (const observer of observers) {
     if (observer._root instanceof Element) addElement(observer._root);
+    // An ancestor whose own chain was already walked for this root has all
+    // of its ancestors gathered too: stop there.
+    const walked = new Set();
     for (const target of observer._targets) {
       let ancestor = target.parentNode || target.host || null;
       while (ancestor && ancestor !== observer._root && ancestor.nodeType !== 9) {
+        if (walked.has(ancestor)) break;
+        walked.add(ancestor);
         addElement(ancestor);
         ancestor = ancestor.parentNode || ancestor.host || null;
       }
@@ -12800,6 +12837,81 @@ function _ioElementPaddingBox(element, style, measurements) {
     ? (geometry ? _roNumber(geometry.clientHeight) : 0)
     : element.clientHeight;
   return _ioRect(rect.left + borderLeft, rect.top + borderTop, width, height);
+}
+// The overflow clip of every ancestor from `start` up to the intersection
+// root, as one rectangle, and the node the walk ended on (the root, a
+// document, or null). Mapping a target to its root clips it at every
+// intervening overflow container: intersecting only with the final root
+// exposes offscreen children of nested carousels, virtual lists and lazy
+// loading viewports. Each ancestor's padding box clips independently by axis,
+// matching Chromium's rectangular overflow clip chain.
+//
+// One checkpoint measures every target against the same snapshot, and
+// targets share most of their ancestors (YouTube observes hundreds of
+// thumbnails below the same few dozen containers), so each ancestor's chain
+// is computed once per checkpoint and root and reused by every target and
+// descendant below it.
+function _ioAncestorClip(start, observerRoot, measurements) {
+  let byRoot = measurements._ioClipChains;
+  if (!byRoot) {
+    byRoot = new Map();
+    Object.defineProperty(measurements, '_ioClipChains', { value: byRoot });
+  }
+  let chains = byRoot.get(observerRoot);
+  if (!chains) {
+    chains = new Map();
+    byRoot.set(observerRoot, chains);
+  }
+  const open = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity };
+  const path = [];
+  let ancestor = start;
+  let above = null;
+  while (ancestor && ancestor !== observerRoot && ancestor.nodeType !== 9) {
+    const known = chains.get(ancestor);
+    if (known) {
+      above = known;
+      break;
+    }
+    path.push(ancestor);
+    ancestor = ancestor.parentNode || ancestor.host || null;
+  }
+  if (!above) above = { ...open, end: ancestor };
+  for (let index = path.length - 1; index >= 0; index--) {
+    const node = path[index];
+    let chain = above;
+    // The root element's overflow, or the body's when the root's is
+    // `visible`, belongs to the viewport (CSS overflow propagation), so that
+    // element does not clip its descendants itself. YouTube's body is
+    // `overflow-y: scroll` with a zero-height box; clipping by it hid every
+    // lazily loaded thumbnail from the observer.
+    if (node instanceof Element) {
+      const doc = node.ownerDocument;
+      const docElement = doc && doc.documentElement;
+      let clips = node !== docElement;
+      if (clips && docElement && node === doc.body) {
+        const rootStyle = _ioElementStyle(docElement, measurements);
+        clips = _ioClipsOverflow(rootStyle.overflowX) || _ioClipsOverflow(rootStyle.overflowY);
+      }
+      if (clips) {
+        const style = _ioElementStyle(node, measurements);
+        const clipX = _ioClipsOverflow(style.overflowX);
+        const clipY = _ioClipsOverflow(style.overflowY);
+        if (clipX || clipY) {
+          const clip = _ioElementPaddingBox(node, style, measurements);
+          chain = {
+            left: clipX ? Math.max(above.left, clip.left) : above.left,
+            right: clipX ? Math.min(above.right, clip.right) : above.right,
+            top: clipY ? Math.max(above.top, clip.top) : above.top,
+            bottom: clipY ? Math.min(above.bottom, clip.bottom) : above.bottom,
+            end: above.end,
+          };
+        }
+      }
+    }
+    chains.set(node, chain);
+    above = chain;
+  }
+  return above;
 }
 // Entry fields are prototype getters over internal state, as in browsers.
 const _ioEntryToken = Symbol("IntersectionObserverEntry");
@@ -12903,39 +13015,14 @@ globalThis.IntersectionObserver = class IntersectionObserver {
     // exposes offscreen children of nested carousels, virtual lists, and lazy
     // loading viewports. Use each ancestor's padding box, independently by
     // axis, matching Chromium's rectangular overflow clip chain.
-    let ancestor = target.parentNode || target.host || null;
-    // The root element's overflow, or the body's when the root's is
-    // `visible`, belongs to the viewport (CSS overflow propagation), so that
-    // element does not clip its descendants itself. YouTube's body is
-    // `overflow-y: scroll` with a zero-height box; clipping by it hid every
-    // lazily loaded thumbnail from the observer.
-    // Read lazily: most roots stop the walk before <body>.
-    const docElement = target.ownerDocument && target.ownerDocument.documentElement;
-    const bodyOwnsViewportOverflow = (element) => {
-      if (!docElement || element !== target.ownerDocument.body) return false;
-      const rootStyle = _ioElementStyle(docElement, measurements);
-      return !_ioClipsOverflow(rootStyle.overflowX) && !_ioClipsOverflow(rootStyle.overflowY);
-    };
-    while (inRootTree && ancestor && ancestor !== this._root && ancestor.nodeType !== 9) {
-      if (ancestor instanceof Element && ancestor !== docElement && !bodyOwnsViewportOverflow(ancestor)) {
-        const style = _ioElementStyle(ancestor, measurements);
-        const clipX = _ioClipsOverflow(style.overflowX);
-        const clipY = _ioClipsOverflow(style.overflowY);
-        if (clipX || clipY) {
-          const clip = _ioElementPaddingBox(ancestor, style, measurements);
-          if (clipX) {
-            left = Math.max(left, clip.left);
-            right = Math.min(right, clip.right);
-          }
-          if (clipY) {
-            top = Math.max(top, clip.top);
-            bottom = Math.min(bottom, clip.bottom);
-          }
-        }
-      }
-      ancestor = ancestor.parentNode || ancestor.host || null;
+    if (inRootTree) {
+      const chain = _ioAncestorClip(target.parentNode || target.host || null, this._root, measurements);
+      left = Math.max(left, chain.left);
+      right = Math.min(right, chain.right);
+      top = Math.max(top, chain.top);
+      bottom = Math.min(bottom, chain.bottom);
+      if (this._root instanceof Element && chain.end !== this._root) inRootTree = false;
     }
-    if (this._root instanceof Element && ancestor !== this._root) inRootTree = false;
 
     const edgesTouch = inRootTree && right >= left && bottom >= top;
     const width = Math.max(0, right - left);

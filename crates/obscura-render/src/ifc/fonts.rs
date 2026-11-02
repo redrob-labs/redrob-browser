@@ -620,7 +620,7 @@ fn host_fallback_font_files() -> &'static [Arc<Vec<u8>>] {
         if !output.status.success() {
             return Vec::new();
         }
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::HashSet::default();
         let mut files = Vec::new();
         for line in String::from_utf8_lossy(&output.stdout).lines() {
             let path = PathBuf::from(line.trim());
@@ -681,12 +681,10 @@ fn font_files_under(roots: Vec<PathBuf>) -> Vec<PathBuf> {
 /// Host-installed families by lowercase family name: the name as the font
 /// spells it and the files that hold its faces. Built once, from the
 /// fonts' own name tables (typographic and legacy family names).
-fn host_font_index() -> &'static std::collections::HashMap<String, (String, Vec<PathBuf>)> {
-    static INDEX: OnceLock<std::collections::HashMap<String, (String, Vec<PathBuf>)>> =
-        OnceLock::new();
+fn host_font_index() -> &'static crate::HashMap<String, (String, Vec<PathBuf>)> {
+    static INDEX: OnceLock<crate::HashMap<String, (String, Vec<PathBuf>)>> = OnceLock::new();
     INDEX.get_or_init(|| {
-        let mut index: std::collections::HashMap<String, (String, Vec<PathBuf>)> =
-            std::collections::HashMap::new();
+        let mut index: crate::HashMap<String, (String, Vec<PathBuf>)> = crate::HashMap::default();
         for path in font_files_under(host_font_directories()) {
             let Ok(data) = std::fs::read(&path) else {
                 continue;
@@ -719,7 +717,7 @@ fn host_font_index() -> &'static std::collections::HashMap<String, (String, Vec<
 
 /// The bytes of one host font file, read once per process.
 fn host_font_bytes(path: &PathBuf) -> Option<Arc<Vec<u8>>> {
-    static FILES: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, Arc<Vec<u8>>>>> =
+    static FILES: OnceLock<std::sync::Mutex<crate::HashMap<PathBuf, Arc<Vec<u8>>>>> =
         OnceLock::new();
     let files = FILES.get_or_init(Default::default);
     let mut files = files.lock().ok()?;

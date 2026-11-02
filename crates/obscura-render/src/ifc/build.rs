@@ -4,8 +4,8 @@
 //! Portions derived from Blitz (https://github.com/DioxusLabs/blitz), MIT OR Apache-2.0
 //! (`blitz-dom/src/layout/inline/build.rs`).
 
+use crate::HashMap;
 use std::borrow::Cow;
-use std::collections::HashMap;
 
 use obscura_dom::tree::{DomTree, NodeId};
 use parley::{
@@ -250,10 +250,10 @@ thread_local! {
     /// Templates of the most recently dropped IFC stores on this thread, by
     /// root element, for the next layout to reuse.
     static PREVIOUS_TEMPLATES: std::cell::RefCell<HashMap<NodeId, Vec<IfcTemplate>>> =
-        std::cell::RefCell::new(HashMap::new());
+        std::cell::RefCell::new(HashMap::default());
     /// The laid-out IFCs of the same stores, by template id.
     static PREVIOUS_LAID: std::cell::RefCell<HashMap<u64, Box<Ifc>>> =
-        std::cell::RefCell::new(HashMap::new());
+        std::cell::RefCell::new(HashMap::default());
 }
 
 static NEXT_TEMPLATE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);

@@ -4,8 +4,8 @@
 //! site-specific hacks that used to live in obscura-render for this exact markup.
 
 use obscura_dom::tree_sink::parse_html;
+use obscura_render::HashMap;
 use obscura_render::{layout_dom, layout_dom_with_images};
-use std::collections::HashMap;
 
 #[test]
 fn word_spacing_changes_intrinsic_width() {
@@ -1030,7 +1030,7 @@ fn replaced_max_height_clamps_intrinsic_aspect_transfer() {
         "../../../render-repros/max-height-replaced.html"
     ));
     let image_id = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image_id, (648.0, 440.0))]);
+    let intrinsic = HashMap::from_iter([(image_id, (648.0, 440.0))]);
     let layout = layout_dom_with_images(&tree, (900.0, 1000.0), &intrinsic);
     let card = layout.rects[&tree.get_element_by_id("card").unwrap()];
     let image = layout.rects[&image_id];
@@ -1879,7 +1879,7 @@ fn replaced_image_contributes_intrinsic_size_in_ordered_grid() {
         "../../../render-repros/replaced-grid-order.html"
     ));
     let image_id = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image_id, (1.0, 1.0))]);
+    let intrinsic = HashMap::from_iter([(image_id, (1.0, 1.0))]);
     let layout = layout_dom_with_images(&tree, (900.0, 1000.0), &intrinsic);
     let rect = |id| layout.rects[&tree.get_element_by_id(id).unwrap()];
     let description = rect("description");
@@ -1912,7 +1912,7 @@ fn auto_block_wrapper_contains_percentage_replaced_child() {
         "../../../render-repros/replaced-block-wrapper.html"
     ));
     let image_id = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image_id, (720.0, 424.0))]);
+    let intrinsic = HashMap::from_iter([(image_id, (720.0, 424.0))]);
     let layout = layout_dom_with_images(&tree, (900.0, 1000.0), &intrinsic);
     let rect = |id| layout.rects[&tree.get_element_by_id(id).unwrap()];
     let media = rect("media");
@@ -3651,7 +3651,7 @@ fn decoded_image_ratio_replaces_mapped_html_ratio() {
         "#,
     );
     let image = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image, (800.0, 400.0))]);
+    let intrinsic = HashMap::from_iter([(image, (800.0, 400.0))]);
     let layout = layout_dom_with_images(&tree, (1000.0, 600.0), &intrinsic);
     let rect = layout.rects[&image];
 
@@ -3679,7 +3679,7 @@ fn authored_aspect_ratio_wins_over_decoded_image_ratio() {
         "#,
     );
     let image = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image, (800.0, 400.0))]);
+    let intrinsic = HashMap::from_iter([(image, (800.0, 400.0))]);
     let layout = layout_dom_with_images(&tree, (1000.0, 600.0), &intrinsic);
     let rect = layout.rects[&image];
 
@@ -3700,7 +3700,7 @@ fn both_auto_replaced_max_height_preserves_intrinsic_ratio() {
         "#,
     );
     let image = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image, (512.0, 323.0))]);
+    let intrinsic = HashMap::from_iter([(image, (512.0, 323.0))]);
     let layout = layout_dom_with_images(&tree, (1000.0, 600.0), &intrinsic);
     let rect = layout.rects[&image];
 
@@ -3734,7 +3734,7 @@ fn height_sized_oversized_image_keeps_intrinsic_ratio_without_an_author_cap() {
         "#,
     );
     let image = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image, (3008.0, 692.0))]);
+    let intrinsic = HashMap::from_iter([(image, (3008.0, 692.0))]);
     let layout = layout_dom_with_images(&tree, (1280.0, 1400.0), &intrinsic);
     let rect = layout.rects[&image];
 
@@ -3758,7 +3758,7 @@ fn authored_percentage_max_width_still_clamps_an_oversized_image() {
         "#,
     );
     let image = tree.get_element_by_id("image").unwrap();
-    let intrinsic = HashMap::from([(image, (3008.0, 692.0))]);
+    let intrinsic = HashMap::from_iter([(image, (3008.0, 692.0))]);
     let layout = layout_dom_with_images(&tree, (1280.0, 1400.0), &intrinsic);
     let rect = layout.rects[&image];
 
@@ -3793,7 +3793,7 @@ fn percentage_max_replaced_items_shrink_in_a_flex_row() {
         "#,
     );
     let ids = ["i1", "i2", "i3", "i4", "i5"].map(|id| tree.get_element_by_id(id).unwrap());
-    let intrinsic = HashMap::from([
+    let intrinsic = HashMap::from_iter([
         (ids[0], (303.0, 255.0)),
         (ids[1], (200.0, 400.0)),
         (ids[2], (500.0, 250.0)),
@@ -3863,7 +3863,7 @@ fn functional_percentage_max_replaced_items_shrink_in_a_flex_row() {
         "#,
     );
     let ids = ["i1", "i2", "i3", "i4", "i5"].map(|id| tree.get_element_by_id(id).unwrap());
-    let intrinsic = HashMap::from([
+    let intrinsic = HashMap::from_iter([
         (ids[0], (303.0, 255.0)),
         (ids[1], (200.0, 400.0)),
         (ids[2], (500.0, 250.0)),
@@ -4035,7 +4035,7 @@ fn bare_and_functional_cyclic_image_percentages_use_the_final_flex_width() {
     );
     let bare_image = tree.get_element_by_id("bare-image").unwrap();
     let functional_image = tree.get_element_by_id("functional-image").unwrap();
-    let intrinsic = HashMap::from([
+    let intrinsic = HashMap::from_iter([
         (bare_image, (500.0, 500.0)),
         (functional_image, (500.0, 500.0)),
     ]);
@@ -4081,7 +4081,7 @@ fn percentage_max_replaced_items_keep_natural_max_content_size() {
     );
     let first = tree.get_element_by_id("i1").unwrap();
     let second = tree.get_element_by_id("i2").unwrap();
-    let intrinsic = HashMap::from([(first, (303.0, 255.0)), (second, (500.0, 250.0))]);
+    let intrinsic = HashMap::from_iter([(first, (303.0, 255.0)), (second, (500.0, 250.0))]);
     let layout = layout_dom_with_images(&tree, (2200.0, 1000.0), &intrinsic);
     let first = layout.rects[&first];
     let second = layout.rects[&second];

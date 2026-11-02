@@ -412,6 +412,13 @@ struct StorageOriginCache {
     origin: String,
 }
 
+/// Script-set element scroll offsets, in the map type the renderer reads.
+#[cfg(feature = "render")]
+pub type ScrollOffsets = obscura_render::HashMap<NodeId, (f32, f32)>;
+/// Script-set element scroll offsets.
+#[cfg(not(feature = "render"))]
+pub type ScrollOffsets = HashMap<NodeId, (f32, f32)>;
+
 pub struct ObscuraState {
     pub dom: Option<DomTree>,
     pub url: String,
@@ -646,7 +653,7 @@ pub struct ObscuraState {
     /// renderer ScrollIds are rebuild-local and are resolved only into the
     /// cached snapshot below.
     #[cfg(feature = "render")]
-    pub element_scroll_offsets: HashMap<NodeId, (f32, f32)>,
+    pub element_scroll_offsets: ScrollOffsets,
     #[cfg(feature = "render")]
     pub scroll_generation: u64,
     #[cfg(feature = "render")]
@@ -855,7 +862,7 @@ impl ObscuraState {
             #[cfg(feature = "render")]
             scroll_offset: (0.0, 0.0),
             #[cfg(feature = "render")]
-            element_scroll_offsets: HashMap::new(),
+            element_scroll_offsets: ScrollOffsets::default(),
             #[cfg(feature = "render")]
             scroll_generation: 0,
             #[cfg(feature = "render")]
@@ -8807,6 +8814,7 @@ pub fn build_extension() -> Extension {
         ops.push(op_waapi_create());
         ops.push(op_waapi_control());
         ops.push(op_css_animations());
+        ops.push(op_css_animation_of());
         ops.push(op_css_animation_control());
     }
     Extension {
@@ -9007,6 +9015,28 @@ fn op_css_animations(state: &OpState) -> String {
         })
         .collect();
     serde_json::Value::Array(rows).to_string()
+}
+
+/// `[[nid, animation-name, paused, currentTime]]` (or `[]`) for one element:
+/// what `op_css_animations` lists for it, without serializing every
+/// animation of the document on each getComputedStyle()/getAnimations().
+#[cfg(feature = "render")]
+#[op2]
+#[string]
+fn op_css_animation_of(state: &OpState, nid: u32) -> String {
+    let shared = state.borrow::<SharedState>().clone();
+    let mut gs = shared.borrow_mut();
+    if gs.prepared_render.is_none() {
+        let _ = ensure_prepared_render(&mut gs);
+    }
+    let now = waapi_document_time_ms(&gs);
+    let node = NodeId::new(nid);
+    match gs.animation_timeline.css_animation_of(node, now) {
+        Some((name, paused, current)) => {
+            serde_json::json!([[node.index(), name, paused, current]]).to_string()
+        }
+        None => "[]".to_string(),
+    }
 }
 
 #[cfg(feature = "render")]
@@ -10200,7 +10230,7 @@ fn op_resize_observer_measurements(
 
     let layout_done = std::time::Instant::now();
     let target_count = nids.len();
-    let style_value = |snapshot: &std::collections::HashMap<&'static str, String>,
+    let style_value = |snapshot: &obscura_render::HashMap<&'static str, String>,
                        name: &'static str| {
         snapshot.get(name).cloned().unwrap_or_default()
     };
@@ -10423,7 +10453,7 @@ fn op_intersection_observer_measurements(
             .unwrap_or_else(|_| "[]".to_string());
     };
 
-    let style_value = |snapshot: &std::collections::HashMap<&'static str, String>,
+    let style_value = |snapshot: &obscura_render::HashMap<&'static str, String>,
                        name: &'static str| {
         snapshot.get(name).cloned().unwrap_or_default()
     };
@@ -10563,6 +10593,22 @@ fn op_computed_style(
     let Some(snapshot) = prepared.computed_style(nid) else {
         return String::new();
     };
+    // One named property: answer with just it (an incomplete snapshot the
+    // page asks again for other names). The whole declaration carries every
+    // inherited custom property, tens of kilobytes of JSON on YouTube, and
+    // offsetParent/clientLeft read one property of each ancestor.
+    if !property.is_empty() {
+        let single = if property.starts_with("--") {
+            prepared
+                .computed_custom_properties(nid)
+                .and_then(|mut custom| custom.remove(&property))
+        } else {
+            snapshot.get(property.as_str()).cloned()
+        };
+        if let Some(value) = single {
+            return serde_json::json!([false, { property.as_str(): value }]).to_string();
+        }
+    }
     let custom = prepared.computed_custom_properties(nid).unwrap_or_default();
     let mut object = serde_json::Map::with_capacity(snapshot.len() + custom.len());
     for (name, value) in snapshot {

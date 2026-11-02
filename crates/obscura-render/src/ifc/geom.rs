@@ -68,7 +68,7 @@ impl Ifc {
         pieces: &[Piece],
         line_spans: &[u32],
         depths: &[usize],
-    ) -> std::collections::HashMap<u32, Vec<(f32, f32, f32, u32)>> {
+    ) -> crate::HashMap<u32, Vec<(f32, f32, f32, u32)>> {
         // chain[p] = piece p's span and its ancestors, innermost first.
         let chains: Vec<Vec<u32>> = pieces
             .iter()
@@ -95,8 +95,7 @@ impl Ifc {
         order.sort_by_key(|span| {
             std::cmp::Reverse(depths.get(*span as usize).copied().unwrap_or(0))
         });
-        let mut memo: std::collections::HashMap<u32, Vec<(f32, f32, f32, u32)>> =
-            std::collections::HashMap::new();
+        let mut memo: crate::HashMap<u32, Vec<(f32, f32, f32, u32)>> = crate::HashMap::default();
         for span in order {
             let culled = self.spans.get(span as usize).is_some_and(|s| s.culled);
             let rects = if !culled {
@@ -220,7 +219,7 @@ impl Ifc {
             .root_span_metrics()
             .map(|metrics| (metrics.ascent, metrics.descent))
             .unwrap_or((14.0, 4.0));
-        let mut placed: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        let mut placed: crate::HashSet<u32> = crate::HashSet::default();
         let depths = self.span_depths();
         let line_count = layout.len();
         let base_origin = origin;
@@ -368,7 +367,7 @@ impl Ifc {
 
             // Spans on this line, each with its ancestors, in first-seen order.
             let mut line_spans: Vec<u32> = Vec::new();
-            let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
+            let mut seen: crate::HashSet<u32> = crate::HashSet::default();
             for piece in &pieces {
                 let mut current = piece.span;
                 while let Some(index) = current {
@@ -393,7 +392,7 @@ impl Ifc {
                 && layout
                     .get(line_index - 1)
                     .is_some_and(|prev| prev.break_reason() == parley::BreakReason::Explicit);
-            let mut content_spans: std::collections::HashSet<u32> = Default::default();
+            let mut content_spans: crate::HashSet<u32> = Default::default();
             if after_break {
                 for piece in &pieces {
                     if piece.edge == Some(false) && piece.x1 - piece.x0 <= 0.0 {

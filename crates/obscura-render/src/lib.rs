@@ -16,6 +16,14 @@
 #![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 use taffy::prelude::*;
 
+/// The maps and sets of this crate. Every layout pass fills several keyed by
+/// node id, and SipHash was a tenth of a relayout; foldhash is several times
+/// faster and still seeded per map, so page-chosen keys cannot be aimed at
+/// collisions.
+pub type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+/// See [`HashMap`].
+pub type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+
 pub mod css;
 pub mod video_header;
 
@@ -1833,8 +1841,8 @@ pub struct LayoutStyle {
     /// so children placed by name (`grid-column: content-start / content-end`,
     /// widely used by the Guardian and other editorial grids) are resolved to
     /// numeric lines against these maps in `dom::resolve_grid_areas`.
-    pub grid_col_line_names: Option<std::collections::HashMap<String, i16>>,
-    pub grid_row_line_names: Option<std::collections::HashMap<String, i16>>,
+    pub grid_col_line_names: Option<crate::HashMap<String, i16>>,
+    pub grid_row_line_names: Option<crate::HashMap<String, i16>>,
     /// Raw `grid-column`/`grid-row` value when it references a named line (so it
     /// cannot be resolved to a `taffy::Line` until the parent's line-name map is
     /// known). Resolved in the same later pass; numeric/`span` values still fill
@@ -2694,10 +2702,10 @@ pub struct WaapiAnimation {
 /// Node ids are document-scoped, so navigation must replace this value.
 #[derive(Debug, Clone, Default)]
 pub struct AnimationTimelineState {
-    display_suppressed: std::collections::HashSet<obscura_dom::tree::NodeId>,
-    instances: std::collections::HashMap<obscura_dom::tree::NodeId, AnimationInstance>,
-    start_candidates: std::collections::HashMap<obscura_dom::tree::NodeId, f32>,
-    subtree_start_candidates: std::collections::HashMap<obscura_dom::tree::NodeId, f32>,
+    display_suppressed: crate::HashSet<obscura_dom::tree::NodeId>,
+    instances: crate::HashMap<obscura_dom::tree::NodeId, AnimationInstance>,
+    start_candidates: crate::HashMap<obscura_dom::tree::NodeId, f32>,
+    subtree_start_candidates: crate::HashMap<obscura_dom::tree::NodeId, f32>,
     waapi: std::collections::BTreeMap<u64, WaapiAnimation>,
 }
 
@@ -2760,7 +2768,7 @@ impl AnimationTimelineState {
     /// Exact set of nodes currently targeted by registered Web Animations.
     /// The render preparation boundary additionally filters disconnected
     /// targets against the current DOM before producing restyle damage.
-    pub fn waapi_nodes(&self) -> std::collections::HashSet<obscura_dom::tree::NodeId> {
+    pub fn waapi_nodes(&self) -> crate::HashSet<obscura_dom::tree::NodeId> {
         self.waapi
             .values()
             .map(|animation| animation.node)
@@ -2797,6 +2805,25 @@ impl AnimationTimelineState {
             .collect();
         out.sort_by_key(|(node, ..)| node.index());
         out
+    }
+
+    /// `css_animations` for one element: an element runs at most one
+    /// instance, and getComputedStyle asks about its own target on every read.
+    pub fn css_animation_of(
+        &self,
+        node: obscura_dom::tree::NodeId,
+        document_time_ms: f32,
+    ) -> Option<(String, bool, f32)> {
+        self.instances.get(&node).map(|instance| {
+            let current = instance
+                .hold_time_ms
+                .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+            (
+                instance.key.name.clone(),
+                instance.script_paused || instance.was_paused,
+                current,
+            )
+        })
     }
 
     /// Script control of one CSS animation instance (CSSAnimation): pause,
