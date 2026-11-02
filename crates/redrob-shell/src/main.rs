@@ -535,6 +535,21 @@ impl Window {
                         // A click in the page closes what floats over it.
                         popup::close_menus(ctx);
                         self.prompts.close_menu();
+                    } else if self.model.index_of(tab).is_some() {
+                        // Chromium focuses each page it makes, out of sight
+                        // too (a new tab under the new tab page): the
+                        // keyboard goes back where it belongs.
+                        self.op(tab, Op::Focus(false));
+                        let web = self.model.active_tab().filter(|t| {
+                            t.id != tab && t.url != NEW_TAB && !internal::is_internal(&t.url)
+                        });
+                        match web.map(|t| t.id) {
+                            Some(id) if self.page_focused => self.op(id, Op::Focus(true)),
+                            _ => {
+                                self.page_focused = false;
+                                let _ = self.commands.send(Command::FocusWindow);
+                            }
+                        }
                     }
                     continue;
                 }

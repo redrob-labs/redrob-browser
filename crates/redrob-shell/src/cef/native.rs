@@ -116,7 +116,7 @@ pub fn chrome_has_keyboard(_top: Handle) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-pub use imp::{chrome_has_keyboard, focus_chrome};
+pub use imp::{chrome_has_keyboard, focus_chrome, set_page_hidden};
 
 #[cfg(target_os = "linux")]
 mod imp {
@@ -252,6 +252,14 @@ mod imp {
         }
     }
 
+    /// Tell Chromium a page is hidden or shown without moving it (its
+    /// browser window was minimized or restored).
+    pub fn set_page_hidden(child: Handle, hidden: bool) {
+        let Some(x) = x() else { return };
+        set_hidden_state(x, child.0 as Window, hidden);
+        let _ = x.conn.flush();
+    }
+
     pub fn set_visible(child: Handle, visible: bool, p: Option<Place>) {
         let Some(x) = x() else { return };
         let w = child.0 as Window;
@@ -264,9 +272,8 @@ mod imp {
                 c.ignore_error();
             }
         } else {
-            if let Ok(c) = x.conn.unmap_window(w) {
-                c.ignore_error();
-            }
+            // Mapped, out of sight: Chromium stops drawing an unmapped
+            // page, and an agent's screenshot of it would never arrive.
             let aux = ConfigureWindowAux::new().x(AWAY).y(AWAY);
             if let Ok(c) = x.conn.configure_window(w, &aux) {
                 c.ignore_error();
@@ -294,6 +301,9 @@ mod imp {
     /// unmapped, until Chromium destroys it.
     pub fn detach(child: Handle) {
         let Some(x) = x() else { return };
+        if let Ok(c) = x.conn.unmap_window(child.0 as Window) {
+            c.ignore_error();
+        }
         if let Ok(c) = x
             .conn
             .reparent_window(child.0 as Window, x.root, AWAY as i16, AWAY as i16)

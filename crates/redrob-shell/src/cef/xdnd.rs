@@ -45,6 +45,8 @@ struct Target {
     proxy: Window,
     /// The page on screen: its XDND window and its rectangle.
     page: Option<(Window, [i32; 4])>,
+    /// The page on screen, as the engine knows it (its native window).
+    shown: Option<Handle>,
 }
 
 /// One drag in progress over a proxy.
@@ -95,6 +97,8 @@ const NAMES: &[&str] = &[
     "UTF8_STRING",
     "text/plain",
     "REDROB_DROP",
+    "_NET_WM_STATE",
+    "_NET_WM_STATE_HIDDEN",
 ];
 
 fn x() -> Option<&'static X> {
@@ -174,6 +178,7 @@ fn dnd_window(x: &X, w: Window) -> Window {
 pub fn set_target(toplevel: Handle, page: Option<(Handle, [i32; 4])>) {
     let Some(x) = x() else { return };
     let top = toplevel.0 as Window;
+    let shown = page.map(|(p, _)| p);
     let page = page.map(|(p, r)| (dnd_window(x, p.0 as Window), r));
     let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
     let st = st.get_or_insert_with(State::default);
@@ -227,7 +232,14 @@ pub fn set_target(toplevel: Handle, page: Option<(Handle, [i32; 4])>) {
         &[proxy],
     );
     let _ = x.conn.flush();
-    st.targets.insert(top, Target { proxy, page });
+    if !st.targets.contains_key(&top) {
+        // Minimized and restored: its page is hidden and shown with it.
+        let aux = x11rb::protocol::xproto::ChangeWindowAttributesAux::new()
+            .event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::PROPERTY_CHANGE);
+        let _ = x.conn.change_window_attributes(top, &aux);
+        let _ = x.conn.flush();
+    }
+    st.targets.insert(top, Target { proxy, page, shown });
 }
 
 /// The browser window closes.
@@ -268,6 +280,36 @@ fn run() {
         let st = st.get_or_insert_with(State::default);
         match ev {
             Event::ClientMessage(e) => client_message(x, st, &e),
+            // The window manager unmaps a minimized window. Chromium does
+            // not see its page hidden with it (a child window keeps its
+            // own state), so it is told, as cefclient does.
+            Event::UnmapNotify(e) if e.window == e.event => {
+                if let Some(p) = st.targets.get(&e.window).and_then(|t| t.shown) {
+                    super::native::set_page_hidden(p, true);
+                }
+            }
+            Event::MapNotify(e) if e.window == e.event => {
+                if let Some(p) = st.targets.get(&e.window).and_then(|t| t.shown) {
+                    super::native::set_page_hidden(p, false);
+                }
+            }
+            // Window managers that keep a minimized window mapped (its
+            // frame goes) say so in _NET_WM_STATE.
+            Event::PropertyNotify(e) if e.atom == atom(x, "_NET_WM_STATE") => {
+                if let Some(p) = st.targets.get(&e.window).and_then(|t| t.shown) {
+                    let hidden = x
+                        .conn
+                        .get_property(false, e.window, e.atom, AtomEnum::ATOM, 0, 64)
+                        .ok()
+                        .and_then(|c| c.reply().ok())
+                        .and_then(|r| {
+                            r.value32()
+                                .map(|mut v| v.any(|a| a == atom(x, "_NET_WM_STATE_HIDDEN")))
+                        })
+                        .unwrap_or(false);
+                    super::native::set_page_hidden(p, hidden);
+                }
+            }
             Event::KeyPress(e) => {
                 korean_key(x, e.detail, false);
                 pass_key(x, e);
