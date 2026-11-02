@@ -54,6 +54,15 @@ fn ko(en: &str) -> Option<&'static str> {
         "Know when you're actively using this device" => "기기를 사용 중인지 확인",
         "Use another feature of your computer" => "컴퓨터의 다른 기능 사용",
         "Open a type of link" => "특정 종류의 링크 열기",
+        "Open with another app?" => "다른 앱으로 열까요?",
+        "This page" => "이 페이지",
+        "{0} wants to open this link in another app:" => {
+            "{0}에서 이 링크를 다른 앱으로 열려고 해요."
+        }
+        "Always allow this site to open links of this type" => {
+            "이 사이트에서 이런 링크를 항상 열도록 허용"
+        }
+        "Open" => "열기",
         "Edit files and folders on your device" => "기기의 파일과 폴더 수정",
         "Use your keyboard" => "키보드 사용",
         "Use and move your mouse pointer" => "마우스 포인터 사용 및 이동",
@@ -83,6 +92,12 @@ fn ko(en: &str) -> Option<&'static str> {
         "Print..." => "인쇄...",
         "View page source" => "페이지 소스 보기",
         "Inspect" => "검사",
+        "Add to dictionary" => "사전에 추가",
+        "Save as..." => "다른 이름으로 저장...",
+        "Cast..." => "전송...",
+        "Translate this page" => "이 페이지 번역",
+        "Create QR code for this page" => "이 페이지의 QR 코드 만들기",
+        "Open in reading mode" => "읽기 모드에서 열기",
         _ => return None,
     })
 }
@@ -110,6 +125,8 @@ struct FindBar {
 #[derive(Default)]
 pub struct Prompts {
     permissions: Vec<(TabId, Prompt)>,
+    /// Links for another program: (tab, site, link, "always" ticked).
+    externals: Vec<(TabId, String, String, bool)>,
     dialogs: Vec<(TabId, Dialog, String)>,
     menu: Option<(TabId, Menu)>,
     find: Option<FindBar>,
@@ -123,6 +140,16 @@ impl Prompts {
     pub fn take(&mut self, ctx: &egui::Context, tab: TabId, event: Event) -> Option<Event> {
         match event {
             Event::Permission(p) => self.permissions.push((tab, p)),
+            Event::External { origin, url } => {
+                // One question per link at a time, like Chrome's dialog.
+                if !self
+                    .externals
+                    .iter()
+                    .any(|(t, _, u, _)| *t == tab && *u == url)
+                {
+                    self.externals.push((tab, origin, url, false));
+                }
+            }
             Event::Dialog(d) => {
                 let text = match &d.kind {
                     DialogKind::Prompt { default_text } => default_text.clone(),
@@ -177,6 +204,7 @@ impl Prompts {
         for (_, p) in extract(&mut self.permissions, |(t, _)| *t == tab) {
             p.answer(Answer::Dismiss);
         }
+        self.externals.retain(|(t, ..)| *t != tab);
         for (_, d, _) in extract(&mut self.dialogs, |(t, _, _)| *t == tab) {
             d.answer(false, "");
         }
@@ -264,6 +292,7 @@ impl Prompts {
     pub fn overlays(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) {
         self.permissions.retain(|(_, p)| p.is_open());
         self.show_permission(ctx, active, page);
+        self.show_external(ctx, active, page);
         self.show_menu(ctx, active, page);
         self.show_zoom(ctx, active, page);
     }
@@ -311,6 +340,57 @@ impl Prompts {
         if let Some(a) = answer {
             let (_, p) = self.permissions.remove(i);
             p.answer(a);
+        }
+    }
+
+    /// "Open with another app?" for a mailto:, tel:, ... link.
+    fn show_external(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) {
+        if self.permissions.iter().any(|(t, _)| *t == active) {
+            return;
+        }
+        let Some(i) = self.externals.iter().position(|(t, ..)| *t == active) else {
+            return;
+        };
+        let mut choice = None;
+        let (_, origin, url, always) = &mut self.externals[i];
+        let at = crate::popup::to_screen(ctx, page.min + egui::vec2(12.0, 4.0));
+        crate::popup::show(
+            ctx,
+            egui::Id::new(("external", url.as_str())),
+            at,
+            360.0,
+            false,
+            |ui| {
+                ui.set_max_width(340.0);
+                ui.strong(tr("Open with another app?"));
+                let who = if origin.is_empty() {
+                    tr("This page")
+                } else {
+                    origin.as_str()
+                };
+                ui.label(trf("{0} wants to open this link in another app:", &who));
+                let shown: String = url.chars().take(80).collect();
+                ui.weak(shown);
+                if !origin.is_empty() {
+                    ui.checkbox(
+                        always,
+                        tr("Always allow this site to open links of this type"),
+                    );
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Open")).clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        choice = Some(false);
+                    }
+                });
+            },
+        );
+        if let Some(open) = choice {
+            let (_, origin, url, always) = self.externals.remove(i);
+            super::external::answer(&origin, &url, open, always);
         }
     }
 
@@ -396,7 +476,7 @@ impl Prompts {
                         ui.separator();
                     }
                     Entry::Item { command, enabled } => {
-                        let b = egui::Button::new(tr(command.label()))
+                        let b = egui::Button::new(menu.text(*command))
                             .frame(false)
                             .min_size(egui::vec2(ui.available_width(), 0.0));
                         if ui.add_enabled(*enabled, b).clicked() {
@@ -561,6 +641,12 @@ mod tests {
             Print,
             ViewSource,
             Inspect,
+            AddToDictionary,
+            SavePageAs,
+            Cast,
+            Translate,
+            QrCode,
+            ReadingMode,
         ];
         for c in commands {
             assert!(ko(c.label()).is_some(), "{}", c.label());
@@ -578,6 +664,17 @@ mod tests {
             Kind::Fonts,
             Kind::Windows,
             Kind::Idle,
+            Kind::Protocols,
+            Kind::Files,
+            Kind::Keyboard,
+            Kind::Pointer,
+            Kind::LocalNetwork,
+            Kind::Sensors,
+            Kind::ProtectedMedia,
+            Kind::Xr,
+            Kind::Identity,
+            Kind::Install,
+            Kind::CapturedSurface,
             Kind::Other(1),
         ];
         for k in kinds {

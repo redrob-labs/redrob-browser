@@ -28,6 +28,15 @@ pub enum Command {
     Print,
     ViewSource,
     Inspect,
+    /// The misspelled word's suggestion at this index (spelling.rs).
+    Suggestion(u8),
+    AddToDictionary,
+    /// Chrome's own (Chrome style pages, chrome.rs).
+    SavePageAs,
+    Cast,
+    Translate,
+    QrCode,
+    ReadingMode,
 }
 
 impl Command {
@@ -52,6 +61,13 @@ impl Command {
             Command::Print => "Print...",
             Command::ViewSource => "View page source",
             Command::Inspect => "Inspect",
+            Command::Suggestion(_) => "",
+            Command::AddToDictionary => "Add to dictionary",
+            Command::SavePageAs => "Save as...",
+            Command::Cast => "Cast...",
+            Command::Translate => "Translate this page",
+            Command::QrCode => "Create QR code for this page",
+            Command::ReadingMode => "Open in reading mode",
         }
     }
 }
@@ -77,6 +93,11 @@ pub struct Target {
     pub can_select_all: bool,
     pub can_back: bool,
     pub can_forward: bool,
+    /// The misspelled word under the pointer, if any, and suggestions.
+    pub misspelled: String,
+    pub suggestions: Vec<String>,
+    /// The page has Chrome's own commands (Chrome style).
+    pub chrome: bool,
 }
 
 /// Chrome's items for `t`, in Chrome's order.
@@ -96,6 +117,13 @@ pub fn entries(t: &Target) -> Vec<Entry> {
         out.push(item(Command::CopyImageAddress, true));
         out.push(Entry::Separator);
     }
+    if t.editable && !t.misspelled.is_empty() {
+        for i in 0..t.suggestions.len().min(super::spelling::MAX_SUGGESTIONS) {
+            out.push(item(Command::Suggestion(i as u8), true));
+        }
+        out.push(item(Command::AddToDictionary, true));
+        out.push(Entry::Separator);
+    }
     if t.editable {
         out.push(item(Command::Undo, t.can_undo));
         out.push(item(Command::Redo, t.can_redo));
@@ -113,7 +141,17 @@ pub fn entries(t: &Target) -> Vec<Entry> {
         out.push(item(Command::Forward, t.can_forward));
         out.push(item(Command::Reload, true));
         out.push(Entry::Separator);
+        if t.chrome {
+            out.push(item(Command::SavePageAs, true));
+        }
         out.push(item(Command::Print, true));
+        if t.chrome {
+            out.push(item(Command::Cast, true));
+            out.push(item(Command::QrCode, true));
+            out.push(item(Command::Translate, true));
+            out.push(item(Command::ReadingMode, true));
+        }
+        out.push(Entry::Separator);
         out.push(item(Command::ViewSource, true));
         out.push(Entry::Separator);
     }
@@ -134,6 +172,19 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// The text of `command`'s item, in the window's language.
+    pub fn text(&self, command: Command) -> String {
+        match command {
+            Command::Suggestion(i) => self
+                .target
+                .suggestions
+                .get(i as usize)
+                .cloned()
+                .unwrap_or_default(),
+            c => super::ui::tr(c.label()).to_string(),
+        }
+    }
+
     /// Run `command`, or close the menu with None.
     pub fn choose(self, command: Option<Command>) {
         let Menu {
@@ -205,6 +256,19 @@ fn run(
             }
         }
         Command::Inspect => inspect(browser, Some(at)),
+        Command::Suggestion(i) => {
+            if let Some(w) = t.suggestions.get(i as usize) {
+                super::spelling::replace(browser, w);
+            }
+        }
+        Command::AddToDictionary => super::spelling::add(browser, &t.misspelled),
+        Command::SavePageAs => super::chrome::run(browser, super::chrome::id::SAVE_PAGE),
+        Command::Cast => super::chrome::run(browser, super::chrome::id::ROUTE_MEDIA),
+        Command::Translate => super::chrome::run(browser, super::chrome::id::SHOW_TRANSLATE),
+        Command::QrCode => super::chrome::run(browser, super::chrome::id::QRCODE_GENERATOR),
+        Command::ReadingMode => {
+            super::chrome::run(browser, super::chrome::id::SHOW_READING_MODE_SIDE_PANEL)
+        }
     }
 }
 
@@ -268,7 +332,14 @@ wrap_context_menu_handler! {
             let edit = params.edit_state_flags().as_ref().0;
             let image = params.media_type() == ContextMenuMediaType::IMAGE
                 && params.has_image_contents() != 0;
+            let (misspelled, suggestions) = super::spelling::of(params);
+            crate::cdp::trace(format_args!(
+                "context menu: misspelled {misspelled:?}, suggestions {suggestions:?}"
+            ));
             let target = Target {
+                misspelled,
+                suggestions,
+                chrome: crate::cef::native::chrome_style(),
                 link: if flag(types, T::CM_TYPEFLAG_LINK.0) {
                     super::text(&params.link_url())
                 } else {

@@ -623,6 +623,7 @@ impl Window {
                 | Event::Zoom(_)
                 | Event::Clipboard(_)
                 | Event::OpenTab(_)
+                | Event::External { .. }
                 | Event::Shortcut(_)
                 | Event::Focused
                 | Event::TakeFocus

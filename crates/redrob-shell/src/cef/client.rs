@@ -110,7 +110,7 @@ pub fn new(ctx: TabCtx) -> Client {
         handlers::jsdialog::new(ctx.sink.clone()),
         handlers::context_menu::new(ctx.sink.clone()),
         handlers::find::new(ctx.sink.clone()),
-        handlers::languages::new(),
+        handlers::languages::new(ctx.sink.clone()),
         handlers::chrome::handler(ctx.sink.clone()),
     )
 }

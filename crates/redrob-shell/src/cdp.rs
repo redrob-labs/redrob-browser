@@ -184,6 +184,12 @@ pub enum Event {
     Clipboard(String),
     /// Open this address in a new tab behind the current one.
     OpenTab(String),
+    /// The page opened a link of a scheme only another program handles
+    /// (mailto:, tel:): ask before handing it over (cef/handlers/external.rs).
+    External {
+        origin: String,
+        url: String,
+    },
     /// A file download began or changed state. Sent with tab 0.
     Download {
         guid: String,

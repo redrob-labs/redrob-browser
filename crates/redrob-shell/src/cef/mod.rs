@@ -534,13 +534,41 @@ pub(crate) fn write_languages() {
 /// Set the profile's string preference `name` (Chromium's own settings).
 /// Call on CEF's UI thread.
 pub(crate) fn set_pref(name: &str, value: &str) {
-    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    set_pref_to(name, Pref::Str(value));
+}
+
+/// A preference value.
+pub(crate) enum Pref<'a> {
+    Str(&'a str),
+    Bool(bool),
+    List(&'a [&'a str]),
+}
+
+/// Set the profile's preference `name` to `value`. Call on CEF's UI thread.
+pub(crate) fn set_pref_to(name: &str, value: Pref) {
+    use cef::{ImplListValue as _, ImplPreferenceManager as _, ImplValue as _};
     let contexts = [request_context(), cef::request_context_get_global_context()];
     for c in contexts.iter().flatten() {
         let Some(mut v) = cef::value_create() else {
             continue;
         };
-        v.set_string(Some(&CefString::from(value)));
+        match &value {
+            Pref::Str(s) => {
+                v.set_string(Some(&CefString::from(*s)));
+            }
+            Pref::Bool(b) => {
+                v.set_bool(*b as _);
+            }
+            Pref::List(items) => {
+                let Some(mut list) = cef::list_value_create() else {
+                    continue;
+                };
+                for (i, s) in items.iter().enumerate() {
+                    list.set_string(i, Some(&CefString::from(*s)));
+                }
+                v.set_list(Some(&mut list));
+            }
+        }
         // Not empty: CEF refuses a null error string, and an empty
         // CefString has no buffer.
         let mut error = CefString::from(" ");
@@ -548,6 +576,20 @@ pub(crate) fn set_pref(name: &str, value: &str) {
             eprintln!("redrob-browser: {name} not set: {error}");
         }
     }
+}
+
+/// Chrome's own features the window relies on (docs/FEATURES.md): spell
+/// check in English and Korean, and no second password manager next to the
+/// window's vault. Run once Chromium's context is ready (cef/app.rs).
+pub(crate) fn write_feature_prefs() {
+    set_pref_to("browser.enable_spellchecking", Pref::Bool(true));
+    set_pref_to(
+        "spellcheck.dictionaries",
+        Pref::List(handlers::spelling::DICTIONARIES),
+    );
+    // The window's vault saves and fills passwords (vault.rs); Chrome's
+    // password manager would ask a second time.
+    set_pref_to("credentials_enable_service", Pref::Bool(false));
 }
 
 /// Whether the profile holds its own value for the preference `name` (not

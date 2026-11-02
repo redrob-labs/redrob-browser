@@ -80,6 +80,8 @@ wrap_browser_process_handler! {
             super::handlers::widevine::install();
             // Pages ask for the window's language (cef/mod.rs).
             super::write_languages();
+            // Spell check, and no second password manager (cef/mod.rs).
+            super::write_feature_prefs();
         }
     }
 }
