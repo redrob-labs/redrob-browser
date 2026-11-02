@@ -10847,12 +10847,16 @@ fn layout_dom_once(
                     if element_kinds_present(tree) & ElementKind::CELL == 0 {
                         HashSet::default()
                     } else {
-                        styles
-                            .keys()
+                        // Every box is on the rendered tree, which knows its
+                        // cells.
+                        let flat = current_flat_tree(tree);
+                        flat.walk
+                            .iter()
                             .copied()
-                            .filter(|&id| {
-                                with_local_name(tree, id, |local| matches!(local, "td" | "th"))
-                                    .unwrap_or(false)
+                            .filter(|id| {
+                                flat.kinds
+                                    .get(id.index())
+                                    .is_some_and(|kinds| kinds & ElementKind::CELL != 0)
                             })
                             .collect::<HashSet<_>>()
                     }
