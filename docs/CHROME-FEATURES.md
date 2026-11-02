@@ -34,7 +34,8 @@ but needs hardware or an account the host does not have.
 | Extensions: install | Works: Chrome Web Store "Add to Chrome" shows Chrome's install dialog; Dark Reader and uBlock Origin Lite installed into the profile | CEF limit: Alloy runs no extensions |
 | Extensions: toolbar icons, menu, pinning | Works: the plug button lists every installed extension with Pin / Unpin; pins are Chrome's own `extensions.pinned_extensions`, so chrome://extensions agrees; pinned icons sit after the address field | Nothing to show (no extensions) |
 | Extensions: popups | Works: a click opens the action's popup page under its icon, sized to its content (Dark Reader 276x580). Dark Reader's popup names the page (localhost:8471) and its Off button turns the page light (mean 0.20 -> 0.92). Closes on a click elsewhere, a click in the page, or another tab | Nothing to show |
-| Extensions: actions without a popup | Works: the action's `onClicked` listeners run in the extension's worker (a test extension set its badge "ok"). CEF limit: Chrome would also grant `activeTab` for the click; the only path to that (`Extensions.triggerAction`) crashes a toolbar-less Chrome browser, so an extension that needs `activeTab` is refused the page. Badge text is not drawn on the icon | Nothing to show |
+| Extensions: actions without a popup | Works: the action's `onClicked` listeners run in the extension's worker (a test extension set its badge "ok"). CEF limit: Chrome would also grant `activeTab` for the click. Every Chromium path to that grant (the toolbar button, `Extensions.triggerAction`, the extensions menu) goes through the browser's `ExtensionsContainer`, which only Chrome's toolbar registers; CEF hosts each page with a parent window in a popup-type Chrome browser without one and allows one Chrome browser per CEF window, and `Extensions.triggerAction` dereferences the missing container (SIGSEGV in `ExtensionsHandler::TriggerAction` right after `ExtensionsContainer::From` returned null). An extension that relies on `activeTab` alone is refused the page (`scripting.executeScript`: title unchanged); one with host permissions works | Nothing to show |
+| Extensions: badges | Works: `chrome.action.setBadgeText`, `setBadgeBackgroundColor` and `setBadgeTextColor` are drawn on the pinned icon as Chrome draws them, per tab and within a second of the call: a test extension's default "7" on red (14x14 px, #d00000) shows on every tab; its click sets "T1" green with yellow text on that tab only (the other tabs keep "7"), "T2" redraws 68 of the badge's 196 px; a reload clears the tab's own badge back to "7", as Chrome's `getBadgeText` then says. Not seen: the blocked-request count Chrome itself computes for `declarativeNetRequest` (`displayActionCountAsBadgeText`) | Nothing to show |
 | chrome://extensions | Works: lists the installed extensions (3 items with an unpacked one) | Not available in Alloy |
 | Picture in picture | Works: a video's PiP window "Picture in picture" 331x186 | CEF limit: Alloy has no PiP window |
 | Media keys | Works: MPRIS `org.mpris.MediaPlayer2.chromium.instance<pid>`; Next / Pause reach the page's `mediaSession` handlers | Not measured |
@@ -80,6 +81,13 @@ but needs hardware or an account the host does not have.
   "normal" windows: CEF makes every Chrome style browser in a parent window
   a "popup" type window, and extensions such as Dark Reader look for tabs
   in normal windows only.
+  Badges: a script in each running extension context (its worker, popup
+  and pages) wraps `chrome.action.setBadge*` and keeps each value with its
+  time and the tab's window; the window reads those once a second with
+  plain JavaScript, so reading never keeps a worker awake. A worker that
+  has not reported since the window started is woken once and asks Chrome
+  for what it kept (`getBadge*`). A tab's own values count only when set
+  after its page last committed a document, as Chrome clears them then.
 - **Page info and certificate** (`cef/handlers/site_info.rs`): from CEF's
   `CefSSLStatus` and `CefX509Certificate` of the page's visible navigation
   entry.

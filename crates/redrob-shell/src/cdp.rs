@@ -233,6 +233,9 @@ pub enum Event {
     /// The extension popup over this tab closed (`window.close()`, or the
     /// window closed it).
     PopupClosed,
+    /// An extension's toolbar badge changed (cef/handlers/extensions.rs).
+    /// Sent with tab 0.
+    Badges,
     Error(String),
 }
 
@@ -492,6 +495,17 @@ impl Engine {
             &browser,
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": LOGIN_SUBMIT_JS, "worldName": WORLD, "runImmediately": true }),
+        );
+        // Its Chrome window, for its extensions' badges.
+        client::devtools(
+            &browser,
+            "Browser.getWindowForTarget",
+            json!({}),
+            move |_, r| {
+                if let Some(w) = r["windowId"].as_i64() {
+                    crate::cef::handlers::extensions::set_window(tab, w);
+                }
+            },
         );
         let b = browser.clone();
         client::devtools(&browser, "Target.getTargetInfo", json!({}), move |_, r| {
