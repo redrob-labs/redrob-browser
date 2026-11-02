@@ -182,7 +182,8 @@ fn cli_drives_chromium_tabs() {
         // The person's own tab is listed too, unmarked as an agent's.
         let all = tab(&chrome, &["list"]);
         assert!(
-            all.lines().any(|l| !l.starts_with(&id) && l.contains("\twindow 1\t\t")),
+            all.lines()
+                .any(|l| !l.starts_with(&id) && l.contains("\twindow 1\t\t")),
             "{all}"
         );
     }
@@ -305,9 +306,12 @@ fn mcp_drives_chromium_tabs() {
     m.tool("window_tab_activate", json!({ "id": id }));
     if std::env::var_os("REDROB_TEST_WINDOW").is_some() {
         std::thread::sleep(Duration::from_millis(300));
-        let tabs: Value =
-            serde_json::from_str(m.tool("window_tab_list", json!({}))["text"].as_str().unwrap())
-                .unwrap();
+        let tabs: Value = serde_json::from_str(
+            m.tool("window_tab_list", json!({}))["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
         let me = tabs
             .as_array()
             .unwrap()

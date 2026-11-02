@@ -101,7 +101,9 @@ impl From<crate::cef::DevTools> for Upstream {
     fn from(d: crate::cef::DevTools) -> Self {
         match d {
             #[cfg(unix)]
-            crate::cef::DevTools::Pipe { commands, replies } => Upstream::Pipe { commands, replies },
+            crate::cef::DevTools::Pipe { commands, replies } => {
+                Upstream::Pipe { commands, replies }
+            }
             crate::cef::DevTools::Port(p) => Upstream::Port(p),
         }
     }
@@ -173,7 +175,13 @@ fn check_handshake(req: &Request, token: &str) -> Result<Option<Option<String>>,
         .find_map(|kv| kv.strip_prefix("token="))
         .unwrap_or_default();
     let target = match path.strip_prefix("/devtools/") {
-        Some(rest) if rest.strip_prefix("browser/").is_some_and(|t| same(t, token)) => Some(None),
+        Some(rest)
+            if rest
+                .strip_prefix("browser/")
+                .is_some_and(|t| same(t, token)) =>
+        {
+            Some(None)
+        }
         Some(rest) => rest
             .strip_prefix("page/")
             .filter(|id| !id.is_empty() && !id.contains('/') && same(query_token, token))
@@ -354,7 +362,12 @@ impl Hub {
     }
 
     /// Call a method on Chromium's root session (or `session`).
-    async fn call(&self, session: Option<&str>, method: &str, params: Value) -> anyhow::Result<Value> {
+    async fn call(
+        &self,
+        session: Option<&str>,
+        method: &str,
+        params: Value,
+    ) -> anyhow::Result<Value> {
         let (tx, rx) = oneshot::channel();
         let id = {
             let mut st = self.state();
@@ -480,7 +493,10 @@ async fn serve(
     let (tx, mut rx) = mpsc::unbounded_channel::<ToClient>();
     // The client's own session: the browser, or its one tab.
     let primary = match &page {
-        None => hub.call(None, "Target.attachToBrowserTarget", json!({})).await?,
+        None => {
+            hub.call(None, "Target.attachToBrowserTarget", json!({}))
+                .await?
+        }
         Some(id) => {
             hub.call(
                 None,
@@ -692,7 +708,11 @@ async fn serve(
     // Child sessions end with the client's own.
     hub.drop_client(client);
     let _ = hub
-        .call(None, "Target.detachFromTarget", json!({ "sessionId": primary }))
+        .call(
+            None,
+            "Target.detachFromTarget",
+            json!({ "sessionId": primary }),
+        )
         .await;
     Ok(())
 }
@@ -725,7 +745,6 @@ fn mark_places(reply: &mut Value, places: &Places) {
         }
     }
 }
-
 
 /// Against a real Chromium on a DevTools pipe, as the window's CEF is.
 /// Skipped when no Chromium is found (`REDROB_TEST_CHROMIUM`, or Playwright's
@@ -957,7 +976,10 @@ pub(crate) mod tests {
         assert_eq!(info["redrobWindow"], 1);
         assert_eq!(info["redrobAgent"], true);
         assert_eq!(info["redrobActive"], false);
-        assert!(t.get("sessionId").is_none(), "the browser session stays hidden");
+        assert!(
+            t.get("sessionId").is_none(),
+            "the browser session stays hidden"
+        );
 
         // Everything else is Chromium's own CDP, in sessions of this client.
         let a = c
@@ -1026,7 +1048,9 @@ pub(crate) mod tests {
         // One-tab clients (DevTools front end style) need the secret too.
         let base = relay.split("/devtools/").next().unwrap();
         let token = relay.rsplit('/').next().unwrap();
-        assert!(connect(&format!("{base}/devtools/page/{id}")).await.is_err());
+        assert!(connect(&format!("{base}/devtools/page/{id}"))
+            .await
+            .is_err());
         let mut p = Client {
             ws: connect(&format!("{base}/devtools/page/{id}?token={token}"))
                 .await
