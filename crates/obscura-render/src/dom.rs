@@ -1048,6 +1048,11 @@ pub enum TreeStyleMutation {
     Remove {
         node: NodeId,
         old_parent: NodeId,
+        /// The node's next sibling before the removal (`Some(None)`: it was
+        /// the last child), when the producer recorded it. It bounds the
+        /// siblings whose sibling-selector matches can change; without it
+        /// every sibling of `old_parent` is restyled.
+        old_next_sibling: Option<Option<NodeId>>,
     },
     Text {
         node: NodeId,
@@ -2847,29 +2852,42 @@ fn resolve_clip_rects(
     viewport: (f32, f32),
 ) {
     clip_rects.insert(id, inherited.clone());
+    let style = styles.get(&id);
+    let rect = rects.get(&id).copied().unwrap_or_default();
+    // Most boxes have no transform of their own: skip the matrix work.
+    let own_transform = match style {
+        Some(style)
+            if !style.ignores_used_box_sizes()
+                && (style.individual_translate.is_some()
+                    || style.individual_rotate.is_some()
+                    || style.individual_scale.is_some()
+                    || !style.transform_ops.is_empty()) =>
+        {
+            resolved_transform_matrix3d(style, &rect, root_font_size, viewport)
+        }
+        _ => crate::Mat4::IDENTITY,
+    };
     // This node's own translate joins the accumulation for its box and its
     // whole subtree (percentages resolve against its own border box).
-    let (own_tx, own_ty) = styles.get(&id).map_or((0.0, 0.0), |style| {
-        if style.ignores_used_box_sizes() {
-            (0.0, 0.0)
+    let (own_tx, own_ty) = if own_transform.is_identity() {
+        (0.0, 0.0)
+    } else {
+        let own = own_transform.flatten().to_affine();
+        if own.is_translation() {
+            (own.e, own.f)
         } else {
-            let rect = rects.get(&id).copied().unwrap_or_default();
-            resolved_own_translate(style, &rect, root_font_size, viewport)
+            (0.0, 0.0)
         }
-    });
+    };
     let (tx, ty) = (tx + own_tx, ty + own_ty);
     if tx != 0.0 || ty != 0.0 {
         translates.insert(id, (tx, ty));
     }
-    let rect = rects.get(&id).copied().unwrap_or_default();
-    let own_transform = styles.get(&id).map_or(crate::Mat4::IDENTITY, |style| {
-        if style.ignores_used_box_sizes() {
-            crate::Mat4::IDENTITY
-        } else {
-            resolved_transform_matrix3d(style, &rect, root_font_size, viewport)
-        }
-    });
-    let transform = parent_transform.then(own_transform);
+    let transform = if own_transform.is_identity() {
+        parent_transform
+    } else {
+        parent_transform.then(own_transform)
+    };
     if transform.is_2d() {
         let affine = transform.to_affine();
         if !affine.is_identity() {
@@ -2888,11 +2906,12 @@ fn resolve_clip_rects(
     // flattened unless it preserves 3D, then its `perspective` around its
     // perspective origin (CSS Transforms 2 "accumulated 3D transformation
     // matrix").
-    let mut child_transform = match styles.get(&id) {
+    let mut child_transform = match style {
         Some(style) if style.preserve_3d => transform,
+        _ if transform.is_identity() => transform,
         _ => transform.flatten(),
     };
-    if let Some(style) = styles.get(&id) {
+    if let Some(style) = style {
         if let Some(distance) = style
             .perspective
             .filter(|_| !style.ignores_used_box_sizes())
@@ -2913,7 +2932,7 @@ fn resolve_clip_rects(
     // coordinates, and the pixmap already supplies that viewport clip.
     // Materializing it here as an ordinary descendant clip would make root
     // scrolling translate the viewport itself offscreen.
-    let next = match (styles.get(&id), rects.get(&id)) {
+    let next = match (style, rects.get(&id)) {
         (Some(style), Some(rect))
             if style.overflow_hidden && !is_viewport_overflow_source(id, styles) =>
         {
@@ -5009,15 +5028,63 @@ fn add_removed_sibling_scopes(
     tree: &DomTree,
     map: &crate::css::InvalidationMap,
     parent: NodeId,
+    removal: Option<(NodeId, Option<Option<NodeId>>)>,
     dirty: &mut HashSet<NodeId>,
 ) {
     if !map.has_adjacent_sibling_selectors() && !map.has_general_sibling_selectors() {
         return;
     }
-    // Removal records intentionally do not retain old sibling pointers. All
-    // direct element siblings are the bounded sound recovery set; their clean
-    // descendant subtrees remain reusable when no sibling selector reaches
-    // through them.
+    // With the removed node's old next sibling known, only the element
+    // siblings that followed it can change their sibling-selector matches:
+    // the first one gets a new previous element (`+`), and every later one
+    // loses the removed node as a preceding sibling (`~`) when the removed
+    // node could start such a selector. A removed non-element was never an
+    // element sibling.
+    if let Some((removed, Some(old_next))) = removal {
+        let still_there = old_next
+            .is_none_or(|next| tree.with_node(next, |node| node.parent) == Some(Some(parent)));
+        if still_there {
+            if !tree
+                .with_node(removed, |node| node.is_element())
+                .unwrap_or(false)
+            {
+                return;
+            }
+            let siblings = element_children(tree, parent);
+            let first_following = match old_next {
+                None => siblings.len(),
+                Some(next) => {
+                    // The first element at or after the old next sibling.
+                    let mut cursor = Some(next);
+                    let mut found = siblings.len();
+                    while let Some(node) = cursor {
+                        if let Some(index) = siblings.iter().position(|sibling| *sibling == node) {
+                            found = index;
+                            break;
+                        }
+                        cursor = tree.with_node(node, |node| node.next_sibling).flatten();
+                    }
+                    found
+                }
+            };
+            let following = &siblings[first_following..];
+            if map.has_adjacent_sibling_selectors() {
+                if let Some(&next) = following.first() {
+                    add_style_subtree(tree, next, dirty);
+                }
+            }
+            if map.has_general_sibling_selectors()
+                && map.node_may_start_sibling_selector(tree, removed)
+            {
+                for &sibling in following {
+                    add_style_subtree(tree, sibling, dirty);
+                }
+            }
+            return;
+        }
+    }
+    // Without the old position, all direct element siblings are the bounded
+    // sound recovery set.
     for sibling in element_children(tree, parent) {
         add_style_subtree(tree, sibling, dirty);
     }
@@ -5234,7 +5301,7 @@ fn retained_style_plan_for_sheet(
                         add_style_context_chain(tree, parent, &mut dirty);
                         add_table_row_child_scope(tree, parent, &mut dirty);
                         add_removed_structural_scopes(tree, map, node, parent, &mut dirty);
-                        add_removed_sibling_scopes(tree, map, parent, &mut dirty);
+                        add_removed_sibling_scopes(tree, map, parent, None, &mut dirty);
                         add_empty_parent_scope(
                             tree,
                             map,
@@ -5265,7 +5332,11 @@ fn retained_style_plan_for_sheet(
                         &mut checked_empty_parents,
                     );
                 }
-                TreeStyleMutation::Remove { node, old_parent } => {
+                TreeStyleMutation::Remove {
+                    node,
+                    old_parent,
+                    old_next_sibling,
+                } => {
                     if subtree_contains_style_element(tree, node)
                         || node_is_style_text(tree, node, Some(old_parent))
                     {
@@ -5287,7 +5358,13 @@ fn retained_style_plan_for_sheet(
                     add_style_context_chain(tree, old_parent, &mut dirty);
                     add_table_row_child_scope(tree, old_parent, &mut dirty);
                     add_removed_structural_scopes(tree, map, node, old_parent, &mut dirty);
-                    add_removed_sibling_scopes(tree, map, old_parent, &mut dirty);
+                    add_removed_sibling_scopes(
+                        tree,
+                        map,
+                        old_parent,
+                        Some((node, old_next_sibling)),
+                        &mut dirty,
+                    );
                     add_empty_parent_scope(
                         tree,
                         map,
@@ -21445,6 +21522,7 @@ mod tests {
             TreeStyleMutation::Remove {
                 node: removed,
                 old_parent: rows,
+                old_next_sibling: None,
             },
             Incremental,
         );
@@ -21803,6 +21881,7 @@ mod tests {
                 TreeStyleMutation::Remove {
                     node: removed,
                     old_parent: host,
+                    old_next_sibling: None,
                 },
                 Incremental,
             );
@@ -21836,6 +21915,7 @@ mod tests {
             TreeStyleMutation::Remove {
                 node: signal,
                 old_parent: host,
+                old_next_sibling: None,
             },
             Incremental,
         );
@@ -21946,6 +22026,7 @@ mod tests {
                     TreeStyleMutation::Remove {
                         node: signal,
                         old_parent: host,
+                        old_next_sibling: None,
                     }
                 }
                 _ => {
@@ -22151,6 +22232,7 @@ mod tests {
                 TreeStyleMutation::Remove {
                     node: wrapper,
                     old_parent: answer,
+                    old_next_sibling: None,
                 }
                 .into(),
             ];

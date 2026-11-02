@@ -17717,6 +17717,7 @@ mod tests {
             &[crate::dom::TreeStyleMutation::Remove {
                 node: item,
                 old_parent: right,
+                old_next_sibling: None,
             }
             .into()],
             2.0,
@@ -17755,11 +17756,13 @@ mod tests {
                 crate::dom::TreeStyleMutation::Remove {
                     node: kept,
                     old_parent: right,
+                    old_next_sibling: None,
                 }
                 .into(),
                 crate::dom::TreeStyleMutation::Remove {
                     node: item,
                     old_parent: left,
+                    old_next_sibling: None,
                 }
                 .into(),
             ],

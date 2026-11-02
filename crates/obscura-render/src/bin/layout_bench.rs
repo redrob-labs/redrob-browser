@@ -378,10 +378,12 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
         for _ in 0..rounds {
+            let old_next_sibling = tree.with_node(p, |node| node.next_sibling);
             tree.remove_child(p);
             let removal = TreeStyleMutation::Remove {
                 node: p,
                 old_parent: parent,
+                old_next_sibling,
             };
             prepared = ctx.retained(&tree, prepared, &[removal.into()]);
             match moved_next {

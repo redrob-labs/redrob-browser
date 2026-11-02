@@ -2113,7 +2113,15 @@ fn retained_style_mutation(
         }
         "remove_child" => {
             let old_parent = dom.with_node(node, |node| node.parent)??;
-            Some(obscura_render::TreeStyleMutation::Remove { node, old_parent }.into())
+            let old_next_sibling = dom.with_node(node, |node| node.next_sibling)?;
+            Some(
+                obscura_render::TreeStyleMutation::Remove {
+                    node,
+                    old_parent,
+                    old_next_sibling: Some(old_next_sibling),
+                }
+                .into(),
+            )
         }
         "insert_before" => {
             let reference = NodeId::new(arg2.parse::<u32>().ok()?);
