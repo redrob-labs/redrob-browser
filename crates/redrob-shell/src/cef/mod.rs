@@ -462,24 +462,59 @@ pub fn apply_languages() {
 /// Chromium derives `intl.accept_languages` from `intl.selected_languages`
 /// (LanguagePrefs), so both are written, the selected ones first.
 pub(crate) fn write_languages() {
-    use cef::{ImplPreferenceManager as _, ImplValue as _};
     let langs = locale().1;
+    set_pref("intl.selected_languages", langs);
+    set_pref("intl.accept_languages", langs);
+}
+
+/// Set the profile's string preference `name` (Chromium's own settings).
+/// Call on CEF's UI thread.
+pub(crate) fn set_pref(name: &str, value: &str) {
+    use cef::{ImplPreferenceManager as _, ImplValue as _};
     let contexts = [request_context(), cef::request_context_get_global_context()];
     for c in contexts.iter().flatten() {
-        for pref in ["intl.selected_languages", "intl.accept_languages"] {
-            let Some(mut v) = cef::value_create() else {
-                continue;
-            };
-            v.set_string(Some(&CefString::from(langs)));
-            // Not empty: CEF refuses a null error string, and an empty
-            // CefString has no buffer.
-            let mut error = CefString::from(" ");
-            let name = CefString::from(pref);
-            if c.set_preference(Some(&name), Some(&mut v), Some(&mut error)) != 1 {
-                eprintln!("redrob-browser: {pref} not set: {error}");
-            }
+        let Some(mut v) = cef::value_create() else {
+            continue;
+        };
+        v.set_string(Some(&CefString::from(value)));
+        // Not empty: CEF refuses a null error string, and an empty
+        // CefString has no buffer.
+        let mut error = CefString::from(" ");
+        if c.set_preference(Some(&CefString::from(name)), Some(&mut v), Some(&mut error)) != 1 {
+            eprintln!("redrob-browser: {name} not set: {error}");
         }
     }
+}
+
+/// Whether the profile holds its own value for the preference `name` (not
+/// Chromium's default). Call on CEF's UI thread.
+pub(crate) fn pref_is_set(name: &str) -> bool {
+    use cef::{ImplDictionaryValue as _, ImplPreferenceManager as _};
+    let Some(mut dict) = request_context().and_then(|c| c.all_preferences(0)) else {
+        return false;
+    };
+    let mut parts = name.split('.').peekable();
+    while let Some(part) = parts.next() {
+        let key = CefString::from(part);
+        if parts.peek().is_none() {
+            return dict.has_key(Some(&key)) == 1;
+        }
+        match dict.dictionary(Some(&key)) {
+            Some(d) => dict = d,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The profile's string preference `name`; empty when unset. Call on CEF's
+/// UI thread.
+pub(crate) fn pref(name: &str) -> String {
+    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    request_context()
+        .and_then(|c| c.preference(Some(&CefString::from(name))))
+        .map(|v| CefString::from(&v.string()).to_string())
+        .unwrap_or_default()
 }
 
 /// Chromium's UI locale and the languages pages are asked for.
