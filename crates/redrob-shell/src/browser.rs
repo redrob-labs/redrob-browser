@@ -623,6 +623,7 @@ impl Browser {
                 if let Some(t) = w.model.tab_mut(id) {
                     t.agent = true;
                 }
+                w.op(id, cdp::Op::Agent);
                 w.session_dirty = true;
                 ctx.request_repaint_of(w.viewport);
                 self.target_waiters.push(TargetWaiter {

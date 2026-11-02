@@ -79,6 +79,10 @@ pub enum Op {
     Stop,
     /// Give the page the keyboard, or take it away.
     Focus(bool),
+    /// An agent works in this tab: out of sight it keeps running and
+    /// drawing (Chromium answers a hidden page's screenshot only now and
+    /// then), as the agent's own screen.
+    Agent,
     /// Chromium's developer tools for this tab, in their own window.
     DevTools,
     /// Type a saved login into the page's sign-in form.
@@ -233,6 +237,8 @@ struct Engine {
     places: HashMap<WindowId, (Place, bool)>,
     /// Which window shows each tab.
     tab_window: HashMap<TabId, WindowId>,
+    /// Agent tabs (`Op::Agent`).
+    agents: HashSet<TabId>,
 }
 
 thread_local! {
@@ -251,6 +257,7 @@ pub fn init(sink: Sink) {
             active: HashMap::new(),
             places: HashMap::new(),
             tab_window: HashMap::new(),
+            agents: HashSet::new(),
         })
     });
 }
@@ -453,7 +460,13 @@ impl Engine {
             (Some(true), true) => native::place(child, place),
             (_, true) => native::set_visible(child, true, Some(place)),
             (Some(false), false) => {}
-            (_, false) => native::set_visible(child, false, None),
+            (_, false) => {
+                native::set_visible(child, false, None);
+                #[cfg(target_os = "linux")]
+                if self.agents.contains(&tab) {
+                    native::set_page_hidden(child, false);
+                }
+            }
         }
         // No `was_hidden` (it is for off-screen pages): Chromium follows its
         // window being shown or hidden, and a hidden page still answers an
@@ -604,6 +617,21 @@ impl Engine {
                 return;
             }
         }
+        if let Op::Agent = op {
+            self.agents.insert(tab);
+            // Out of sight now: shown to Chromium again.
+            #[cfg(target_os = "linux")]
+            if let Some(t) = self
+                .tabs
+                .get(&tab)
+                .filter(|t| t.at.is_some_and(|(_, s)| !s))
+            {
+                if let Some(child) = t.native {
+                    native::set_page_hidden(child, false);
+                }
+            }
+            return;
+        }
         if let Some((_, waiting)) = self.opening.get_mut(&tab) {
             if !matches!(op, Op::Activate) {
                 waiting.push(op);
@@ -611,6 +639,7 @@ impl Engine {
             return;
         }
         if let Op::Close = op {
+            self.agents.remove(&tab);
             // Never created (its window had no handle yet).
             if self.unplaced.remove(&tab).is_some() {
                 self.tab_window.remove(&tab);
@@ -622,7 +651,7 @@ impl Engine {
             return;
         };
         match op {
-            Op::Open(_) | Op::Activate => {}
+            Op::Open(_) | Op::Activate | Op::Agent => {}
             Op::Close => {
                 if let Some(t) = self.tabs.remove(&tab) {
                     // Out of sight at once; Chromium destroys it later.

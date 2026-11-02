@@ -486,6 +486,9 @@ impl Window {
                 t.loading = true;
                 // A tab no page opened came from outside the window: an agent.
                 t.agent = opener.is_none();
+                if t.agent {
+                    self.op(tab, Op::Agent);
+                }
                 // Next to its opener, as in Chrome.
                 let keep = self.model.active;
                 if let Some(i) = opener.and_then(|o| self.model.index_of(o)) {
