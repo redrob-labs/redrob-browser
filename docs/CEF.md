@@ -20,6 +20,9 @@ We do not build Chromium. CEF ships prebuilt binaries per platform; the
 `156.3.0+156.0.15` = Chromium 156) downloads them and generates Rust
 bindings. Chromium security updates arrive as a `cef` crate bump.
 
+Which of Chrome's features work in the window, and how the window stands
+in for Chrome's toolbar: docs/CHROME-FEATURES.md.
+
 ## Shape
 
 ```

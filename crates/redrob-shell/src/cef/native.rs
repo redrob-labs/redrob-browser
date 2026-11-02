@@ -24,6 +24,24 @@ pub struct Place {
 /// hidden flag at creation).
 const AWAY: i32 = -30_000;
 
+/// The runtime style of every page (docs/CEF.md, docs/CHROME-FEATURES.md): Chrome
+/// style, so pages get Chrome's own features (print preview, extensions,
+/// autofill, passwords, chrome:// pages, choosers, page info). macOS: CEF
+/// always uses Alloy for a page inside a parent NSView.
+pub fn style() -> cef::RuntimeStyle {
+    let s = if chrome_style() {
+        cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME
+    } else {
+        cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY
+    };
+    s.into()
+}
+
+/// Whether pages run in Chrome style ([`style`]).
+pub fn chrome_style() -> bool {
+    !cfg!(target_os = "macos") && std::env::var_os("REDROB_ALLOY").is_none()
+}
+
 /// How a browser's page is created: a child of `place.parent`, hidden
 /// unless `shown`.
 pub fn child_info(place: Place, shown: bool) -> WindowInfo {
@@ -53,8 +71,7 @@ pub fn child_info(place: Place, shown: bool) -> WindowInfo {
         }
     };
     let info = WindowInfo {
-        // Alloy style: a page without Chrome's own window around it.
-        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into(),
+        runtime_style: style(),
         ..Default::default()
     }
     .set_as_child(raw_handle(place.parent), &bounds);
@@ -99,7 +116,7 @@ pub fn of(browser: &cef::Browser) -> Option<Handle> {
     (h != 0).then_some(Handle(h))
 }
 
-pub use imp::{detach, find_window, focus, place, reparent, set_visible};
+pub use imp::{detach, find_window, focus, place, raise, reparent, set_visible};
 
 /// Where the pointer is on screen (physical pixels) and whether its
 /// primary button is down, whichever window has it: a tab dragged out of
@@ -136,7 +153,7 @@ mod imp {
 
     use x11rb::connection::Connection as _;
     use x11rb::protocol::xproto::{
-        AtomEnum, ConfigureWindowAux, ConnectionExt as _, InputFocus, PropMode, Window,
+        AtomEnum, ConfigureWindowAux, ConnectionExt as _, InputFocus, PropMode, StackMode, Window,
     };
     use x11rb::rust_connection::RustConnection;
     use x11rb::wrapper::ConnectionExt as _;
@@ -236,6 +253,17 @@ mod imp {
             .y(py)
             .width(w.max(1) as u32)
             .height(h.max(1) as u32);
+        if let Ok(c) = x.conn.configure_window(child.0 as Window, &aux) {
+            c.ignore_error();
+        }
+        let _ = x.conn.flush();
+    }
+
+    /// Put `child` above its sibling pages (an extension's popup over the
+    /// page it acts on).
+    pub fn raise(child: Handle) {
+        let Some(x) = x() else { return };
+        let aux = ConfigureWindowAux::new().stack_mode(StackMode::ABOVE);
         if let Ok(c) = x.conn.configure_window(child.0 as Window, &aux) {
             c.ignore_error();
         }
@@ -381,7 +409,8 @@ mod imp {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetParent, SetWindowPos, ShowWindow,
-        HWND_MESSAGE, SWP_NOACTIVATE, SWP_NOZORDER, SW_HIDE, SW_SHOWNA,
+        HWND_MESSAGE, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SW_HIDE,
+        SW_SHOWNA,
     };
 
     use super::{Handle, Place};
@@ -436,6 +465,22 @@ mod imp {
                 w.max(1),
                 h.max(1),
                 SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+    }
+
+    /// Put `child` above its sibling pages.
+    pub fn raise(child: Handle) {
+        // SAFETY: as above.
+        unsafe {
+            SetWindowPos(
+                hwnd(child),
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
             )
         };
     }
@@ -526,6 +571,21 @@ mod imp {
             return;
         };
         c.setFrame(frame(parent, p));
+    }
+
+    /// Put `child` above its sibling pages: the last subview draws on top.
+    pub fn raise(child: Handle) {
+        let Some(c) = view(child) else { return };
+        // SAFETY: `c` is a live view; its superview is read on the main
+        // thread, where the window runs.
+        let Some(parent) = (unsafe { c.superview() }) else {
+            return;
+        };
+        // SAFETY: `c` is a live view; kept alive while it moves.
+        let keep = unsafe { objc2::rc::Retained::retain(c as *const NSView as *mut NSView) };
+        c.removeFromSuperview();
+        parent.addSubview(c);
+        drop(keep);
     }
 
     pub fn set_visible(child: Handle, visible: bool, p: Option<Place>) {

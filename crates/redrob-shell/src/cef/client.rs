@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use cef::{
     rc::Rc as _, sys, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
-    CefString, Client, ContextMenuHandler, DevToolsMessageObserver, DictionaryValue,
-    DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource, Frame, ImplBrowser,
-    ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler,
-    ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, JsdialogHandler, KeyboardHandler,
-    LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration, RequestHandler,
-    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
-    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    CefString, Client, CommandHandler, ContextMenuHandler, DevToolsMessageObserver,
+    DictionaryValue, DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource,
+    Frame, ImplBrowser, ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver,
+    ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler,
+    JsdialogHandler, KeyboardHandler, LifeSpanHandler, LoadHandler, PermissionHandler,
+    PopupFeatures, Registration, RequestHandler, WindowInfo, WindowOpenDisposition, WrapClient,
+    WrapDevToolsMessageObserver, WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler,
+    WrapLoadHandler,
 };
 use serde_json::{json, Value};
 
@@ -27,6 +28,12 @@ use crate::model::TabId;
 /// Tab ids for pages a page opened itself (popups, `target=_blank`), far
 /// above the ones the window hands out.
 static NEXT_POPUP: AtomicU64 = AtomicU64::new(1 << 40);
+
+/// A tab id of the same kind for a page the window opens over a tab (an
+/// extension's popup).
+pub fn next_popup_tab() -> TabId {
+    NEXT_POPUP.fetch_add(1, Ordering::SeqCst)
+}
 
 /// What every handler of one tab shares.
 #[derive(Clone)]
@@ -62,6 +69,47 @@ thread_local! {
     /// Where each tab's page sits (the engine keeps it current), so a
     /// page a tab opens is born in the same window.
     static PLACES: RefCell<HashMap<TabId, Place>> = RefCell::new(HashMap::new());
+    /// Pages that asked for a size of their own (`set_auto_resize_enabled`),
+    /// in points.
+    static RESIZED: RefCell<Vec<(TabId, i32, i32)>> = const { RefCell::new(Vec::new()) };
+    /// Pages the DevTools debugger paused (`Debugger.paused`).
+    static PAUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The browser id of the extension popup open now (cdp.rs), 0 for none.
+static POPUP_BROWSER: AtomicI32 = AtomicI32::new(0);
+/// Escape was pressed in the extension popup.
+static POPUP_ESCAPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_popup_browser(id: i32) {
+    POPUP_BROWSER.store(id, Ordering::SeqCst);
+}
+
+/// Escape in `browser`'s page: true when it is the extension popup, which
+/// Escape closes, as in Chrome.
+pub fn popup_escape(browser: i32) -> bool {
+    let popup = POPUP_BROWSER.load(Ordering::SeqCst);
+    let hit = popup != 0 && popup == browser;
+    if hit {
+        POPUP_ESCAPED.store(true, Ordering::SeqCst);
+    }
+    hit
+}
+
+/// Whether Escape was pressed in the extension popup since the last call.
+pub fn take_popup_escaped() -> bool {
+    POPUP_ESCAPED.swap(false, Ordering::SeqCst)
+}
+
+/// Pages paused in the debugger since the last call (an extension popup
+/// before its first script, cdp.rs).
+pub fn take_paused() -> Vec<TabId> {
+    PAUSED.with_borrow_mut(std::mem::take)
+}
+
+/// Sizes pages asked for since the last call (cef/handlers/extensions.rs).
+pub fn take_resized() -> Vec<(TabId, i32, i32)> {
+    RESIZED.with_borrow_mut(std::mem::take)
 }
 
 /// Where `tab`'s page was made or last placed.
@@ -109,7 +157,8 @@ pub fn new(ctx: TabCtx) -> Client {
         handlers::jsdialog::new(ctx.sink.clone()),
         handlers::context_menu::new(ctx.sink.clone()),
         handlers::find::new(ctx.sink.clone()),
-        handlers::languages::new(),
+        handlers::languages::new(ctx.sink.clone()),
+        handlers::chrome::handler(ctx.sink.clone()),
     )
 }
 
@@ -126,6 +175,7 @@ wrap_client! {
         context_menu: ContextMenuHandler,
         find: FindHandler,
         request: RequestHandler,
+        command: CommandHandler,
     }
 
     impl Client {
@@ -163,6 +213,57 @@ wrap_client! {
         fn request_handler(&self) -> Option<RequestHandler> {
             Some(self.request.clone())
         }
+        fn command_handler(&self) -> Option<CommandHandler> {
+            Some(self.command.clone())
+        }
+    }
+}
+
+/// The client of a browser Chrome opened by itself (Chrome style), outside
+/// any window of ours: an extension's welcome page, a chrome:// page's "open
+/// in new tab", a download's "show". Its page opens as a tab of the window
+/// in front instead, and Chrome's window closes.
+pub fn stray_client() -> Client {
+    StrayClient::new(Stray::new(std::sync::Arc::default()))
+}
+
+wrap_client! {
+    struct StrayClient {
+        display: DisplayHandler,
+    }
+
+    impl Client {
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(self.display.clone())
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct Stray {
+        adopted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl DisplayHandler {
+        fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            let (Some(b), Some(f)) = (browser, frame) else { return };
+            let url = text(url);
+            if f.is_main() != 1 || url.is_empty() || url == "about:blank" {
+                return;
+            }
+            if self.adopted.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            // An empty new tab Chrome opened (its session restore, an
+            // install) is not worth a tab.
+            let blank = url.starts_with("chrome://newtab") || url.starts_with("chrome://new-tab-page");
+            if let (false, Some(sink)) = (blank, super::global_sink()) {
+                sink.send_global(Event::ShowTab(url));
+            }
+            if let Some(host) = b.host() {
+                host.close_browser(1);
+            }
+        }
     }
 }
 
@@ -197,6 +298,17 @@ wrap_display_handler! {
                     handlers::on_address_change(&self.ctx.sink, b, &text(url));
                 }
             }
+        }
+
+        fn on_auto_resize(&self, _browser: Option<&mut Browser>, new_size: Option<&cef::Size>) -> ::std::os::raw::c_int {
+            // Only an extension's popup asks (cdp.rs): it is as big as what
+            // it draws, as in Chrome.
+            if let Some(s) = new_size {
+                let tab = self.ctx.tab;
+                RESIZED.with_borrow_mut(|r| r.push((tab, s.width, s.height)));
+                self.ctx.sink.wake_window();
+            }
+            1
         }
 
         fn on_status_message(&self, _browser: Option<&mut Browser>, value: Option<&CefString>) {
@@ -292,6 +404,7 @@ wrap_life_span_handler! {
             let Some(browser) = browser else { return };
             let id = browser.identifier();
             self.ctx.sink.bind(id, self.ctx.tab);
+            super::keep_browser(id, Some(browser));
             let tab = self.ctx.tab;
             POPUPS.with_borrow_mut(|p| p.retain(|_, t| *t != tab));
             CREATED.with_borrow_mut(|c| {
@@ -315,6 +428,7 @@ wrap_life_span_handler! {
             if let Some(b) = browser {
                 self.ctx.sink.unbind(b.identifier());
                 super::forget_browser(b.identifier());
+                super::keep_browser(b.identifier(), None);
             }
             set_place(self.ctx.tab, None);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
@@ -379,6 +493,30 @@ pub fn run_replies() -> bool {
     any
 }
 
+/// [`devtools`] in a session `browser`'s page attached to (a worker of an
+/// extension, cef/handlers/extensions.rs).
+pub fn devtools_in(
+    browser: &Browser,
+    session: &str,
+    method: &str,
+    params: Value,
+    reply: impl FnOnce(bool, Value) + 'static,
+) {
+    let Some(host) = browser.host() else {
+        reply(false, Value::Null);
+        return;
+    };
+    let id = NEXT_MESSAGE.fetch_add(1, Ordering::SeqCst);
+    let message =
+        json!({ "id": id, "sessionId": session, "method": method, "params": params }).to_string();
+    PENDING.with_borrow_mut(|p| p.insert(id, Box::new(reply)));
+    if host.send_dev_tools_message(Some(message.as_bytes())) != 1 {
+        if let Some(r) = PENDING.with_borrow_mut(|p| p.remove(&id)) {
+            r(false, Value::Null);
+        }
+    }
+}
+
 /// Fire and forget.
 pub fn devtools_send(browser: &Browser, method: &str, params: Value) {
     devtools(browser, method, params, |_, _| {});
@@ -435,6 +573,10 @@ wrap_dev_tools_message_observer! {
                             .unwrap_or_default();
                         sink.send_tab(tab, Event::Navigated(url.to_string()));
                     }
+                }
+                "Debugger.paused" => {
+                    PAUSED.with_borrow_mut(|p| p.push(tab));
+                    sink.wake_window();
                 }
                 "Page.navigatedWithinDocument" => {
                     if let Some(url) = p["url"].as_str() {

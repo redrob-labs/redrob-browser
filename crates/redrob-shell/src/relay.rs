@@ -657,6 +657,41 @@ async fn serve(
                 }));
                 continue;
             }
+            "Redrob.chromeCommand" => {
+                // A Chrome command (IDC_*, cef_command_ids.h) on the tab of
+                // this session or of `targetId`, as its menu entry runs it.
+                let target = params["targetId"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| session.as_deref().and_then(|s| hub.target_of(s)))
+                    .or_else(|| page.clone())
+                    .unwrap_or_default();
+                let command = params["command"].as_i64().unwrap_or(0) as i32;
+                // `dry`: only whether Chrome has it enabled for the page.
+                let dry = params["dry"].as_bool().unwrap_or(false);
+                let (tx, rx) = oneshot::channel();
+                let sent = command > 0
+                    && crate::cef::browser_of(&target).is_some_and(|b| {
+                        crate::cef::with_browser(b, move |browser| {
+                            let _ = tx.send(if dry {
+                                crate::cef::handlers::chrome::enabled(browser, command)
+                            } else {
+                                crate::cef::handlers::chrome::run(browser, command)
+                            });
+                        })
+                    });
+                let to_client = to_client.clone();
+                let (original, session) = (original.clone(), session.clone());
+                tokio::spawn(async move {
+                    let result = match tokio::time::timeout(Duration::from_secs(5), rx).await {
+                        _ if !sent => Err("no window tab for this target, or no command".into()),
+                        Ok(Ok(enabled)) => Ok(json!({ "enabled": enabled })),
+                        _ => Err("the window did not run the command".to_string()),
+                    };
+                    let _ = to_client.send(answer(&original, &session, result));
+                });
+                continue;
+            }
             m if m.starts_with("Redrob.") => {
                 let _ = to_client.send(reply(Err(format!("'{m}' wasn't found"))));
                 continue;

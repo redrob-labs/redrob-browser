@@ -56,9 +56,17 @@ wrap_app! {
                 // (XWayland under Wayland).
                 value("ozone-platform", "x11");
             }
+            // Reader mode: Chrome's DOM Distiller shows the article alone
+            // (chrome.rs DISTILL_PAGE).
+            switch("enable-dom-distiller");
             // Middle-click autoscroll, as Chrome on Windows has it; Chromium
-            // turns it on there only.
-            value("enable-blink-features", "MiddleClickAutoscroll");
+            // turns it on there only. Web Bluetooth on Linux too: Chrome has
+            // it on everywhere else, and its device chooser works here.
+            if cfg!(target_os = "linux") {
+                value("enable-blink-features", "MiddleClickAutoscroll,WebBluetooth");
+            } else {
+                value("enable-blink-features", "MiddleClickAutoscroll");
+            }
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {
@@ -75,11 +83,18 @@ wrap_browser_process_handler! {
             super::schedule(Duration::from_millis(delay_ms.max(0) as u64));
         }
 
+        fn default_client(&self) -> Option<cef::Client> {
+            // Browsers Chrome opens by itself become tabs of ours (client.rs).
+            Some(super::client::stray_client())
+        }
+
         fn on_context_initialized(&self) {
             // Protected video plays on the first visit (cef/handlers/widevine.rs).
             super::handlers::widevine::install();
             // Pages ask for the window's language (cef/mod.rs).
             super::write_languages();
+            // Spell check, and no second password manager (cef/mod.rs).
+            super::write_feature_prefs();
         }
     }
 }

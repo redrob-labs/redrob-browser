@@ -344,6 +344,20 @@ struct Window {
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
+    /// The extension whose popup is open over a tab
+    /// (cef/handlers/extensions.rs).
+    ext_popup: Option<(TabId, String)>,
+    /// An extension icon was clicked this frame: it opened or closed the
+    /// popup itself.
+    ext_toggled: bool,
+    /// Extension icons, by file (None: not an image).
+    ext_icons: std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
+    /// When the window last asked for the installed extensions.
+    ext_read_at: f64,
+    /// What the page info bubble shows for a tab (`Op::SiteInfo`).
+    site_info: Option<(TabId, cef::handlers::site_info::SiteInfo)>,
+    /// The page info bubble shows the certificate.
+    site_cert: bool,
 }
 
 impl Window {
@@ -627,6 +641,10 @@ impl Window {
                 self.open_tab(&url, false);
                 continue;
             }
+            if let Event::ShowTab(url) = event {
+                self.open_tab(&url, true);
+                continue;
+            }
             if let Event::Download {
                 guid,
                 url,
@@ -692,6 +710,16 @@ impl Window {
                 }
                 continue;
             }
+            if let Event::PopupClosed = event {
+                if self.ext_popup.as_ref().is_some_and(|(t, _)| *t == tab) {
+                    self.ext_popup = None;
+                }
+                continue;
+            }
+            if let Event::SiteInfo(info) = event {
+                self.site_info = Some((tab, info));
+                continue;
+            }
             // Only the tab on screen can have the keyboard or the pointer,
             // and only while its page shows (not under the new tab page or
             // settings, where Chromium still focuses a page it creates).
@@ -717,6 +745,7 @@ impl Window {
                         // A click in the page closes what floats over it.
                         popup::close_menus(ctx);
                         self.prompts.close_menu();
+                        self.close_ext_popup();
                     } else if self.model.index_of(tab).is_some() {
                         // Chromium focuses each page it makes, out of sight
                         // too (a new tab under the new tab page): the
@@ -802,10 +831,14 @@ impl Window {
                 | Event::Zoom(_)
                 | Event::Clipboard(_)
                 | Event::OpenTab(_)
+                | Event::ShowTab(_)
+                | Event::External { .. }
                 | Event::Shortcut(_)
                 | Event::Focused
                 | Event::TakeFocus
-                | Event::Status(_) => {}
+                | Event::Status(_)
+                | Event::SiteInfo(_)
+                | Event::PopupClosed => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -1126,6 +1159,366 @@ impl Window {
         }
     }
 
+    /// How many buttons [`Self::extension_buttons`] draws: the pinned icons
+    /// and the extensions menu.
+    fn extension_buttons_count(&self) -> usize {
+        let all = cef::handlers::extensions::list();
+        if all.is_empty() {
+            0
+        } else {
+            1 + all.iter().filter(|e| e.pinned).count()
+        }
+    }
+
+    /// The pinned extensions' icons and the extensions menu (Chrome's
+    /// puzzle piece) after the address field: Chrome style pages have no
+    /// toolbar of their own to show them (cef/handlers/extensions.rs).
+    fn extension_buttons(&mut self, ui: &mut egui::Ui) {
+        use cef::handlers::extensions::{self, Extension};
+        let now = ui.input(|i| i.time);
+        if self.ext_read_at == 0.0 || now - self.ext_read_at > 2.0 {
+            self.ext_read_at = now.max(0.001);
+            cef::handlers::on_ui(extensions::refresh);
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(2));
+        let all = extensions::list();
+        if all.is_empty() {
+            return;
+        }
+        let mut run: Option<(Extension, Rect)> = None;
+        for e in all.iter().filter(|e| e.pinned) {
+            let r = self.extension_icon(ui, e);
+            if r.clicked() {
+                run = Some((e.clone(), r.rect));
+            }
+        }
+        let r = theme::icon_button(ui, Icon::Plug, t("Extensions"));
+        let anchor = r.rect;
+        let mut pin: Option<(String, bool)> = None;
+        let mut open: Option<&'static str> = None;
+        popup::menu(&r, 320.0, true, |ui| {
+            ui.add_space(2.0);
+            ui.strong(t("Extensions"));
+            for e in all.iter() {
+                ui.horizontal(|ui| {
+                    let tex = e.icon.as_ref().and_then(|p| self.ext_texture(ui.ctx(), p));
+                    match tex {
+                        Some(tex) => {
+                            ui.add(egui::Image::new((tex, Vec2::splat(16.0))));
+                        }
+                        None => {
+                            let ink = theme::palette(ui).ink_secondary;
+                            ui.add(Icon::Plug.image(16.0, ink));
+                        }
+                    }
+                    let name = ui.add(
+                        egui::Button::new(theme::elide(&e.name, 32))
+                            .frame(false)
+                            .min_size(Vec2::new(210.0, 28.0)),
+                    );
+                    if name.clicked() {
+                        run = Some((e.clone(), anchor));
+                        ui.close();
+                    }
+                    let label = if e.pinned { t("Unpin") } else { t("Pin") };
+                    if ui.small_button(label).clicked() {
+                        pin = Some((e.id.clone(), !e.pinned));
+                    }
+                });
+            }
+            ui.separator();
+            if ui
+                .add(egui::Button::new(t("Manage extensions")).frame(false))
+                .clicked()
+            {
+                open = Some("chrome://extensions/");
+                ui.close();
+            }
+            if ui
+                .add(egui::Button::new(t("Find more in the Chrome Web Store")).frame(false))
+                .clicked()
+            {
+                open = Some("https://chromewebstore.google.com/category/extensions");
+                ui.close();
+            }
+        });
+        if let Some((id, on)) = pin {
+            cef::handlers::on_ui(move || extensions::set_pinned(&id, on));
+            self.ext_read_at = 0.0;
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if let Some(url) = open {
+            self.open_tab(url, true);
+        }
+        if let Some((e, at)) = run {
+            self.run_extension(ui.ctx(), &e, at);
+        }
+    }
+
+    /// A pinned extension's toolbar button.
+    fn extension_icon(
+        &mut self,
+        ui: &mut egui::Ui,
+        e: &cef::handlers::extensions::Extension,
+    ) -> egui::Response {
+        let p = theme::palette(ui);
+        let (rect, r) = ui.allocate_exact_size(Vec2::splat(size::CONTROL_SM), Sense::click());
+        let open = self.ext_popup.as_ref().is_some_and(|(_, id)| *id == e.id);
+        let fill = if r.is_pointer_button_down_on() || open {
+            p.border_subtle
+        } else if r.hovered() {
+            p.surface_sunken
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(size::RADIUS_MD), fill);
+        let icon = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+        match e.icon.as_ref().and_then(|p| self.ext_texture(ui.ctx(), p)) {
+            Some(tex) => {
+                egui::Image::new((tex, Vec2::splat(18.0))).paint_at(ui, icon);
+            }
+            None => Icon::Plug.paint(ui, icon, p.ink_secondary),
+        }
+        popup::tip(r, &e.name)
+    }
+
+    /// The texture of an extension icon file, loaded once.
+    fn ext_texture(
+        &mut self,
+        ctx: &egui::Context,
+        path: &std::path::Path,
+    ) -> Option<egui::TextureId> {
+        self.ext_icons
+            .entry(path.to_path_buf())
+            .or_insert_with(|| {
+                let img = image::load_from_memory(&std::fs::read(path).ok()?)
+                    .ok()?
+                    .to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+                Some(ctx.load_texture(
+                    format!("extension-icon:{}", path.display()),
+                    color,
+                    egui::TextureOptions::LINEAR,
+                ))
+            })
+            .as_ref()
+            .map(|t| t.id())
+    }
+
+    /// Run extension `e`'s action on the tab on screen; `at` is the button
+    /// its popup hangs from. A second click on its icon closes the popup.
+    fn run_extension(
+        &mut self,
+        ctx: &egui::Context,
+        e: &cef::handlers::extensions::Extension,
+        at: Rect,
+    ) {
+        let Some(tab) = self.active_id() else { return };
+        self.ext_toggled = true;
+        let again = self
+            .ext_popup
+            .as_ref()
+            .is_some_and(|(t, id)| *t == tab && *id == e.id);
+        self.close_ext_popup();
+        if again {
+            return;
+        }
+        let s = ctx.pixels_per_point();
+        let px = |v: f32| (v * s).round() as i32;
+        let anchor = [px(at.left()), px(at.top()), px(at.width()), px(at.height())];
+        self.op(
+            tab,
+            Op::Extension {
+                id: e.id.clone(),
+                popup: e.popup.clone(),
+                anchor,
+            },
+        );
+        if e.popup.is_some() {
+            self.ext_popup = Some((tab, e.id.clone()));
+        }
+    }
+
+    fn close_ext_popup(&mut self) {
+        if let Some((tab, _)) = self.ext_popup.take() {
+            self.op(tab, Op::ClosePopup);
+        }
+    }
+
+    /// The page info bubble: the connection, the certificate viewer, the
+    /// site's permissions and data, as Chrome's from its location bar.
+    fn page_info(&mut self, ui: &mut egui::Ui, url: &str) {
+        let tab = self.active_id();
+        let origin = vault::origin_of(url).unwrap_or_default();
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_else(|| url.to_string());
+        let info = self
+            .site_info
+            .as_ref()
+            .filter(|(t, i)| Some(*t) == tab && i.url == url)
+            .map(|(_, i)| i.clone());
+        let p = theme::palette(ui);
+        ui.add_space(2.0);
+        ui.strong(&host);
+        ui.add_space(4.0);
+        let Some(info) = info else {
+            ui.weak(t("Loading..."));
+            return;
+        };
+        if self.site_cert {
+            if let Some(c) = &info.cert {
+                self.certificate(ui, c);
+            }
+            return;
+        }
+        let https = url.starts_with("https://");
+        let (icon, text) = if info.secure && !info.cert_error && !info.mixed {
+            (Icon::Lock, t("Connection is secure"))
+        } else if info.cert_error {
+            (
+                Icon::Globe,
+                t("Your connection to this site is not private"),
+            )
+        } else if https && info.mixed {
+            (Icon::Globe, t("Parts of this page are not secure"))
+        } else {
+            (Icon::Globe, t("Connection is not secure"))
+        };
+        ui.horizontal(|ui| {
+            ui.add(icon.image(16.0, p.ink_secondary));
+            ui.label(text);
+        });
+        if info.secure && !info.cert_error {
+            ui.weak(t(
+                "Passwords and card numbers you send to this site stay private.",
+            ));
+        } else {
+            ui.weak(t("Do not enter passwords or card numbers on this site."));
+        }
+        if info.cert.is_some() {
+            let label = if info.cert_error {
+                t("Certificate is not valid")
+            } else {
+                t("Certificate is valid")
+            };
+            if ui.add(egui::Button::new(label).frame(false)).clicked() {
+                self.site_cert = true;
+            }
+        }
+        // The site's permissions, as the person answered them.
+        let sites = &cef::handlers::features().sites;
+        let saved = sites.entries(&origin, "permission.");
+        if !saved.is_empty() {
+            ui.separator();
+            ui.strong(t("Permissions"));
+            for (key, value) in saved {
+                let Some(kind) = cef::handlers::permission::Kind::from_key(&key) else {
+                    continue;
+                };
+                ui.horizontal(|ui| {
+                    ui.label(cef::handlers::ui::tr(kind.label()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button(t("Reset")).clicked() {
+                            sites.set(&origin, &key, None);
+                        }
+                        let allowed = value == "allow";
+                        let now = if allowed { t("Allowed") } else { t("Blocked") };
+                        if ui.small_button(now).clicked() {
+                            let next = if allowed { "block" } else { "allow" };
+                            sites.set(&origin, &key, Some(next));
+                        }
+                    });
+                });
+            }
+        }
+        if origin.is_empty() {
+            return;
+        }
+        ui.separator();
+        if ui
+            .add(egui::Button::new(t("Delete cookies and site data")).frame(false))
+            .clicked()
+        {
+            if let Some(id) = tab {
+                self.op(id, Op::ClearSiteData(origin.clone()));
+            }
+            self.notice = Some(tf("Deleted cookies and site data for {0}", &[&host]));
+            ui.close();
+        }
+        if ui
+            .add(egui::Button::new(t("Site settings")).frame(false))
+            .clicked()
+        {
+            let page = format!("chrome://settings/content/siteDetails?site={origin}");
+            self.open_tab(&page, true);
+            ui.close();
+        }
+    }
+
+    /// The certificate viewer, inside the page info bubble.
+    fn certificate(&mut self, ui: &mut egui::Ui, c: &cef::handlers::site_info::Certificate) {
+        let row = |ui: &mut egui::Ui, k: &str, v: &str| {
+            if v.is_empty() {
+                return;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(k);
+                ui.label(v);
+            });
+        };
+        let mono = |ui: &mut egui::Ui, k: &str, v: &str| {
+            ui.weak(k);
+            ui.label(egui::RichText::new(v).monospace().size(10.5));
+        };
+        ui.strong(t("Certificate viewer"));
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Issued to")).strong());
+        row(ui, t("Common name"), &c.subject.common_name);
+        row(ui, t("Organization"), &c.subject.organization);
+        row(ui, t("Country"), &c.subject.country);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Issued by")).strong());
+        row(ui, t("Common name"), &c.issuer.common_name);
+        row(ui, t("Organization"), &c.issuer.organization);
+        row(ui, t("Country"), &c.issuer.country);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Validity period")).strong());
+        row(ui, t("Issued on"), &c.valid_from);
+        row(ui, t("Expires on"), &c.valid_until);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Fingerprints")).strong());
+        mono(ui, t("Serial number"), &c.serial);
+        mono(ui, "SHA-256", &c.sha256);
+        mono(ui, "SHA-1", &c.sha1);
+        if !c.chain.is_empty() {
+            ui.add_space(4.0);
+            let n = c.chain.len();
+            ui.label(
+                egui::RichText::new(tf("Issued through {0} more certificates", &[&n])).strong(),
+            );
+            for (i, h) in c.chain.iter().enumerate() {
+                mono(ui, &format!("{}", i + 1), h);
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button(t("Back")).clicked() {
+                self.site_cert = false;
+            }
+            if ui.button(t("Copy certificate")).clicked() {
+                ui.ctx().copy_text(c.pem.clone());
+                self.notice = Some(t("Copied the certificate (PEM).").to_string());
+                ui.close();
+            }
+        });
+    }
+
     /// Offer to save a sign-in, but only for the tab's own committed site: a
     /// page cannot plant a login for another origin.
     fn offer_save(
@@ -1379,6 +1772,12 @@ impl Window {
             }
             if item(ui, Icon::Key, t("Passwords")).clicked() {
                 self.open_tab(internal::PASSWORDS, true);
+                ui.close();
+            }
+            if item(ui, Icon::BookOpen, t("Reading mode")).clicked() {
+                if let Some(id) = self.active_id() {
+                    self.op(id, Op::Reader);
+                }
                 ui.close();
             }
             if item(ui, Icon::Code, t("Developer tools")).clicked() {
@@ -1741,6 +2140,7 @@ impl Window {
                         } else {
                             0.0
                         }
+                        + self.extension_buttons_count() as f32 * (size::CONTROL_SM + 2.0)
                         + 4.0;
                     let width = (ui.available_width() - after).max(120.0);
                     let (pill, _) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::hover());
@@ -1778,6 +2178,27 @@ impl Window {
                         egui::pos2(pill.left() + 20.0, pill.center().y),
                         Vec2::splat(16.0),
                     );
+                    // The page info bubble, from the lock or globe, as in
+                    // Chrome (its connection, certificate, permissions).
+                    if matches!(site_icon, Icon::Lock | Icon::Globe) {
+                        let area = icon_rect.expand(6.0);
+                        let hit = ui.interact(area, ui.id().with("page-info"), Sense::click());
+                        if hit.hovered() {
+                            ui.painter().rect_filled(
+                                area,
+                                CornerRadius::same(size::RADIUS_MD),
+                                p.surface_sunken,
+                            );
+                        }
+                        if hit.clicked() {
+                            self.site_cert = false;
+                            if let Some(id) = id {
+                                self.op(id, Op::SiteInfo);
+                            }
+                        }
+                        let hit = popup::tip(hit, t("View site information"));
+                        popup::menu(&hit, 360.0, false, |ui| self.page_info(ui, &url));
+                    }
                     site_icon.paint(ui, icon_rect, p.ink_muted);
                     let star_rect = Rect::from_center_size(
                         egui::pos2(pill.right() - 20.0, pill.center().y),
@@ -1893,6 +2314,7 @@ impl Window {
                     }
                     ui.add_space(4.0);
                     self.key_button(ui, &url);
+                    self.extension_buttons(ui);
                     self.menu(ui);
                 });
             });
@@ -2743,6 +3165,17 @@ impl Window {
                 let page_id = self.model.tabs[tab_index].id;
                 self.page(&ctx, rect, page_id);
             });
+        // An extension popup closes on a click anywhere else in the window,
+        // and when its tab leaves the screen.
+        let clicked = ctx.input(|i| i.pointer.any_click());
+        let off_screen = self
+            .ext_popup
+            .as_ref()
+            .is_some_and(|(t, _)| self.active_id() != Some(*t));
+        if (clicked && !self.ext_toggled) || off_screen {
+            self.close_ext_popup();
+        }
+        self.ext_toggled = false;
         popup::end_frame(&ctx, self.page_focused || self.chrome_keyboard);
     }
 
