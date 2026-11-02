@@ -184,6 +184,9 @@ pub enum Event {
     Clipboard(String),
     /// Open this address in a new tab behind the current one.
     OpenTab(String),
+    /// Open this address in a new tab in front (a page Chrome opened by
+    /// itself). Sent with tab 0.
+    ShowTab(String),
     /// The page opened a link of a scheme only another program handles
     /// (mailto:, tel:): ask before handing it over (cef/handlers/external.rs).
     External {

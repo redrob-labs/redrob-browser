@@ -448,6 +448,10 @@ impl Window {
                 self.open_tab(&url, false);
                 continue;
             }
+            if let Event::ShowTab(url) = event {
+                self.open_tab(&url, true);
+                continue;
+            }
             if let Event::Download {
                 guid,
                 url,
@@ -623,6 +627,7 @@ impl Window {
                 | Event::Zoom(_)
                 | Event::Clipboard(_)
                 | Event::OpenTab(_)
+                | Event::ShowTab(_)
                 | Event::External { .. }
                 | Event::Shortcut(_)
                 | Event::Focused

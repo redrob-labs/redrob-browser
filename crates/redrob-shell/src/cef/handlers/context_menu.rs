@@ -262,12 +262,20 @@ fn run(
             }
         }
         Command::AddToDictionary => super::spelling::add(browser, &t.misspelled),
-        Command::SavePageAs => super::chrome::run(browser, super::chrome::id::SAVE_PAGE),
-        Command::Cast => super::chrome::run(browser, super::chrome::id::ROUTE_MEDIA),
-        Command::Translate => super::chrome::run(browser, super::chrome::id::SHOW_TRANSLATE),
-        Command::QrCode => super::chrome::run(browser, super::chrome::id::QRCODE_GENERATOR),
+        Command::SavePageAs => {
+            super::chrome::run(browser, super::chrome::id::SAVE_PAGE);
+        }
+        Command::Cast => {
+            super::chrome::run(browser, super::chrome::id::ROUTE_MEDIA);
+        }
+        Command::Translate => {
+            super::chrome::run(browser, super::chrome::id::SHOW_TRANSLATE);
+        }
+        Command::QrCode => {
+            super::chrome::run(browser, super::chrome::id::QRCODE_GENERATOR);
+        }
         Command::ReadingMode => {
-            super::chrome::run(browser, super::chrome::id::SHOW_READING_MODE_SIDE_PANEL)
+            super::chrome::run(browser, super::chrome::id::DISTILL_PAGE);
         }
     }
 }

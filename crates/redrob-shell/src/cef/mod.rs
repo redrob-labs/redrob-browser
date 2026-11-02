@@ -53,11 +53,13 @@ pub struct Sink {
 
 impl Sink {
     pub fn new(tx: Sender<Update>, wake: Wake) -> Self {
-        Sink {
+        let sink = Sink {
             tx,
             tabs: Arc::default(),
             wake,
-        }
+        };
+        let _ = GLOBAL_SINK.set(sink.clone());
+        sink
     }
 
     pub fn bind(&self, browser_id: i32, tab: TabId) {
@@ -104,6 +106,14 @@ impl Sink {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
     }
+}
+
+static GLOBAL_SINK: OnceLock<Sink> = OnceLock::new();
+
+/// The window's sink, for browsers that belong to no tab yet (client.rs
+/// `stray_client`).
+pub(crate) fn global_sink() -> Option<&'static Sink> {
+    GLOBAL_SINK.get()
 }
 
 /// Each tab's CDP target id and its browser, so the relay can reach what
@@ -590,6 +600,8 @@ pub(crate) fn write_feature_prefs() {
     // The window's vault saves and fills passwords (vault.rs); Chrome's
     // password manager would ask a second time.
     set_pref_to("credentials_enable_service", Pref::Bool(false));
+    // Offer to translate pages in other languages, as Chrome does.
+    set_pref_to("translate.enabled", Pref::Bool(true));
 }
 
 /// Whether the profile holds its own value for the preference `name` (not

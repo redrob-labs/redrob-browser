@@ -78,14 +78,27 @@ pub mod id {
 }
 
 /// Run Chrome's command `command` on `browser`'s page, as its menu entry
-/// would. Call on CEF's UI thread.
-pub fn run(browser: &Browser, command: i32) {
-    if let Some(host) = browser.host() {
+/// would; false when Chrome has it disabled for the page. Call on CEF's UI
+/// thread.
+pub fn run(browser: &Browser, command: i32) -> bool {
+    let Some(host) = browser.host() else {
+        return false;
+    };
+    let enabled = enabled(browser, command);
+    if enabled {
         host.execute_chrome_command(
             command,
             sys::cef_window_open_disposition_t::CEF_WOD_CURRENT_TAB.into(),
         );
     }
+    enabled
+}
+
+/// Whether Chrome can run `command` on `browser`'s page now.
+pub fn enabled(browser: &Browser, command: i32) -> bool {
+    browser
+        .host()
+        .is_some_and(|h| h.can_execute_chrome_command(command) == 1)
 }
 
 /// What the window does for one of Chrome's commands instead of Chrome.

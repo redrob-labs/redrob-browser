@@ -133,6 +133,8 @@ pub fn chromium_scheme(scheme: &str) -> bool {
             | "chrome-search"
             | "chrome-error"
             | "chrome-native"
+            | "chrome-distiller"
+            | "isolated-app"
             | "devtools"
             | "view-source"
             | "javascript"

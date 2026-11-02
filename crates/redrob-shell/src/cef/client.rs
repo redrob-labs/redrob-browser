@@ -172,6 +172,54 @@ wrap_client! {
     }
 }
 
+/// The client of a browser Chrome opened by itself (Chrome style), outside
+/// any window of ours: an extension's welcome page, a chrome:// page's "open
+/// in new tab", a download's "show". Its page opens as a tab of the window
+/// in front instead, and Chrome's window closes.
+pub fn stray_client() -> Client {
+    StrayClient::new(Stray::new(std::sync::Arc::default()))
+}
+
+wrap_client! {
+    struct StrayClient {
+        display: DisplayHandler,
+    }
+
+    impl Client {
+        fn display_handler(&self) -> Option<DisplayHandler> {
+            Some(self.display.clone())
+        }
+    }
+}
+
+wrap_display_handler! {
+    struct Stray {
+        adopted: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl DisplayHandler {
+        fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            let (Some(b), Some(f)) = (browser, frame) else { return };
+            let url = text(url);
+            if f.is_main() != 1 || url.is_empty() || url == "about:blank" {
+                return;
+            }
+            if self.adopted.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            // An empty new tab Chrome opened (its session restore, an
+            // install) is not worth a tab.
+            let blank = url.starts_with("chrome://newtab") || url.starts_with("chrome://new-tab-page");
+            if let (false, Some(sink)) = (blank, super::global_sink()) {
+                sink.send_global(Event::ShowTab(url));
+            }
+            if let Some(host) = b.host() {
+                host.close_browser(1);
+            }
+        }
+    }
+}
+
 /// The client of a DevTools window: CEF draws it itself, in its own window.
 pub fn devtools_client() -> Client {
     DevToolsClient::new()

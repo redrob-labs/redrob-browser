@@ -56,6 +56,9 @@ wrap_app! {
                 // (XWayland under Wayland).
                 value("ozone-platform", "x11");
             }
+            // Reader mode: Chrome's DOM Distiller shows the article alone
+            // (chrome.rs DISTILL_PAGE).
+            switch("enable-dom-distiller");
             // Middle-click autoscroll, as Chrome on Windows has it; Chromium
             // turns it on there only.
             value("enable-blink-features", "MiddleClickAutoscroll");
@@ -73,6 +76,11 @@ wrap_browser_process_handler! {
     impl BrowserProcessHandler {
         fn on_schedule_message_pump_work(&self, delay_ms: i64) {
             super::schedule(Duration::from_millis(delay_ms.max(0) as u64));
+        }
+
+        fn default_client(&self) -> Option<cef::Client> {
+            // Browsers Chrome opens by itself become tabs of ours (client.rs).
+            Some(super::client::stray_client())
         }
 
         fn on_context_initialized(&self) {
