@@ -4355,6 +4355,11 @@ fn prepare_dom_internal_unverified(
         return None;
     }
     let prepare_started = std::time::Instant::now();
+    if let Some((maps, mutations)) = retained.as_ref() {
+        if let Some(previous) = maps.previous_rendered.as_deref() {
+            crate::dom::patch_flat_tree(tree, previous, mutations);
+        }
+    }
     // Fetch <img> bytes up front to learn intrinsic sizes for layout (a
     // CSS-sized image with no width/height attribute would otherwise be 0x0
     // and never paint). This seeds the same cache the paint pass reads, so

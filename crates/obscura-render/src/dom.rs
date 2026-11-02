@@ -1921,7 +1921,7 @@ impl DomLayout {
                 owner
             };
 
-            for child in rendered_children(tree, id) {
+            for child in rendered_children_ref(tree, id).iter().copied() {
                 assign(
                     laid,
                     tree,
@@ -1989,7 +1989,7 @@ impl DomLayout {
                     local = Some(local.map_or(grid, |local| local.union(&grid)));
                 }
             }
-            for child in rendered_children(tree, id) {
+            for child in rendered_children_ref(tree, id).iter().copied() {
                 let Some(child_overflow) = overflow_bounds.get(child.index()).copied().flatten()
                 else {
                     continue;
@@ -2433,7 +2433,7 @@ fn accumulate_scrolling_overflow(
         }
         _ => inherited_clip,
     };
-    for child in rendered_children(tree, id) {
+    for child in rendered_children_ref(tree, id).iter().copied() {
         accumulate_scrolling_overflow(
             tree,
             child,
@@ -2982,7 +2982,7 @@ fn resolve_clip_rects(
         }
         _ => inherited,
     };
-    for cid in rendered_children(tree, id) {
+    for cid in rendered_children_ref(tree, id).iter().copied() {
         resolve_clip_rects(
             tree,
             cid,
@@ -4474,7 +4474,7 @@ fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::Layo
         }
 
         let mut child_scopes = Vec::new();
-        for child in rendered_children(tree, id) {
+        for child in rendered_children_ref(tree, id).iter().copied() {
             child_scopes.extend(walk(tree, child, styles, counters));
         }
         counters.pop_created(&child_scopes);
@@ -9184,15 +9184,39 @@ fn layout_dom_once(
             crate::blockify_outer_display(root_style);
         }
 
+        // The repairs below read an element's own style and its parent's and
+        // write its own or its children's. A retained style already went
+        // through them with the same inputs unless it is fresh or next to a
+        // fresh one; they only need to run again there.
+        let touched: Option<Vec<NodeId>> = fresh_styles.as_ref().map(|fresh| {
+            let mut touched = HashSet::default();
+            for &id in fresh {
+                touched.insert(id);
+                touched.extend(rendered_parent(tree, id));
+                touched.extend(rendered_children_ref(tree, id).iter().copied());
+            }
+            touched
+                .into_iter()
+                .filter(|id| styles.contains_key(id))
+                .collect()
+        });
+        let repair_candidates = |styles: &HashMap<NodeId, crate::LayoutStyle>| -> Vec<NodeId> {
+            match &touched {
+                Some(touched) => touched.clone(),
+                None => styles.keys().copied().collect(),
+            }
+        };
+
         // CSS Display blockification changes only the outer display. Preserve
         // the inner Flex/Grid mode of inline-flex/grid items.
-        let item_parents: Vec<NodeId> = styles
-            .iter()
-            .filter(|(_, s)| {
-                s.display == crate::Display::Grid
-                    || (s.display == crate::Display::Flex && !s.internal_flex_container)
+        let item_parents: Vec<NodeId> = repair_candidates(&styles)
+            .into_iter()
+            .filter(|id| {
+                styles.get(id).is_some_and(|s| {
+                    s.display == crate::Display::Grid
+                        || (s.display == crate::Display::Flex && !s.internal_flex_container)
+                })
             })
-            .map(|(&id, _)| id)
             .collect();
         for pid in item_parents {
             blockify_layout_children(tree, pid, &mut styles);
@@ -9205,14 +9229,15 @@ fn layout_dom_once(
         // entire ancestor chain even when the item contains many lines. Use
         // an auto basis for this indefinite-size phase; definite-height flex
         // containers keep the authored zero basis and normal free-space math.
-        let intrinsic_column_flex_parents: Vec<NodeId> = styles
-            .iter()
-            .filter(|(_, style)| {
-                style.display == crate::Display::Flex
-                    && style.flex_direction == Some(taffy::FlexDirection::Column)
-                    && style.height == crate::Dimension::Auto
+        let intrinsic_column_flex_parents: Vec<NodeId> = repair_candidates(&styles)
+            .into_iter()
+            .filter(|id| {
+                styles.get(id).is_some_and(|style| {
+                    style.display == crate::Display::Flex
+                        && style.flex_direction == Some(taffy::FlexDirection::Column)
+                        && style.height == crate::Dimension::Auto
+                })
             })
-            .map(|(&id, _)| id)
             .collect();
         for parent in intrinsic_column_flex_parents {
             for child in tree.children(parent) {
@@ -9235,17 +9260,18 @@ fn layout_dom_once(
 
         // An inline box whose writing mode is orthogonal to its parent's
         // becomes an inline-block (CSS Writing Modes 3 9.1).
-        let orthogonal: Vec<NodeId> = styles
-            .iter()
-            .filter(|(id, style)| {
-                style.vertical_writing
-                    && style.display == crate::Display::Inline
-                    && !style.is_inline_block
-                    && rendered_parent(tree, **id)
-                        .and_then(|parent| styles.get(&parent))
-                        .is_some_and(|parent| !parent.vertical_writing)
+        let orthogonal: Vec<NodeId> = repair_candidates(&styles)
+            .into_iter()
+            .filter(|id| {
+                styles.get(id).is_some_and(|style| {
+                    style.vertical_writing
+                        && style.display == crate::Display::Inline
+                        && !style.is_inline_block
+                        && rendered_parent(tree, *id)
+                            .and_then(|parent| styles.get(&parent))
+                            .is_some_and(|parent| !parent.vertical_writing)
+                })
             })
-            .map(|(id, _)| *id)
             .collect();
         for id in orthogonal {
             if let Some(style) = styles.get_mut(&id) {
@@ -9256,17 +9282,18 @@ fn layout_dom_once(
         // width: its physical width is its block size, the extent of all of
         // its stacked vertical lines (CSS Writing Modes 3 7.3), so it sizes
         // like fit-content from its turned layout.
-        let orthogonal_blocks: Vec<NodeId> = styles
-            .iter()
-            .filter(|(id, style)| {
-                style.vertical_writing
-                    && style.display == crate::Display::Block
-                    && style.width == crate::Dimension::Auto
-                    && rendered_parent(tree, **id)
-                        .and_then(|parent| styles.get(&parent))
-                        .is_some_and(|parent| !parent.vertical_writing)
+        let orthogonal_blocks: Vec<NodeId> = repair_candidates(&styles)
+            .into_iter()
+            .filter(|id| {
+                styles.get(id).is_some_and(|style| {
+                    style.vertical_writing
+                        && style.display == crate::Display::Block
+                        && style.width == crate::Dimension::Auto
+                        && rendered_parent(tree, *id)
+                            .and_then(|parent| styles.get(&parent))
+                            .is_some_and(|parent| !parent.vertical_writing)
+                })
             })
-            .map(|(id, _)| *id)
             .collect();
         for id in orthogonal_blocks {
             if let Some(style) = styles.get_mut(&id) {
@@ -9276,12 +9303,15 @@ fn layout_dom_once(
 
         // Absolute/fixed boxes and floats are blockified externally but retain
         // their inner formatting mode and their context-specific shrink-fit.
-        for style in styles.values_mut() {
+        for id in repair_candidates(&styles) {
+            let Some(style) = styles.get_mut(&id) else {
+                continue;
+            };
             if matches!(style.position, Some(taffy::Position::Absolute)) || style.float.is_some() {
                 crate::blockify_outer_display(style);
             }
+            blockify_generated_pseudos(style);
         }
-        blockify_generated_pseudos(&mut styles);
 
         // The initial containing block is modelled by the root taffy node's
         // definite viewport height (set at build), which is what `html,body{
@@ -13495,6 +13525,42 @@ pub(crate) fn rendered_children(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
     rendered_children_uncached(tree, id)
 }
 
+/// The rendered children of a node, borrowed from the flat tree when it has
+/// them (see `rendered_children_ref`).
+pub(crate) enum RenderedChildren {
+    Flat(std::rc::Rc<FlatTree>, usize, usize),
+    Owned(Vec<NodeId>),
+}
+
+impl std::ops::Deref for RenderedChildren {
+    type Target = [NodeId];
+
+    fn deref(&self) -> &[NodeId] {
+        match self {
+            Self::Flat(flat, start, end) => &flat.kids[*start..*end],
+            Self::Owned(children) => children,
+        }
+    }
+}
+
+/// `rendered_children` without copying the flat tree's list.
+pub(crate) fn rendered_children_ref(tree: &DomTree, id: NodeId) -> RenderedChildren {
+    if let Some(flat) = FLAT_TREE
+        .try_with(|slot| slot.borrow().clone())
+        .ok()
+        .flatten()
+        .filter(|flat| flat.generation == tree.mutation_generation())
+    {
+        if let Some(&(start, len)) = flat.spans.get(id.index()) {
+            if start != u32::MAX {
+                let (start, end) = (start as usize, (start + len) as usize);
+                return RenderedChildren::Flat(flat, start, end);
+            }
+        }
+    }
+    RenderedChildren::Owned(rendered_children_uncached(tree, id))
+}
+
 /// The flattened rendering tree of one document state: its preorder walk and,
 /// for every node on it (and the document), its rendered children and parent.
 /// A layout walks the tree a dozen times; each walk then reads these instead
@@ -13630,14 +13696,161 @@ pub(crate) fn mutated_subtrees(
     Some(subtrees)
 }
 
-/// Whether `node` is on the rendered tree of `tree`'s current state.
-fn rendered_now(tree: &DomTree, node: NodeId) -> bool {
-    current_flat_tree(tree).contains(node)
-}
-
 thread_local! {
     static FLAT_TREE: std::cell::RefCell<Option<std::rc::Rc<FlatTree>>> =
         const { std::cell::RefCell::new(None) };
+}
+
+/// Make the flat tree of `tree`'s current state from `previous`, the flat
+/// tree of the layout before `mutations`, instead of walking the whole
+/// document again: only the parents whose child lists the mutations changed
+/// and the subtrees they inserted (which may have changed while detached) are
+/// read from the DOM. Does nothing when the current state's tree is already
+/// known, or when an attribute may have moved slotted or `<details>` content.
+pub(crate) fn patch_flat_tree(
+    tree: &DomTree,
+    previous: &FlatTree,
+    mutations: &[RetainedStyleMutation],
+) {
+    let generation = tree.mutation_generation();
+    let current = FLAT_TREE
+        .try_with(|slot| slot.borrow().as_ref().map(|flat| flat.generation))
+        .ok()
+        .flatten();
+    if current == Some(generation)
+        || tree.has_shadow_roots()
+        || previous.spans.len() > tree.node_slot_count()
+        // The kept lists of every patch accumulate: start over past twice
+        // the live size.
+        || previous.kids.len() > 2 * previous.walk.len() + 1024
+        || mutations.iter().any(|mutation| {
+            matches!(mutation, RetainedStyleMutation::Attribute(attribute)
+                if matches!(attribute.name.to_ascii_lowercase().as_str(), "open" | "slot" | "name"))
+        })
+    {
+        return;
+    }
+    let slots = tree.node_slot_count();
+    let mut spans = previous.spans.clone();
+    spans.resize(slots, (u32::MAX, 0));
+    let mut kids = previous.kids.clone();
+    let record = |id: NodeId, kids: &mut Vec<NodeId>, spans: &mut Vec<(u32, u32)>| {
+        let children = rendered_children_uncached(tree, id);
+        if let Some(span) = spans.get_mut(id.index()) {
+            *span = (kids.len() as u32, children.len() as u32);
+            kids.extend_from_slice(&children);
+        }
+    };
+    let mut parents_done = HashSet::default();
+    for mutation in mutations {
+        let RetainedStyleMutation::Tree(mutation) = mutation else {
+            continue;
+        };
+        match *mutation {
+            TreeStyleMutation::Insert {
+                node,
+                old_parent,
+                new_parent,
+            } => {
+                for parent in std::iter::once(new_parent).chain(old_parent) {
+                    if parents_done.insert(parent) {
+                        record(parent, &mut kids, &mut spans);
+                    }
+                }
+                // The inserted subtree as it is now.
+                let mut stack = vec![node];
+                while let Some(id) = stack.pop() {
+                    record(id, &mut kids, &mut spans);
+                    if let Some(&(start, len)) = spans.get(id.index()) {
+                        if start != u32::MAX {
+                            stack.extend_from_slice(&kids[start as usize..(start + len) as usize]);
+                        }
+                    }
+                }
+            }
+            TreeStyleMutation::Remove { old_parent, .. } => {
+                if parents_done.insert(old_parent) {
+                    record(old_parent, &mut kids, &mut spans);
+                }
+            }
+            TreeStyleMutation::Text { .. } => {}
+        }
+    }
+    // The walk and the parents from the document down, as `build_flat_tree`
+    // makes them; a node no longer reached loses its list.
+    let root = tree.document();
+    let limit = tree.len();
+    let mut walk = Vec::with_capacity(previous.walk.len());
+    let mut parents = vec![None; slots];
+    let mut visited = vec![false; slots];
+    let children_of = |id: NodeId, spans: &[(u32, u32)]| {
+        spans
+            .get(id.index())
+            .filter(|(start, _)| *start != u32::MAX)
+            .map(|&(start, len)| start as usize..(start + len) as usize)
+    };
+    let mut stack: Vec<(NodeId, NodeId)> = children_of(root, &spans)
+        .map(|range| {
+            kids[range]
+                .iter()
+                .rev()
+                .map(|child| (*child, root))
+                .collect()
+        })
+        .unwrap_or_default();
+    while let Some((id, parent)) = stack.pop() {
+        match visited.get_mut(id.index()) {
+            Some(seen) if *seen => continue,
+            Some(seen) => *seen = true,
+            None => continue,
+        }
+        walk.push(id);
+        if let Some(slot) = parents.get_mut(id.index()) {
+            *slot = Some(parent);
+        }
+        if walk.len() >= limit {
+            break;
+        }
+        if children_of(id, &spans).is_none() {
+            // Never recorded: newly reached through a parent read above.
+            record(id, &mut kids, &mut spans);
+        }
+        if let Some(range) = children_of(id, &spans) {
+            stack.extend(kids[range].iter().rev().map(|child| (*child, id)));
+        }
+    }
+    for (index, span) in spans.iter_mut().enumerate() {
+        if index != root.index() && !visited.get(index).copied().unwrap_or(false) {
+            *span = (u32::MAX, 0);
+        }
+    }
+    let flat = std::rc::Rc::new(FlatTree {
+        generation,
+        walk: std::rc::Rc::new(walk),
+        spans,
+        kids,
+        parents,
+    });
+    if layout_verify_enabled() {
+        let scratch = build_flat_tree(tree);
+        assert!(
+            flat.walk == scratch.walk,
+            "OBSCURA_LAYOUT_VERIFY: patched flat tree walk differs from scratch"
+        );
+        for &id in scratch.walk.iter().chain(std::iter::once(&root)) {
+            assert_eq!(
+                flat.children(id),
+                scratch.children(id),
+                "OBSCURA_LAYOUT_VERIFY: patched flat tree children of {id:?} differ"
+            );
+            assert_eq!(
+                flat.parent(id),
+                scratch.parent(id),
+                "OBSCURA_LAYOUT_VERIFY: patched flat tree parent of {id:?} differs"
+            );
+        }
+    }
+    let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
 }
 
 /// Run `f` on the flat tree of `tree`'s current state, if one was built.
@@ -14034,8 +14247,8 @@ fn blockify_layout_children(
 /// fixups as real elements. They are stored inside their host style rather
 /// than in the DOM map, so the normal root/item/float/positioned loops above
 /// cannot reach them.
-fn blockify_generated_pseudos(styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
-    for host in styles.values_mut() {
+fn blockify_generated_pseudos(host: &mut crate::LayoutStyle) {
+    {
         let host_is_item_container =
             matches!(host.display, crate::Display::Flex | crate::Display::Grid)
                 && !host.internal_flex_container;
@@ -17096,7 +17309,7 @@ fn definite_row_flex_intrinsic_width(
 
     let mut count = 0usize;
     let mut width = 0.0_f32;
-    for child in rendered_children(tree, id) {
+    for child in rendered_children_ref(tree, id).iter().copied() {
         let Some(child_style) = styles.get(&child) else {
             let node = tree.borrow_node(child)?;
             if matches!(
