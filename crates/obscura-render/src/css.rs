@@ -2694,6 +2694,9 @@ pub struct StylesheetCache {
     misses: u64,
     /// How the sheet of the latest miss continued an earlier parse.
     last_resume: Option<SheetResume>,
+    /// The document (`DomTree::identity`) and external sheet generation whose
+    /// sources the entry was last parsed or checked against.
+    tree_token: Option<(usize, u64)>,
 }
 
 /// The rule counts of the parse a sheet continued from: every rule at or
@@ -2887,10 +2890,13 @@ impl StylesheetCache {
     ) -> (Arc<Stylesheet>, bool) {
         let viewport_bits = (viewport.0.to_bits(), viewport.1.to_bits());
         self.last_resume = None;
+        let token = (tree.identity(), tree.external_stylesheet_generation());
         if let Some(sheet) = self.get(sources, viewport, media_type) {
             self.hits = self.hits.saturating_add(1);
+            self.tree_token = Some(token);
             return (sheet, true);
         }
+        self.tree_token = None;
 
         self.misses = self.misses.saturating_add(1);
         if crate::prof::enabled() {
@@ -2972,6 +2978,7 @@ impl StylesheetCache {
             && compiled_rules <= MAX_STYLESHEET_CACHE_RULES
         {
             let source_bytes = source_bytes.unwrap_or_default();
+            self.tree_token = Some(token);
             self.entry = Some(CachedStylesheet {
                 sources: sources.to_vec(),
                 fold,
@@ -2985,6 +2992,30 @@ impl StylesheetCache {
             self.entry = None;
         }
         (sheet, false)
+    }
+
+    /// The cached sheet of `tree`, when the caller knows the document's
+    /// stylesheet sources have not changed since `get_or_parse` last read
+    /// them from it (no mutation since then touched a `<style>`, a
+    /// stylesheet `<link>` or their text). Skips collecting and comparing
+    /// the sources, which are often megabytes of CSS.
+    pub(crate) fn sheet_for_unchanged_tree(
+        &mut self,
+        tree: &DomTree,
+        viewport: (f32, f32),
+        media_type: CssMediaType,
+    ) -> Option<Arc<Stylesheet>> {
+        let token = (tree.identity(), tree.external_stylesheet_generation());
+        let entry = self.entry.as_ref()?;
+        if self.tree_token != Some(token)
+            || entry.viewport_bits != (viewport.0.to_bits(), viewport.1.to_bits())
+            || entry.media_type != media_type
+        {
+            return None;
+        }
+        self.last_resume = None;
+        self.hits = self.hits.saturating_add(1);
+        Some(Arc::clone(&entry.sheet))
     }
 
     /// How the sheet of the latest `get_or_parse` miss continued an earlier

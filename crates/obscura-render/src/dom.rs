@@ -297,6 +297,10 @@ pub struct DomLayout {
     /// retained layout can tell a restyled element that would get the same
     /// style. Elements whose cascade reads more context have none.
     pub(crate) cascade_signatures: HashMap<NodeId, u64>,
+    /// The elements that give their children a definite containing-block
+    /// height (computed from styles alone), kept so a retained layout can
+    /// skip walking subtrees whose styles all stayed.
+    pub(crate) definite_heights: HashSet<NodeId>,
     /// The per-axis clip inherited from ancestor non-visible overflow, keyed
     /// per node, in SCREEN space (the clip owner's box shifted by the owner's
     /// accumulated translate; see `resolve_clip_rects`). `None` means
@@ -1116,6 +1120,10 @@ pub(crate) struct RetainedStyleMaps {
     pub custom_properties: HashMap<NodeId, std::rc::Rc<HashMap<String, String>>>,
     /// The cascade inputs of each retained style (`DomLayout::cascade_signatures`).
     pub signatures: HashMap<NodeId, u64>,
+    /// The elements whose children had a definite containing-block height
+    /// in the layout these styles come from (`DomLayout::definite_heights`).
+    /// `None`: unknown, every retained element is walked again.
+    pub definite_heights: Option<HashSet<NodeId>>,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -4685,6 +4693,59 @@ fn subtree_contains_style_element(tree: &DomTree, root: NodeId) -> bool {
         })
 }
 
+/// Whether `node` is a `<style>` or `<link>` element, or holds one.
+fn subtree_contains_sheet_owner(tree: &DomTree, root: NodeId) -> bool {
+    std::iter::once(root)
+        .chain(tree.descendants(root))
+        .any(|id| {
+            tree.borrow_node(id).is_some_and(|node| {
+                node.as_element()
+                    .is_some_and(|element| matches!(element.local.as_ref(), "style" | "link"))
+            })
+        })
+}
+
+/// Whether the document's stylesheet sources are the same after `mutations`
+/// as before them: none adds, removes or edits a `<style>` or `<link>`
+/// element, its attributes or its text.
+pub(crate) fn mutations_keep_document_stylesheets(
+    tree: &DomTree,
+    mutations: &[RetainedStyleMutation],
+) -> bool {
+    let is_sheet_owner = |node: NodeId| {
+        tree.borrow_node(node).is_some_and(|node| {
+            node.as_element()
+                .is_some_and(|element| matches!(element.local.as_ref(), "style" | "link"))
+        })
+    };
+    mutations.iter().all(|mutation| match mutation {
+        RetainedStyleMutation::Attribute(attribute) => !is_sheet_owner(attribute.node),
+        RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
+            node,
+            old_parent,
+            new_parent,
+        }) => {
+            !is_sheet_owner(*new_parent)
+                && !old_parent.is_some_and(is_sheet_owner)
+                && !subtree_contains_sheet_owner(tree, *node)
+        }
+        RetainedStyleMutation::Tree(TreeStyleMutation::Remove {
+            node, old_parent, ..
+        }) => !is_sheet_owner(*old_parent) && !subtree_contains_sheet_owner(tree, *node),
+        RetainedStyleMutation::Tree(TreeStyleMutation::Text { node, parent }) => {
+            !parent.is_some_and(is_sheet_owner)
+                && !tree
+                    .borrow_node(*node)
+                    .and_then(|text| text.parent)
+                    .is_some_and(is_sheet_owner)
+        }
+        RetainedStyleMutation::Animation { .. }
+        | RetainedStyleMutation::WaapiAnimation { .. }
+        | RetainedStyleMutation::Resource => true,
+        RetainedStyleMutation::Stylesheet => false,
+    })
+}
+
 fn node_is_style_text(tree: &DomTree, node: NodeId, parent: Option<NodeId>) -> bool {
     parent.is_some_and(|parent| {
         tree.borrow_node(parent).is_some_and(|node| {
@@ -6592,7 +6653,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     intrinsic: &ReplacedIntrinsicMap,
     fonts: &[crate::inline::WebFont],
     pass_limit: Option<usize>,
-    stylesheet_cache: Option<&mut crate::css::StylesheetCache>,
+    mut stylesheet_cache: Option<&mut crate::css::StylesheetCache>,
     retained: Option<RetainedStyleMaps>,
     mutations: &[RetainedStyleMutation],
     media_type: crate::CssMediaType,
@@ -6602,18 +6663,28 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
 ) -> (DomLayout, ContainerLayoutTelemetry) {
     let timing = std::env::var("OBSCURA_RENDER_TIMING").is_ok();
 
-    let css_sources = document_stylesheet_sources(tree, viewport, media_type);
-
     let t0 = std::time::Instant::now();
-    let (sheet, stylesheet_cache_hit, sheet_resume) = match stylesheet_cache {
-        Some(cache) => {
+    // A retained layout whose mutations left every `<style>` and stylesheet
+    // `<link>` alone has the sources the cached sheet was read from.
+    let unchanged_sheet = match stylesheet_cache.as_deref_mut() {
+        Some(cache)
+            if retained.is_some() && mutations_keep_document_stylesheets(tree, mutations) =>
+        {
+            cache.sheet_for_unchanged_tree(tree, viewport, media_type)
+        }
+        _ => None,
+    };
+    let (sheet, stylesheet_cache_hit, sheet_resume) = match (unchanged_sheet, stylesheet_cache) {
+        (Some(sheet), _) => (sheet, true, None),
+        (None, Some(cache)) => {
+            let css_sources = document_stylesheet_sources(tree, viewport, media_type);
             let (sheet, hit) = cache.get_or_parse(tree, &css_sources, viewport, media_type);
             (sheet, hit, cache.take_resume())
         }
-        None => (
+        (None, None) => (
             std::sync::Arc::new(crate::css::Stylesheet::parse_for_viewport_and_media(
                 tree,
-                &css_sources,
+                &document_stylesheet_sources(tree, viewport, media_type),
                 viewport,
                 media_type,
             )),
@@ -6621,7 +6692,11 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             None,
         ),
     };
-    let shadow_sheets = collect_shadow_stylesheets(tree, viewport, media_type);
+    let shadow_sheets = if tree.has_shadow_roots() {
+        collect_shadow_stylesheets(tree, viewport, media_type)
+    } else {
+        HashMap::default()
+    };
     let t_parse = t0.elapsed();
 
     // Only the owning PreparedRender can supply an initial-pass cache. Its
@@ -6943,6 +7018,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                     styles: std::mem::take(&mut laid.styles),
                     custom_properties: std::mem::take(&mut laid.custom_properties),
                     signatures: std::mem::take(&mut laid.cascade_signatures),
+                    definite_heights: None,
                 });
             }
         }
@@ -7066,22 +7142,25 @@ fn layout_dom_once(
 ) {
     let t1 = std::time::Instant::now();
     let mut matcher = tree.matcher();
-    let (mut styles, mut custom_properties, mut fresh_styles, signatures) = match retained {
-        Some((retained, fresh)) => (
-            retained.styles,
-            retained.custom_properties,
-            Some(fresh),
-            retained.signatures,
-        ),
-        // Sized up front: growing a map of computed styles moves every
-        // (large) style each time it doubles.
-        None => (
-            HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
-            HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
-            None,
-            HashMap::default(),
-        ),
-    };
+    let (mut styles, mut custom_properties, mut fresh_styles, signatures, prior_definite_heights) =
+        match retained {
+            Some((retained, fresh)) => (
+                retained.styles,
+                retained.custom_properties,
+                Some(fresh),
+                retained.signatures,
+                retained.definite_heights,
+            ),
+            // Sized up front: growing a map of computed styles moves every
+            // (large) style each time it doubles.
+            None => (
+                HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
+                HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
+                None,
+                HashMap::default(),
+                None,
+            ),
+        };
     let root_props = std::rc::Rc::new(HashMap::default());
     let mut evaluator =
         snapshot.map(|snapshot| crate::css::ContainerQueryEvaluator::new(tree, snapshot));
@@ -7179,6 +7258,7 @@ fn layout_dom_once(
     let mut column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>> = HashMap::default();
     let mut text_runs = HashMap::default();
     let mut generated_rects: Vec<Option<Rect>> = Vec::new();
+    let mut definite_height_nodes: HashSet<NodeId> = HashSet::default();
     if let Some(root_id) = root {
         // Headless Chromium's classic scrollbar gutter is 15 CSS pixels.
         // `scrollbar-gutter:stable` reserves it even when the scrollbar track
@@ -7366,10 +7446,28 @@ fn layout_dom_once(
         // containing-block chain. Merely retaining `height:Percent` is not
         // sufficient: under an auto-height containing block it computes to
         // auto and must never become a post-layout percentage basis.
-        let mut definite_height_nodes = HashSet::default();
+        //
+        // A retained element with no fresh style above or below it has the
+        // containing-block chain of the layout its style comes from, so its
+        // subtree keeps that layout's entries and is not walked.
+        let prior_definite_known = prior_definite_heights.is_some();
+        definite_height_nodes = prior_definite_heights.unwrap_or_default();
         phase_marks.push(("pre", std::time::Instant::now()));
-        let mut queue = vec![(root_id, root_inh)];
-        while let Some((id, mut inh)) = queue.pop() {
+        // (element, inherited context, an ancestor got a fresh style)
+        let mut queue = vec![(root_id, root_inh, false)];
+        while let Some((id, mut inh, path_fresh)) = queue.pop() {
+            if prior_definite_known
+                && !path_fresh
+                && fresh_styles
+                    .as_ref()
+                    .is_some_and(|fresh| !fresh.contains(&id))
+                && fresh_ancestors
+                    .as_ref()
+                    .is_some_and(|ancestors| !ancestors.contains(&id))
+            {
+                continue;
+            }
+            definite_height_nodes.remove(&id);
             // Default the child containing-block width to this element's own
             // (updated to its content width inside the block below).
             let mut child_cb_width = inh.cb_width;
@@ -7616,7 +7714,7 @@ fn layout_dom_once(
                         .is_some_and(|ancestors| !ancestors.contains(&id));
                 if !hidden_and_clean {
                     for child in style_children(tree, id).into_iter().rev() {
-                        queue.push((child, inh.clone()));
+                        queue.push((child, inh.clone(), path_fresh));
                     }
                 }
                 continue;
@@ -8594,7 +8692,7 @@ fn layout_dom_once(
                 }
             }
             for child in style_children(tree, id).into_iter().rev() {
-                queue.push((child, inh.clone()));
+                queue.push((child, inh.clone(), true));
             }
         }
 
@@ -10431,6 +10529,7 @@ fn layout_dom_once(
             styles,
             custom_properties,
             cascade_signatures,
+            definite_heights: definite_height_nodes,
             clip_rects,
             translates,
             transforms,
@@ -20397,6 +20496,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                definite_heights: None,
             };
             let (mut active, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20438,6 +20538,7 @@ mod tests {
                 styles: std::mem::take(&mut active.styles),
                 custom_properties: std::mem::take(&mut active.custom_properties),
                 signatures: HashMap::default(),
+                definite_heights: None,
             };
             let (inactive, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20537,6 +20638,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -20659,6 +20761,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
@@ -20741,6 +20844,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let mutations = [
             TreeStyleMutation::Insert {
@@ -20812,6 +20916,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (_, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21113,6 +21218,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21213,6 +21319,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21552,6 +21659,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21601,6 +21709,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let mutations = mutations
             .iter()
@@ -22236,6 +22345,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                definite_heights: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22446,6 +22556,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                definite_heights: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22617,6 +22728,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22667,6 +22779,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22723,6 +22836,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            definite_heights: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -23481,6 +23595,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                definite_heights: None,
             };
             let (incremental, _) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
