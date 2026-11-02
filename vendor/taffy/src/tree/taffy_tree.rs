@@ -94,8 +94,13 @@ pub(crate) struct TaffyConfig {
 }
 
 #[cfg(feature = "calc")]
-fn default_calc_resolver(_value: *const (), _basis: f32) -> f32 {
-    0.0
+fn default_calc_resolver(_value: *const (), basis: f32) -> f32 {
+    // A NaN basis asks for the value without a basis: auto.
+    if basis.is_nan() {
+        f32::NAN
+    } else {
+        0.0
+    }
 }
 
 impl Default for TaffyConfig {
@@ -559,7 +564,7 @@ where
             }
         }
 
-        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+        let compute_algorithm = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
             #[cfg(feature = "std")]
@@ -609,6 +614,20 @@ where
                     compute_leaf_layout(inputs, style, calc_resolver, measure_function)
                 }
             }
+        };
+
+        // A cyclic percentage resolves by what the layout is made for (see
+        // `MAX_CONTENT_INDEFINITE_BASIS_BITS`).
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+            #[cfg(feature = "std")]
+            let previous = crate::util::set_max_content_layout(matches!(
+                inputs.available_space.width,
+                crate::style::AvailableSpace::MaxContent
+            ));
+            let output = compute_algorithm(tree, node_id, inputs);
+            #[cfg(feature = "std")]
+            crate::util::set_max_content_layout(previous);
+            output
         };
 
         // The bands follow from the float context, so a layout under them is cached with it.

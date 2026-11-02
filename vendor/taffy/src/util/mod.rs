@@ -4,7 +4,9 @@ mod resolve;
 pub(crate) mod sys;
 
 pub use math::MaybeMath;
-pub use resolve::{MaybeResolve, ResolveOrZero};
+pub use resolve::{MaybeResolve, ResolveOrZero, MAX_CONTENT_INDEFINITE_BASIS_BITS};
+#[cfg(feature = "std")]
+pub(crate) use resolve::set_max_content_layout;
 
 #[doc(hidden)]
 #[macro_use]
