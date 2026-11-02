@@ -35,6 +35,10 @@ redrob-browser-window (one process per profile, CEF browser process)
   │   │  only the tab on screen is shown, moved between windows by
   │   │  re-parenting. Chromium does its own keyboard, IME, clipboard,
   │   │  popups (<select>), cursor, drag and drop, scrolling, throttling
+  │   ├ host.rs (Linux): each page is a Chrome browser with Chrome's toolbar
+  │   │  (hidden), in a frameless CEF Views window moved into the browser
+  │   │  window before it is shown, so extension actions run through Chrome
+  │   │  (activeTab); see "Pages as Chrome windows" below
   │   ├ keys.rs: window shortcuts taken in on_pre_key_event while the page
   │   │  has the keyboard
   │   ├ xdnd.rs (Linux): the chrome's focus window and the window's XDND
@@ -95,6 +99,48 @@ Linux specifics:
 
 `crates/redrob-shell/src/cef/mod.rs` defines `Sink`: CEF callbacks report
 `cdp::Event`s for a CEF browser id; the sink maps it to the window `TabId`.
+
+## Pages as Chrome windows (Linux)
+
+CEF makes a Chrome style page created inside a parent window
+(`WindowInfo::set_as_child`) a popup-type Chrome browser without Chrome's
+toolbar. Chrome keeps the extensions' toolbar container in that toolbar, and
+everything that runs an extension's action as a click (and so grants it
+`activeTab`) goes through the container: `Extensions.triggerAction` crashes
+Chromium without one. So on Linux each page is created differently
+(`cef/host.rs`):
+
+- a CEF Views `BrowserView` whose delegate asks for Chrome's normal toolbar
+  (`CEF_CTT_NORMAL`; the browser is still TYPE_POPUP, but CEF builds the
+  toolbar with its extensions container), hidden as soon as it exists;
+- in a frameless top-level CEF window of its own (one Chrome style
+  BrowserView per CEF window), whose X11 window is re-parented into the
+  browser window's page area before it is first shown, as a window manager
+  moves a window into its frame. From then on native.rs places, shows, hides
+  and re-parents it like a child page;
+- pages a page opens come through the opener view's delegate
+  (`get_delegate_for_popup_browser_view`), DevTools too (a framed window of
+  their own).
+
+What the window does for it:
+
+- A click on an extension's icon asks Chrome over the relay's DevTools
+  connection to run the action (`Extensions.triggerAction` on the page's
+  "tab" target, found by its Chrome window): Chrome grants `activeTab` and
+  runs `onClicked`. For an action with a popup Chrome draws no popup of its
+  own (its toolbar is not on screen) and the window opens it as before. CEF's
+  own DevTools sessions are refused the method ("Method not allowed").
+- Chromium counts such a page active, and gives it keys, only while its own
+  window has the X input focus; it asks the window manager for that with
+  `_NET_ACTIVE_WINDOW`, which ignores a window inside another. So the page
+  on screen gets `XSetInputFocus` when it takes the keyboard (cdp.rs
+  `page_focused`).
+- Chrome closing such a page itself (an agent's `Target.closeTarget`) calls
+  no `do_close`; the window learns of it in `on_before_close`.
+
+`REDROB_CHILD_PAGES=1` keeps child pages. Windows keeps child pages
+(re-parenting Chromium's top-level HWND into ours with `WS_CHILD` is not
+verified on Windows yet); macOS pages are Alloy style.
 
 ## Agents
 
