@@ -46,6 +46,8 @@ thread_local! {
     /// The popup whose view CEF is creating now (between its delegate and
     /// `on_popup_browser_view_created`).
     static CREATING: RefCell<Option<TabId>> = const { RefCell::new(None) };
+    /// The browsers hosted here, by id.
+    static HOSTED: RefCell<std::collections::HashSet<i32>> = RefCell::new(Default::default());
 }
 
 fn client_key(client: &Client) -> usize {
@@ -61,8 +63,8 @@ pub fn expect_popup(client: &Client, tab: TabId) {
 /// Whether `browser`'s page is hosted here (its pages open as Views
 /// browsers too).
 pub fn hosts(browser: &Browser) -> bool {
-    let mut b = browser.clone();
-    enabled() && browser_view_get_for_browser(Some(&mut b)).is_some()
+    let id = browser.identifier();
+    HOSTED.with_borrow(|h| h.contains(&id))
 }
 
 /// Create tab `tab`'s page at `place` (hidden: `native` shows it). The
@@ -160,9 +162,18 @@ wrap_browser_view_delegate! {
             open_window(view.clone(), place) as _
         }
 
-        fn on_browser_destroyed(&self, browser_view: Option<&mut BrowserView>, _browser: Option<&mut Browser>) {
-            // Its window goes with it.
+        fn on_browser_created(&self, _browser_view: Option<&mut BrowserView>, browser: Option<&mut Browser>) {
+            if let Some(b) = browser {
+                HOSTED.with_borrow_mut(|h| h.insert(b.identifier()));
+            }
+        }
+
+        fn on_browser_destroyed(&self, browser_view: Option<&mut BrowserView>, browser: Option<&mut Browser>) {
             let _ = self.tab;
+            if let Some(b) = browser {
+                HOSTED.with_borrow_mut(|h| h.remove(&b.identifier()));
+            }
+            // Its window goes with it.
             if let Some(w) = browser_view.and_then(|v| v.window()) {
                 if w.is_closed() != 1 {
                     w.close();

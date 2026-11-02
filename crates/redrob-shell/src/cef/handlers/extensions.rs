@@ -267,123 +267,16 @@ pub fn run_action(browser: &Browser, id: &str) {
 /// its own toolbar icon does: the extension gets `activeTab` on the page
 /// and its `onClicked` listeners the page's tab. The page is a Chrome
 /// browser with Chrome's (hidden) toolbar, which holds the actions
-/// (cef/host.rs). `Extensions.triggerAction` names the page by its "tab"
-/// DevTools target, found here by the Chrome window it is in.
+/// (cef/host.rs); the relay asks Chrome (`relay::trigger_action`).
 fn trigger(browser: &Browser, id: &str) {
     let id = id.to_string();
-    let b = browser.clone();
-    let url = browser
-        .main_frame()
-        .map(|f| super::text(&f.url()))
-        .unwrap_or_default();
     client::devtools(
         browser,
         "Browser.getWindowForTarget",
         json!({}),
-        move |_, r| {
-            let Some(window) = r["windowId"].as_i64() else {
-                eprintln!("redrob-browser: extension action: the page has no window");
-                return;
-            };
-            let b2 = b.clone();
-            client::devtools(
-                &b,
-                "Target.getTargets",
-                json!({ "filter": [{ "type": "tab" }] }),
-                move |_, r| {
-                    let mut tabs: Vec<(bool, String)> = r["targetInfos"]
-                        .as_array()
-                        .map(|all| {
-                            all.iter()
-                                .filter_map(|t| {
-                                    let same = t["url"].as_str() == Some(url.as_str());
-                                    Some((!same, t["targetId"].as_str()?.to_string()))
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    // Tabs showing the page's address first: usually the one.
-                    tabs.sort();
-                    let tabs = tabs.into_iter().map(|(_, t)| t).collect();
-                    tab_in_window(b2, tabs, window, move |b, tab| match tab {
-                        Some(tab) => trigger_on(b, id, tab),
-                        None => eprintln!("redrob-browser: extension action: no tab target"),
-                    });
-                },
-            );
-        },
-    );
-}
-
-/// The first of the "tab" targets `tabs` in Chrome window `window`.
-fn tab_in_window(
-    browser: Browser,
-    mut tabs: Vec<String>,
-    window: i64,
-    then: impl FnOnce(Browser, Option<String>) + 'static,
-) {
-    if tabs.is_empty() {
-        then(browser, None);
-        return;
-    }
-    let tab = tabs.remove(0);
-    let b = browser.clone();
-    client::devtools(
-        &browser,
-        "Browser.getWindowForTarget",
-        json!({ "targetId": tab }),
-        move |_, r| {
-            if r["windowId"].as_i64() == Some(window) {
-                then(b, Some(tab));
-            } else {
-                tab_in_window(b, tabs, window, then);
-            }
-        },
-    );
-}
-
-fn trigger_on(browser: Browser, id: String, tab: String) {
-    let params = json!({ "id": id, "targetId": tab });
-    let b = browser.clone();
-    client::devtools(
-        &browser,
-        "Extensions.triggerAction",
-        params.clone(),
-        move |ok, r| {
-            if ok {
-                return;
-            }
-            // The domain answers on the browser's own session only: ask
-            // there.
-            let b2 = b.clone();
-            client::devtools(
-                &b,
-                "Target.attachToBrowserTarget",
-                json!({}),
-                move |_, s| {
-                    let Some(session) = s["sessionId"].as_str().map(str::to_string) else {
-                        eprintln!("redrob-browser: extension action: {r}");
-                        return;
-                    };
-                    let (b3, s2) = (b2.clone(), session.clone());
-                    client::devtools_in(
-                        &b2,
-                        &session,
-                        "Extensions.triggerAction",
-                        params,
-                        move |ok, r| {
-                            if !ok {
-                                eprintln!("redrob-browser: extension action: {r}");
-                            }
-                            client::devtools_send(
-                                &b3,
-                                "Target.detachFromTarget",
-                                json!({ "sessionId": s2 }),
-                            );
-                        },
-                    );
-                },
-            );
+        move |_, r| match r["windowId"].as_i64() {
+            Some(window) => crate::relay::trigger_action(window, id),
+            None => eprintln!("redrob-browser: extension action: the page has no window"),
         },
     );
 }
