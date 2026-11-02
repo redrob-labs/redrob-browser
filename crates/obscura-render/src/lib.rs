@@ -51,7 +51,10 @@ pub mod prof {
     pub const CLIP_WALK: usize = 13;
     /// A node whose rect changed since the retained layout.
     pub const RECT_MOVED: usize = 14;
-    const NAMES: [&str; 15] = [
+    /// An element whose context-free matches came from the cache.
+    pub const MATCH_HIT: usize = 15;
+    pub const MATCH_MISS: usize = 16;
+    const NAMES: [&str; 17] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -67,9 +70,11 @@ pub mod prof {
         "style_set",
         "clip_walk",
         "rect_moved",
+        "match_hit",
+        "match_miss",
     ];
-    static NANOS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
-    static COUNTS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
+    static NANOS: [AtomicU64; 17] = [const { AtomicU64::new(0) }; 17];
+    static COUNTS: [AtomicU64; 17] = [const { AtomicU64::new(0) }; 17];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();

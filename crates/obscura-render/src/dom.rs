@@ -4090,6 +4090,21 @@ impl StyleShareKey {
 pub(crate) struct StyleShareCache {
     entries: HashMap<u64, Vec<StyleShareEntry>>,
     len: usize,
+    /// What elements matched of the context-free rules, by ancestor chain
+    /// feature (see `chain_feature`), for the sheet of epoch `matches_sheet`.
+    matches: HashMap<u64, crate::css::ContextFreeMatches>,
+    matches_sheet: u64,
+}
+
+/// The ancestor chain feature of the document: the start of every chain.
+const CHAIN_ROOT: u64 = 0x6f62_7363_7572_6100;
+
+/// An element's ancestor chain feature: what context-free selectors read of
+/// it and its ancestors (`Stylesheet::element_match_feature`, from the
+/// element up to the document), folded into one hash.
+fn chain_feature(parent: u64, feature: u64) -> u64 {
+    use std::hash::BuildHasher;
+    foldhash::fast::FixedState::default().hash_one((parent, feature))
 }
 
 struct StyleShareEntry {
@@ -4103,6 +4118,32 @@ impl StyleShareCache {
     /// Entries kept per pass; a document with more distinct styles keeps
     /// cascading the rest normally.
     const CAPACITY: usize = 8192;
+    /// Ancestor chains whose context-free matches are kept.
+    const MATCH_CAPACITY: usize = 16384;
+
+    fn context_free_matches(
+        &self,
+        sheet: u64,
+        chain: u64,
+    ) -> Option<&crate::css::ContextFreeMatches> {
+        if self.matches_sheet != sheet {
+            return None;
+        }
+        self.matches.get(&chain)
+    }
+
+    fn insert_context_free_matches(
+        &mut self,
+        sheet: u64,
+        chain: u64,
+        matches: crate::css::ContextFreeMatches,
+    ) {
+        if self.matches_sheet != sheet || self.matches.len() >= Self::MATCH_CAPACITY {
+            self.matches.clear();
+            self.matches_sheet = sheet;
+        }
+        self.matches.insert(chain, matches);
+    }
 
     fn get(
         &self,
@@ -4178,6 +4219,8 @@ fn cascade_node_style(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
     ancestor_display_none: bool,
+    // The element's ancestor chain feature, when the cascade tracks it.
+    chain: Option<u64>,
     mut cx: Option<&mut CascadeCx>,
 ) -> Option<(
     std::rc::Rc<HashMap<String, String>>,
@@ -4446,17 +4489,28 @@ fn cascade_node_style(
         let cx = cx.filter(|_| signable);
         let mut pseudo_matches = None;
         if let Some(cx) = cx {
-            let matched = sheet.matched_rules_without_scopes(
+            let epoch = sheet.epoch();
+            let cached = chain.and_then(|chain| cx.share.context_free_matches(epoch, chain));
+            crate::prof::count(if cached.is_some() {
+                crate::prof::MATCH_HIT
+            } else {
+                crate::prof::MATCH_MISS
+            });
+            let (matched, pseudo, context_free) = sheet.matches_with_context_free(
                 tree,
                 matcher,
                 id,
                 node_id,
                 &classes,
                 elem.local.as_ref(),
+                cached,
             );
+            if let (Some(chain), Some(context_free)) = (chain, context_free) {
+                cx.share
+                    .insert_context_free_matches(epoch, chain, context_free);
+            }
             let inline = node.get_attribute("style");
             let shareable = sheet.matched_rules_are_shareable(&matched, inline);
-            let pseudo = sheet.pseudo_matches(tree, matcher, id, &mut None);
             // Everything the rest of this function reads, for an element whose
             // starting style depends on nothing outside itself.
             let local = elem.local.as_ref();
@@ -4751,6 +4805,8 @@ fn cascade_walk(
         use_container_evaluator: bool,
         /// An ancestor got a new style in this pass.
         context_changed: bool,
+        /// The parent's ancestor chain feature (`None`: not tracked).
+        parent_chain: Option<u64>,
     }
 
     enum Work<'a> {
@@ -4770,6 +4826,7 @@ fn cascade_walk(
         matcher_base: MatcherBase::Incremental,
         use_container_evaluator: true,
         context_changed: false,
+        parent_chain: (id == tree.document()).then_some(CHAIN_ROOT),
     })];
 
     while let Some(item) = work.pop() {
@@ -4802,6 +4859,16 @@ fn cascade_walk(
                     work.push(Work::PopSubtreeMatcher);
                 }
                 let current_matcher = subtree_matchers.last_mut().unwrap_or(&mut *matcher);
+                // The document passes the root chain on; other non-elements
+                // (a fragment, a shadow root) end it.
+                let chain = visit.parent_chain.and_then(|parent| {
+                    if visit.id == tree.document() {
+                        return Some(parent);
+                    }
+                    tree.borrow_node(visit.id)
+                        .and_then(|node| visit.sheet.element_match_feature(&node))
+                        .map(|feature| chain_feature(parent, feature))
+                });
                 let mut no_container_evaluator = None;
                 let evaluator: &mut Option<&mut crate::css::ContainerQueryEvaluator<'_>> =
                     if visit.use_container_evaluator {
@@ -4833,6 +4900,7 @@ fn cascade_walk(
                     visit.color_scheme_dark,
                     fresh_styles,
                     visit.display_none,
+                    chain,
                     cx.as_deref_mut().map(|cx| {
                         cx.context_changed = visit.context_changed;
                         cx
@@ -4878,6 +4946,7 @@ fn cascade_walk(
                                 matcher_base: MatcherBase::FreshEmpty,
                                 use_container_evaluator: false,
                                 context_changed,
+                                parent_chain: None,
                             }));
                         }
                     }
@@ -4898,6 +4967,7 @@ fn cascade_walk(
                             matcher_base: MatcherBase::FreshFromAncestors,
                             use_container_evaluator: true,
                             context_changed,
+                            parent_chain: None,
                         }));
                     }
                 }
@@ -4919,6 +4989,7 @@ fn cascade_walk(
                         matcher_base: MatcherBase::Incremental,
                         use_container_evaluator: visit.use_container_evaluator,
                         context_changed,
+                        parent_chain: chain,
                     }));
                 }
             }
@@ -7202,6 +7273,7 @@ impl NonGeometricStyleCache {
                 dark,
                 None,
                 ancestor_display_none,
+                None,
                 None,
             )?;
             props = next_props;

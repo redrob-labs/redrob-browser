@@ -1107,6 +1107,65 @@ pub enum SelectorKey {
     Universal,
 }
 
+/// See `CompiledSelector::context_free`.
+fn selector_context_free(
+    sel: &parser::Selector<ObscuraSelector>,
+    attributes: &mut Vec<String>,
+) -> bool {
+    use parser::{Combinator, Component};
+    sel.iter_raw_match_order().all(|component| match component {
+        Component::LocalName(_)
+        | Component::ID(_)
+        | Component::Class(_)
+        | Component::ExplicitUniversalType
+        | Component::ExplicitAnyNamespace
+        | Component::ExplicitNoNamespace
+        | Component::DefaultNamespace(_)
+        | Component::Namespace(..)
+        | Component::Root
+        | Component::Invalid(_)
+        | Component::PseudoElement(_)
+        | Component::Combinator(
+            Combinator::Child | Combinator::Descendant | Combinator::PseudoElement,
+        ) => true,
+        Component::AttributeInNoNamespaceExists {
+            local_name_lower, ..
+        } => {
+            attributes.push(local_name_lower.0.to_string());
+            true
+        }
+        Component::AttributeInNoNamespace { local_name, .. } => {
+            attributes.push(local_name.0.as_ref().to_ascii_lowercase());
+            true
+        }
+        Component::AttributeOther(selector) => {
+            attributes.push(selector.local_name_lower.0.to_string());
+            true
+        }
+        Component::Negation(list) | Component::Is(list) | Component::Where(list) => list
+            .slice()
+            .iter()
+            .all(|alternative| selector_context_free(alternative, attributes)),
+        Component::NonTSPseudoClass(pseudo) => match pseudo {
+            PseudoClass::Link => {
+                attributes.push("href".into());
+                true
+            }
+            PseudoClass::Enabled | PseudoClass::Disabled => {
+                attributes.push("disabled".into());
+                true
+            }
+            PseudoClass::Visited
+            | PseudoClass::Active
+            | PseudoClass::Focus
+            | PseudoClass::FocusVisible
+            | PseudoClass::FocusWithin => true,
+            PseudoClass::Hover | PseudoClass::Checked => false,
+        },
+        _ => false,
+    })
+}
+
 /// A parsed selector plus its cached specificity and subject key.
 #[derive(Clone)]
 pub struct CompiledSelector {
@@ -1120,6 +1179,15 @@ impl CompiledSelector {
     /// The selector serialized back to CSS, for diagnostics.
     pub fn to_css_text(&self) -> String {
         self.sel.to_css_string()
+    }
+
+    /// Whether matching reads nothing of an element and its ancestors but
+    /// their namespaces, local names, ids, classes, whether each is the
+    /// root, and the attributes it pushes onto `attributes` (lowercase): no
+    /// sibling, child, `:has()`, scope, slot or live state. Elements whose
+    /// ancestor chains agree in those match it alike.
+    pub fn context_free(&self, attributes: &mut Vec<String>) -> bool {
+        selector_context_free(&self.sel, attributes)
     }
 
     /// Whether this selector is eligible to match a featureless shadow host.
