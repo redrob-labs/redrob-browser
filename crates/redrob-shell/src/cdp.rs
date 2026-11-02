@@ -343,10 +343,12 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
         let paused = client::take_paused();
         let escaped = client::take_popup_escaped();
         let focused = client::take_focused();
+        let refit = crate::cef::host::take_refit();
         let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
         if created.is_empty()
             && focused.is_empty()
+            && refit.is_empty()
             && closed.is_empty()
             && resized.is_empty()
             && paused.is_empty()
@@ -366,6 +368,9 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
             }
             for tab in focused {
                 e.page_focused(tab);
+            }
+            for tab in refit {
+                e.refit(tab);
             }
             for tab in paused {
                 e.popup_paused(tab);
@@ -394,6 +399,26 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
         // outside the engine borrow (a CEF call may run callbacks).
         if let Some((window, cmd)) = cmd {
             run(window, cmd);
+        }
+    }
+    // Pages on screen whose window moved (native::follow): Chromium closes
+    // what it shows over the page (a <select> list, a picker) as it does
+    // when its own window moves.
+    let moved: Vec<Browser> = ENGINE.with_borrow_mut(|e| {
+        let Some(e) = e.as_mut() else {
+            return Vec::new();
+        };
+        let shown: Vec<TabId> = e.active.values().copied().filter(|t| e.shown(*t)).collect();
+        shown
+            .into_iter()
+            .filter_map(|t| e.tabs.get(&t))
+            .filter(|t| t.native.is_some_and(native::follow))
+            .map(|t| t.browser.clone())
+            .collect()
+    });
+    for b in moved {
+        if let Some(h) = b.host() {
+            h.notify_move_or_resize_started();
         }
     }
 }
@@ -553,6 +578,21 @@ impl Engine {
         }
     }
 
+    /// Chrome moved `tab`'s page window itself (cef/host.rs, fullscreen):
+    /// back where it belongs.
+    fn refit(&mut self, tab: TabId) {
+        let Some((child, (place, shown))) =
+            self.tabs.get(&tab).and_then(|t| Some((t.native?, t.at?)))
+        else {
+            return;
+        };
+        if shown {
+            native::place(child, place);
+        } else {
+            native::set_visible(child, false, None);
+        }
+    }
+
     /// Whether `tab` is the page on screen in its window.
     fn shown(&self, tab: TabId) -> bool {
         let Some(w) = self.tab_window.get(&tab) else {
@@ -616,6 +656,9 @@ impl Engine {
         let host = t.browser.host();
         if let Some(h) = &host {
             if before.is_some_and(|(p, _)| p.scale != place.scale) {
+                if crate::cef::host::enabled() {
+                    native::rescale(child, place);
+                }
                 h.notify_screen_info_changed();
             }
             if shown {

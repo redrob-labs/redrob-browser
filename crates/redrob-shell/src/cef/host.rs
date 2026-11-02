@@ -25,18 +25,31 @@ use cef::*;
 use super::native::{self, Place};
 use crate::model::TabId;
 
-/// Whether pages are hosted this way. Linux in Chrome style only:
-/// re-parenting Chromium's top-level window into the browser window is
-/// verified with X11 alone, and macOS pages run in Alloy style.
-/// `REDROB_CHILD_PAGES` keeps the earlier child pages.
+/// Whether pages are hosted this way: in Chrome style on Linux (X11
+/// re-parenting) and Windows (the HWND made `WS_CHILD`, native.rs). macOS
+/// only with `REDROB_MAC_HOSTED=1` ([`mac_opt_in`]): there the page's
+/// window becomes a child window of the browser window, which also turns
+/// macOS pages from Alloy to Chrome style. `REDROB_CHILD_PAGES` keeps the
+/// earlier child pages everywhere.
 pub fn enabled() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
-        cfg!(target_os = "linux")
+        (cfg!(any(target_os = "linux", windows)) || mac_opt_in())
             && native::chrome_style()
             && std::env::var_os("REDROB_CHILD_PAGES").is_none()
     })
+}
+
+/// macOS hosting is asked for (`REDROB_MAC_HOSTED=1`). Off by default
+/// until it runs on a Mac: CEF cannot put a Chrome style page inside our
+/// NSView (browser_host_create.cc, issue #3294), so the page is an NSWindow
+/// of its own kept over the page area as a child window, and a click in it
+/// makes that window key (the browser window's title bar dims meanwhile).
+pub fn mac_opt_in() -> bool {
+    cfg!(target_os = "macos")
+        && std::env::var_os("REDROB_MAC_HOSTED").is_some_and(|v| v == "1")
+        && std::env::var_os("REDROB_CHILD_PAGES").is_none()
 }
 
 thread_local! {
@@ -48,6 +61,15 @@ thread_local! {
     static CREATING: RefCell<Option<TabId>> = const { RefCell::new(None) };
     /// The browsers hosted here, by id.
     static HOSTED: RefCell<std::collections::HashSet<i32>> = RefCell::new(Default::default());
+    /// Pages whose window Chrome moved itself (fullscreen), to be put back.
+    static REFIT: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Pages whose window Chrome resized itself since the last call
+/// (`on_window_fullscreen_transition`): cdp.rs puts them back where they
+/// belong.
+pub fn take_refit() -> Vec<TabId> {
+    REFIT.with_borrow_mut(std::mem::take)
 }
 
 fn client_key(client: &Client) -> usize {
@@ -88,13 +110,13 @@ pub fn create(
     ) else {
         return false;
     };
-    open_window(view, place)
+    open_window(tab, view, place)
 }
 
-/// A frameless top-level CEF window holding `view`, moved into the page
-/// area of `place` as soon as it exists.
-fn open_window(view: BrowserView, place: Place) -> bool {
-    let mut delegate = PageWindow::new(view, place);
+/// A frameless top-level CEF window holding `view`, tab `tab`'s page,
+/// moved into the page area of `place` as soon as it exists.
+fn open_window(tab: TabId, view: BrowserView, place: Place) -> bool {
+    let mut delegate = PageWindow::new(tab, view, place);
     window_create_top_level(Some(&mut delegate)).is_some()
 }
 
@@ -171,7 +193,7 @@ wrap_browser_view_delegate! {
             let Some(place) = super::client::place_of(tab) else {
                 return 0;
             };
-            open_window(view.clone(), place) as _
+            open_window(tab, view.clone(), place) as _
         }
 
         fn on_browser_created(&self, _browser_view: Option<&mut BrowserView>, browser: Option<&mut Browser>) {
@@ -197,6 +219,7 @@ wrap_browser_view_delegate! {
 
 wrap_window_delegate! {
     struct PageWindow {
+        tab: TabId,
         view: BrowserView,
         place: Place,
     }
@@ -209,20 +232,40 @@ wrap_window_delegate! {
         fn on_window_created(&self, window: Option<&mut Window>) {
             let Some(w) = window else { return };
             w.add_child_view(Some(&mut View::from(&self.view)));
-            if let Some(h) = native::window_of(w) {
-                native::embed(h, self.place);
+            match native::window_of(w) {
+                Some(h) => native::embed(h, self.place, || w.show()),
+                None => w.show(),
             }
-            w.show();
         }
 
         fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
             let [_, _, w, h] = self.place.rect;
+            // Windows and macOS take it in DIPs (native.rs sets the size in
+            // pixels once the window is in place); Linux in pixels.
+            let s = if cfg!(target_os = "linux") {
+                1.0
+            } else {
+                self.place.scale.max(0.1)
+            };
             Rect {
                 x: native::AWAY,
                 y: native::AWAY,
-                width: w.max(1),
-                height: h.max(1),
+                width: ((w as f32 / s).round() as i32).max(1),
+                height: ((h as f32 / s).round() as i32).max(1),
             }
+        }
+
+        fn on_window_fullscreen_transition(
+            &self,
+            _window: Option<&mut Window>,
+            _is_completed: ::std::os::raw::c_int,
+        ) {
+            // A page going fullscreen (a video's button, F11 in the page)
+            // has Chrome size its window to the screen, in screen
+            // coordinates; inside the browser window that misplaces it. It
+            // stays over the page area, fullscreen there.
+            // cdp.rs puts it back ([`take_refit`]).
+            REFIT.with_borrow_mut(|r| r.push(self.tab));
         }
 
         fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
