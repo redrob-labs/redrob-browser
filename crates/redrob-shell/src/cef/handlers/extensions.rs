@@ -285,6 +285,12 @@ fn trigger(browser: &Browser, id: &str) {
 /// popup's questions about "the active tab", finds the page's tab
 /// ([`WINDOW_TYPES`]).
 pub fn prepare_popup(browser: &Browser, id: &str) {
+    // Chrome grants `activeTab` when it opens an action's popup: run the
+    // action through Chrome first. Its own popup stays closed (it has no
+    // toolbar on screen to hang it from); the window opens it instead.
+    if crate::cef::host::hosts(browser) {
+        trigger(browser, id);
+    }
     in_worker(
         browser.clone(),
         id.to_string(),
