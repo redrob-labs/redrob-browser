@@ -6,6 +6,7 @@
 //! (`OnAcceleratedPaint`: dmabuf, IOSurface, D3D11 shared handle) when the
 //! window's wgpu device can import them, else as BGRA pixels (`OnPaint`).
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -132,10 +133,53 @@ pub fn lock(v: &SharedView) -> MutexGuard<'_, View> {
 static IMPORTED: AtomicBool = AtomicBool::new(false);
 static IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
 
-/// A GPU frame could not be imported into the window's device: tabs opened
-/// from now on ask Chromium for pixels instead.
+/// A GPU frame could not be imported into the window's device: every tab
+/// moves to pixels ([`Paths::switch`]) and new ones start there.
 pub fn import_failed() -> bool {
     IMPORT_FAILED.load(Ordering::SeqCst)
+}
+
+/// Which render path each tab's browser was created with.
+///
+/// CEF fixes a browser's path when it creates it (`shared_texture_enabled`)
+/// and has no call to change it, so when a GPU frame cannot be imported the
+/// window re-hosts every tab still on the GPU path in a browser that sends
+/// pixels (cdp.rs `rehost`): same address and profile, drawn at once.
+#[derive(Default)]
+pub struct Paths {
+    gpu: HashSet<TabId>,
+}
+
+impl Paths {
+    /// Whether a browser created now may send GPU frames.
+    pub fn gpu_for_new(allowed: bool, failed: bool) -> bool {
+        allowed && !failed
+    }
+
+    /// The tab's browser exists, on the GPU path or not.
+    pub fn adopted(&mut self, tab: TabId, gpu: bool) {
+        if gpu {
+            self.gpu.insert(tab);
+        } else {
+            self.gpu.remove(&tab);
+        }
+    }
+
+    pub fn forget(&mut self, tab: TabId) {
+        self.gpu.remove(&tab);
+    }
+
+    /// After an import failure: the tabs whose browser is still on the GPU
+    /// path, oldest first, each to be re-hosted on pixels. Each comes back
+    /// once.
+    pub fn switch(&mut self, failed: bool) -> Vec<TabId> {
+        if !failed || self.gpu.is_empty() {
+            return Vec::new();
+        }
+        let mut tabs: Vec<TabId> = self.gpu.drain().collect();
+        tabs.sort_unstable();
+        tabs
+    }
 }
 
 /// The window's GPU, when CEF frames can be imported into it.
@@ -277,12 +321,13 @@ wrap_render_handler! {
             let texture = match unsafe { handle.import_texture(&gpu.device, &gpu.queue) } {
                 Ok(t) => t,
                 Err(e) => {
-                    // New tabs take pixels from here on (cdp.rs).
+                    // Every tab moves to pixels (cdp.rs re-hosts them).
                     if !IMPORT_FAILED.swap(true, Ordering::SeqCst) {
                         eprintln!(
-                            "redrob-browser: page frame import failed ({e}); new tabs use pixel upload (REDROB_OSR=cpu starts that way)"
+                            "redrob-browser: page frame import failed ({e}); every tab switches to pixel upload (REDROB_OSR=cpu starts that way)"
                         );
                     }
+                    self.sink.repaint(self.tab);
                     return;
                 }
             };
@@ -412,5 +457,55 @@ pub fn cursor_icon(t: sys::cef_cursor_type_t) -> egui::CursorIcon {
         T::CT_GRAB => C::Grab,
         T::CT_GRABBING | T::CT_DND_MOVE => C::Grabbing,
         _ => C::Default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_import_moves_every_open_tab_to_pixels_once() {
+        let mut paths = Paths::default();
+        for tab in [3, 1, 2] {
+            paths.adopted(tab, Paths::gpu_for_new(true, false));
+        }
+        // A tab that started on pixels and one that closed are left alone.
+        paths.adopted(4, Paths::gpu_for_new(false, false));
+        paths.adopted(5, true);
+        paths.forget(5);
+        assert!(paths.switch(false).is_empty());
+
+        // The first failed frame: every tab still on the GPU path, at once.
+        assert_eq!(paths.switch(true), vec![1, 2, 3]);
+        // Their new browsers send pixels, and so does every later tab.
+        for tab in [1, 2, 3, 6] {
+            paths.adopted(tab, Paths::gpu_for_new(true, true));
+        }
+        assert!(paths.switch(true).is_empty());
+    }
+
+    #[test]
+    fn pixels_repaint_the_rows_that_changed() {
+        let mut layer = Layer::default();
+        let frame = vec![7u8; 4 * 4 * 4];
+        layer.paint(&[], frame.as_ptr(), 4, 4);
+        assert_eq!(
+            (layer.width, layer.height, layer.dirty),
+            (4, 4, Some((0, 4)))
+        );
+        layer.dirty = None;
+        let next = vec![9u8; 4 * 4 * 4];
+        let rect = Rect {
+            x: 1,
+            y: 2,
+            width: 2,
+            height: 1,
+        };
+        layer.paint(&[rect], next.as_ptr(), 4, 4);
+        assert_eq!(layer.dirty, Some((2, 3)));
+        assert_eq!(&layer.pixels[2 * 16 + 4..2 * 16 + 12], &[9; 8]);
+        assert_eq!(layer.pixels[2 * 16], 7);
+        assert!(layer.texture.is_none());
     }
 }
