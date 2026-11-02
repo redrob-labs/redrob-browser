@@ -4294,6 +4294,11 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             derived: previous_derived,
             counters_used: previous.layout.counters_used,
             emoji,
+            layout_tree: previous.layout.layout_tree.take().map(|mut layout_tree| {
+                layout_tree.store = Some(std::mem::take(&mut previous.layout.ifc));
+                layout_tree.engine = Some(std::mem::take(&mut previous.layout.text_engine));
+                layout_tree
+            }),
         }),
     };
     drop(previous);
@@ -13429,16 +13434,27 @@ fn collect_content_image_intrinsics(
 ) -> bool {
     let mut changed = false;
     let mut active = HashSet::default();
-    for (&nid, style) in styles {
-        if !tree
-            .with_node(nid, |node| {
-                node.as_element()
-                    .is_some_and(|name| name.local.as_ref() == "img")
+    // Without shadow trees every `<img>` with a style is on the rendered
+    // tree, which knows them.
+    let images: Vec<obscura_dom::tree::NodeId> = if tree.has_shadow_roots() {
+        styles
+            .keys()
+            .copied()
+            .filter(|&nid| {
+                tree.with_node(nid, |node| {
+                    node.as_element()
+                        .is_some_and(|name| name.local.as_ref() == "img")
+                })
+                .unwrap_or(false)
             })
-            .unwrap_or(false)
-        {
+            .collect()
+    } else {
+        crate::dom::rendered_nodes_of_kind(tree, crate::dom::ElementKind::IMG)
+    };
+    for nid in images {
+        let Some(style) = styles.get(&nid) else {
             continue;
-        }
+        };
         let Some(url) = style.content_image.as_deref() else {
             continue;
         };

@@ -336,6 +336,11 @@ fn layout_ifc(
     inputs: LayoutInput,
     block_ctx: &mut BlockContext<'_>,
 ) -> LayoutOutput {
+    // A final pass changes the final lines and positions; a measuring pass
+    // only breaks lines again, keeping the final ones aside once there are.
+    if inputs.run_mode == RunMode::PerformLayout || !ifc.layout_is_final {
+        ifc.touch();
+    }
     let LayoutInput {
         known_dimensions,
         parent_size,

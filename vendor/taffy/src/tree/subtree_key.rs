@@ -132,6 +132,83 @@ pub(crate) fn style_uses_calc(style: &Style) -> bool {
     false
 }
 
+/// Every `calc()` handle of `style`, by raw value
+#[cfg(feature = "calc")]
+fn calc_handles(style: &Style, out: &mut Vec<u64>) {
+    let mut push = |raw: crate::style::CompactLength| {
+        if raw.is_calc() {
+            out.push(raw.calc_value() as usize as u64);
+        }
+    };
+    for value in [
+        style.size.width.into_raw(),
+        style.size.height.into_raw(),
+        style.min_size.width.into_raw(),
+        style.min_size.height.into_raw(),
+        style.max_size.width.into_raw(),
+        style.max_size.height.into_raw(),
+        style.inset.left.into_raw(),
+        style.inset.right.into_raw(),
+        style.inset.top.into_raw(),
+        style.inset.bottom.into_raw(),
+        style.margin.left.into_raw(),
+        style.margin.right.into_raw(),
+        style.margin.top.into_raw(),
+        style.margin.bottom.into_raw(),
+        style.padding.left.into_raw(),
+        style.padding.right.into_raw(),
+        style.padding.top.into_raw(),
+        style.padding.bottom.into_raw(),
+        style.border.left.into_raw(),
+        style.border.right.into_raw(),
+        style.border.top.into_raw(),
+        style.border.bottom.into_raw(),
+    ] {
+        push(value);
+    }
+    #[cfg(any(feature = "flexbox", feature = "grid"))]
+    {
+        push(style.gap.width.into_raw());
+        push(style.gap.height.into_raw());
+    }
+    #[cfg(feature = "flexbox")]
+    push(style.flex_basis.into_raw());
+    #[cfg(feature = "grid")]
+    {
+        let mut track = |track: &crate::style::TrackSizingFunction| {
+            push(track.min.into_raw());
+            push(track.max.into_raw());
+        };
+        for component in style.grid_template_rows.iter().chain(&style.grid_template_columns) {
+            match component {
+                crate::style::GridTemplateComponent::Single(single) => track(single),
+                crate::style::GridTemplateComponent::Repeat(repeat) => repeat.tracks.iter().for_each(&mut track),
+            }
+        }
+        style.grid_auto_rows.iter().chain(&style.grid_auto_columns).for_each(track);
+    }
+}
+
+/// Whether every `calc()` handle of `new` is also one of `old`'s: a style change that brings no
+/// handle the node did not already hold (a pass that edits other fields of a cloned style). A
+/// handle stays alive while a style holds it, so results computed under it stay valid.
+#[cfg(feature = "calc")]
+pub(crate) fn calc_handles_kept(old: &Style, new: &Style) -> bool {
+    if !style_uses_calc(new) {
+        return true;
+    }
+    let (mut old_handles, mut new_handles) = (Vec::new(), Vec::new());
+    calc_handles(old, &mut old_handles);
+    calc_handles(new, &mut new_handles);
+    new_handles.iter().all(|handle| old_handles.contains(handle))
+}
+
+/// Without the `calc` feature no style holds a handle
+#[cfg(not(feature = "calc"))]
+pub(crate) fn calc_handles_kept(_old: &Style, _new: &Style) -> bool {
+    true
+}
+
 /// Whether `style` holds a `calc()` handle (never without the `calc` feature)
 #[cfg(not(feature = "calc"))]
 pub(crate) fn style_uses_calc(_style: &Style) -> bool {
