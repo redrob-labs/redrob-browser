@@ -11,10 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use cef::{Browser, CefString, ImplBrowser, ImplBrowserHost, ImplFrame, Registration};
-use futures_util::{SinkExt, StreamExt};
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
 
 use crate::cef::client::{self, TabCtx, LOGIN_BINDING, WORLD};
 use crate::cef::input::{self, Button, Edit, Ime, KeyKind, MouseKind};
@@ -633,58 +631,8 @@ pub async fn relay(
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     };
-    let ws_url = browser_ws_url(port).await?;
-    let (ws, _) = tokio_tungstenite::connect_async(ws_url.as_str()).await?;
-    let (mut sink, mut stream) = ws.split();
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<String>();
-    let pending: crate::relay::Pending = Default::default();
-    let (broadcast_tx, _) = tokio::sync::broadcast::channel::<Value>(1024);
-    tokio::spawn(async move {
-        while let Some(text) = out_rx.recv().await {
-            if sink.send(Message::Text(text.into())).await.is_err() {
-                break;
-            }
-        }
-    });
-    let relay_url =
-        crate::relay::start(out_tx, pending.clone(), broadcast_tx.clone(), window).await?;
+    let relay_url = crate::relay::start(port, window).await?;
     crate::write_private(&endpoint_file, &relay_url);
-    while let Some(Ok(msg)) = stream.next().await {
-        let Message::Text(text) = msg else { continue };
-        let Ok(v) = serde_json::from_str::<Value>(text.as_str()) else {
-            continue;
-        };
-        if let Some(id) = v.get("id").and_then(Value::as_u64) {
-            if let Some(tx) = pending.lock().unwrap().remove(&id) {
-                let _ = tx.send(v);
-            }
-        } else {
-            let _ = broadcast_tx.send(v);
-        }
-    }
     Ok(())
 }
 
-/// Chromium's browser-level DevTools WebSocket (`/json/version`).
-async fn browser_ws_url(port: u16) -> anyhow::Result<String> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    for _ in 0..200 {
-        if let Ok(mut s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            let req = format!(
-                "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
-            );
-            s.write_all(req.as_bytes()).await?;
-            let mut body = String::new();
-            s.read_to_string(&mut body).await?;
-            if let Some(json) = body.split("\r\n\r\n").nth(1) {
-                if let Ok(v) = serde_json::from_str::<Value>(json) {
-                    if let Some(u) = v["webSocketDebuggerUrl"].as_str() {
-                        return Ok(u.to_string());
-                    }
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    anyhow::bail!("Chromium's DevTools server on port {port} did not answer")
-}

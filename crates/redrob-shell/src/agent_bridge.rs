@@ -29,7 +29,7 @@ pub fn send_prompt(
         .to_string();
     let context = format!(
         "The person typed this in Redrob Browser's address bar while on \"{tab_title}\" ({tab_url}).\n\
-         Drive the browser with `redrob-browser tab list|open|go|read|click|type|key|scroll|shot|markdown|close`.\n\
+         Drive the browser with `redrob-browser tab list|open|go|read|click|type|key|scroll|eval|shot|markdown|close`.\n\
          Open your own tabs with `redrob-browser tab open`; they are marked as agent tabs.\n\
          Never ask for or type a password: ask the person to sign in, or use the browser's saved login."
     );
