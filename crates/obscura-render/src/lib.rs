@@ -89,8 +89,7 @@ pub mod prof {
     pub fn mark() -> (std::time::Instant, u64) {
         (
             std::time::Instant::now(),
-            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed)
-                | taffy::compute::MISSES[0].load(Ordering::Relaxed) << 32,
+            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed),
         )
     }
 
@@ -3219,9 +3218,6 @@ pub(crate) fn new_taffy_tree_with_capacity<NodeContext>(capacity: usize) -> Taff
     // Every opaque handle is backed by an Arc retained in the LayoutStyle
     // map/input tree, which outlives all computations on `tree`.
     tree.set_calc_resolver(crate::style::resolve_grid_calc);
-    if std::env::var_os("DBG_NO_CALC_KEY").is_none() {
-        tree.set_calc_key(crate::style::grid_calc_key);
-    }
     tree
 }
 

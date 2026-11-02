@@ -9,7 +9,7 @@ mod layout;
 mod node;
 pub mod traits;
 
-pub use cache::{current_perform_slot, Cache, ClearState, MAX_PERFORM_SLOTS};
+pub use cache::{Cache, ClearState};
 pub use layout::{CollapsibleMarginSet, Layout, LayoutInput, LayoutOutput, RequestedAxis, RunMode, SizingMode};
 pub use node::NodeId;
 pub(crate) use traits::LayoutPartialTreeExt;

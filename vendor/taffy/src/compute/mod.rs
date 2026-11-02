@@ -167,15 +167,6 @@ pub fn compute_root_layout(tree: &mut impl LayoutPartialTree, root: NodeId, avai
     );
 }
 
-/// Cache misses of `compute_cached_layout` by run mode (perform, size, hidden), for profiling.
-pub static MISSES: [core::sync::atomic::AtomicU64; 3] =
-    [core::sync::atomic::AtomicU64::new(0), core::sync::atomic::AtomicU64::new(0), core::sync::atomic::AtomicU64::new(0)];
-
-/// Take the counts of [`MISSES`] (perform, size, hidden), resetting them.
-pub fn take_misses() -> [u64; 3] {
-    [0, 1, 2].map(|i| MISSES[i].swap(0, core::sync::atomic::Ordering::Relaxed))
-}
-
 /// Attempts to find a cached layout for the specified node and layout inputs.
 ///
 /// Uses the provided closure to compute the layout (and then stores the result in the cache) if no cached layout is found.
@@ -202,12 +193,6 @@ where
 
     debug_log_node!(inputs);
 
-    MISSES[match inputs.run_mode {
-        crate::tree::RunMode::PerformLayout => 0,
-        crate::tree::RunMode::ComputeSize => 1,
-        crate::tree::RunMode::PerformHiddenLayout => 2,
-    }]
-    .fetch_add(1, core::sync::atomic::Ordering::Relaxed);
     let computed_size_and_baselines = compute_uncached(tree, node, inputs);
 
     // Cache result

@@ -507,8 +507,10 @@ impl<C> SetStyleIfChanged for TaffyTree<C> {
         node: taffy::NodeId,
         style: taffy::Style,
     ) -> taffy::TaffyResult<()> {
-        // Equal `calc()` handles name one live expression.
-        if self.style(node).is_ok_and(|current| *current == style) {
+        if self
+            .style(node)
+            .is_ok_and(|current| *current == style && !taffy_style_uses_calc(&style))
+        {
             return Ok(());
         }
         self.set_style(node, style)
@@ -618,6 +620,67 @@ fn ifc_reuses_laid(store: &crate::ifc::IfcStore, ctx: usize) -> bool {
             .is_some_and(|ifc| ifc.reused_laid)
 }
 
+fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
+    let track = |track: &taffy::TrackSizingFunction| {
+        track.min.into_raw().is_calc() || track.max.into_raw().is_calc()
+    };
+    style
+        .grid_template_rows
+        .iter()
+        .chain(&style.grid_template_columns)
+        .any(|component| match component {
+            taffy::GridTemplateComponent::Single(single) => track(single),
+            taffy::GridTemplateComponent::Repeat(repeat) => repeat.tracks.iter().any(track),
+        })
+        || style
+            .grid_auto_rows
+            .iter()
+            .chain(&style.grid_auto_columns)
+            .any(track)
+        || [
+            style.size.width,
+            style.size.height,
+            style.min_size.width,
+            style.min_size.height,
+        ]
+        .into_iter()
+        .chain([
+            style.max_size.width,
+            style.max_size.height,
+            style.flex_basis,
+        ])
+        .any(|value| value.into_raw().is_calc())
+        || [
+            style.margin.left,
+            style.margin.right,
+            style.margin.top,
+            style.margin.bottom,
+        ]
+        .into_iter()
+        .chain([
+            style.inset.left,
+            style.inset.right,
+            style.inset.top,
+            style.inset.bottom,
+        ])
+        .any(|value| value.into_raw().is_calc())
+        || [
+            style.padding.left,
+            style.padding.right,
+            style.padding.top,
+            style.padding.bottom,
+        ]
+        .into_iter()
+        .chain([
+            style.border.left,
+            style.border.right,
+            style.border.top,
+            style.border.bottom,
+        ])
+        .chain([style.gap.width, style.gap.height])
+        .any(|value| value.into_raw().is_calc())
+}
+
 /// A content key no other node of any layout has (see `assign_content_keys`).
 fn unique_content_key() -> u64 {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -634,15 +697,16 @@ fn unique_content_key() -> u64 {
 /// - an inline formatting context by its template (see `ifc::Ifc::template_id`)
 ///   when the previous layout's laid-out copy of it can be adopted, which is
 ///   what makes its line layout equal;
-/// - every other measured leaf by a key of its own.
-///
-/// A `calc()` handle in a style is keyed by its expression (see
-/// `style::grid_calc_key`), not by its address.
+/// - every other measured leaf, and every node whose style holds a `calc()`
+///   handle of a fresh computed style (the address of a new expression can be
+///   a freed old one's), by a key of its own.
 fn assign_content_keys(
     tree: &mut TaffyTree<usize>,
     root: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
     engine: &crate::inline::TextEngine,
     ifc_store: &crate::ifc::IfcStore,
+    fresh: Option<&HashSet<NodeId>>,
 ) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
@@ -661,6 +725,12 @@ fn assign_content_keys(
                     _ => unique_content_key(),
                 },
             };
+        }
+        let calc_retained = id_map
+            .get(&node)
+            .is_some_and(|dom| fresh.is_some_and(|fresh| !fresh.contains(dom)));
+        if !calc_retained && tree.style(node).is_ok_and(taffy_style_uses_calc) {
+            key ^= unique_content_key();
         }
         tree.set_content_key(node, key);
     }
@@ -761,20 +831,8 @@ fn seed_from_retained_taffy(
             }
         }
     }
-    // Nodes that took no layout state are rounded again, with their paths.
-    let paired: HashSet<taffy::NodeId> = pairs.iter().map(|&(new, _)| new).collect();
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        stack.extend_from_slice(tree.child_slice(node));
-        if !paired.contains(&node) {
-            tree.note_rounding_changed(node);
-        }
-    }
     // The copied positions of a reordered parent's children are not the
     // ones its (and its ancestors') copied final layouts placed them at.
-    if crate::prof::enabled() {
-        eprintln!("[timing] seed-reordered {}", reordered.len());
-    }
     for node in reordered {
         tree.forget_final_layouts_to_root(node);
     }
@@ -9614,7 +9672,6 @@ fn layout_dom_once(
             };
 
             mark_float_sensitive(&mut taffy_tree, taffy_root);
-            let mut static_moves: Vec<(taffy::NodeId, taffy::NodeId, usize)> = Vec::new();
             phase_marks.push(("s.float", crate::prof::mark()));
             let static_position_candidates = reparent_inset_positioned_nodes(
                 tree,
@@ -9625,7 +9682,14 @@ fn layout_dom_once(
                 &ifc_items.static_positions,
             );
             phase_marks.push(("s.reparent", crate::prof::mark()));
-            assign_content_keys(&mut taffy_tree, taffy_root, &engine, &ifc_items.ifc);
+            assign_content_keys(
+                &mut taffy_tree,
+                taffy_root,
+                &id_map,
+                &engine,
+                &ifc_items.ifc,
+                fresh_styles.as_ref(),
+            );
             phase_marks.push(("s.keys", crate::prof::mark()));
             let (seeded, previous_nodes) =
                 seed_from_retained_taffy(&mut taffy_tree, taffy_root, &id_map, &mut ifc_items.ifc);
@@ -9680,15 +9744,6 @@ fn layout_dom_once(
                 }
             };
             ifc_items.ifc.activate();
-            // Each root layout below gets its own Taffy perform slot, so the
-            // next retained layout's same pass reuses what this one computed
-            // even though the passes in between change styles.
-            if subtree_keys_enabled()
-                && taffy_reuse_enabled()
-                && std::env::var_os("DBG_NO_SLOTS").is_none()
-            {
-                taffy_tree.begin_perform_slots(None);
-            }
 
             #[cfg(feature = "paint")]
             {
@@ -10410,7 +10465,7 @@ fn layout_dom_once(
                 // candidates before changing any parent, preserving nested
                 // static-position candidates.
                 if !static_position_candidates.is_empty() {
-                    static_moves = resolve_static_positions_and_reparent(
+                    resolve_static_positions_and_reparent(
                         &mut taffy_tree,
                         &static_position_candidates,
                     );
@@ -10565,7 +10620,7 @@ fn layout_dom_once(
                 // contract as screenshots: static coordinates are resolved
                 // after every pass that can move in-flow placeholders.
                 if !static_position_candidates.is_empty() {
-                    static_moves = resolve_static_positions_and_reparent(
+                    resolve_static_positions_and_reparent(
                         &mut taffy_tree,
                         &static_position_candidates,
                     );
@@ -10841,27 +10896,7 @@ fn layout_dom_once(
                 }
             }
             synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
-            if crate::prof::enabled() {
-                eprintln!(
-                    "[timing] root-layouts {}",
-                    taffy_tree.root_layouts_since_slots_began()
-                );
-            }
             phase_marks.push(("x.rows", crate::prof::mark()));
-            // The next layout pairs its freshly built tree with this one:
-            // give the boxes reparented for their static positions back to
-            // the parents they were built in, so the two have one structure.
-            // (Each slot keeps the layouts computed with either.)
-            if std::env::var_os("DBG_NO_UNMOVE").is_some() {
-                static_moves.clear();
-            }
-            for &(child, parent, index) in static_moves.iter().rev() {
-                if let Some(current) = taffy_tree.parent(child) {
-                    if taffy_tree.remove_child(current, child).is_ok() {
-                        let _ = taffy_tree.insert_child_at_index(parent, index, child);
-                    }
-                }
-            }
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
                 taffy_root,
@@ -10949,22 +10984,11 @@ fn layout_dom_once(
             std::mem::size_of::<crate::LayoutStyle>()
         );
         line.push_str(&crate::prof::take());
-        let [perform, size, other] = taffy::compute::take_misses();
-        line.push_str(&format!(
-            " taffy_perform_miss={perform} taffy_size_miss={size} calc_dirty={}",
-            other >> 32
-        ));
         let mut last = (t1, phase_marks.first().map_or(0, |(_, (_, ifc))| *ifc));
         for (name, (at, ifc)) in &phase_marks {
             line.push_str(&format!(" {name}={:?}", at.duration_since(last.0)));
-            if *ifc & 0xffff_ffff > last.1 & 0xffff_ffff {
-                line.push_str(&format!(
-                    " {name}.ifc={}",
-                    (ifc & 0xffff_ffff) - (last.1 & 0xffff_ffff)
-                ));
-            }
-            if ifc >> 32 > last.1 >> 32 {
-                line.push_str(&format!(" {name}.pm={}", (ifc >> 32) - (last.1 >> 32)));
+            if *ifc > last.1 {
+                line.push_str(&format!(" {name}.ifc={}", ifc - last.1));
             }
             last = (*at, *ifc);
         }
@@ -12237,31 +12261,6 @@ fn compute_absolute_rects(
         };
 
         if let Some(dom_id) = id_map.get(&taffy_id) {
-            if std::env::var("DBG_NODE").ok().and_then(|v| v.parse::<u32>().ok())
-                == Some(dom_id.raw())
-            {
-                let mut chain = Vec::new();
-                let mut cur = Some(taffy_id);
-                while let Some(n) = cur {
-                    let l = taffy_tree.layout(n).ok().copied().unwrap_or_default();
-                    chain.push(format!(
-                        "{:?}/{:?} disp={:?} loc=({},{}) size=({},{})",
-                        n,
-                        id_map.get(&n),
-                        taffy_tree.style(n).map(|s| s.display).ok(),
-                        l.location.x,
-                        l.location.y,
-                        l.size.width,
-                        l.size.height
-                    ));
-                    cur = taffy_tree.parent(n);
-                }
-                eprintln!(
-                    "DBG slot={} subtree_keys={} rect={rect:?} chain={chain:#?}",
-                    taffy::current_perform_slot(),
-                    subtree_keys_enabled()
-                );
-            }
             rects.insert(*dom_id, rect);
             if let taffy::tree::DetailedLayoutInfo::Grid(info) =
                 taffy_tree.detailed_layout_info(taffy_id)
@@ -13710,9 +13709,7 @@ fn repair_intrinsic_column_flex_negative_margins(
 fn resolve_static_positions_and_reparent(
     taffy_tree: &mut TaffyTree<usize>,
     candidates: &[StaticPositionCandidate],
-) -> Vec<(taffy::NodeId, taffy::NodeId, usize)> {
-    // (child, the parent it was built in, its index there), in move order.
-    let mut moves = Vec::new();
+) {
     // Harvest every placeholder coordinate before mutating parent links.
     // Otherwise reparenting an outer candidate changes the global-origin walk
     // for a nested candidate while both still contain preliminary-pass layout
@@ -13759,13 +13756,6 @@ fn resolve_static_positions_and_reparent(
         let Some(current) = taffy_tree.parent(candidate.child) else {
             continue;
         };
-        let Some(index) = taffy_tree
-            .child_slice(current)
-            .iter()
-            .position(|&child| child == candidate.child)
-        else {
-            continue;
-        };
         if taffy_tree.remove_child(current, candidate.child).is_err() {
             continue;
         }
@@ -13773,7 +13763,7 @@ fn resolve_static_positions_and_reparent(
             .add_child(candidate.target, candidate.child)
             .is_err()
         {
-            let _ = taffy_tree.insert_child_at_index(current, index, candidate.child);
+            let _ = taffy_tree.add_child(current, candidate.child);
             continue;
         }
         if taffy_tree
@@ -13781,12 +13771,9 @@ fn resolve_static_positions_and_reparent(
             .is_err()
         {
             let _ = taffy_tree.remove_child(candidate.target, candidate.child);
-            let _ = taffy_tree.insert_child_at_index(current, index, candidate.child);
-            continue;
+            let _ = taffy_tree.add_child(current, candidate.child);
         }
-        moves.push((candidate.child, current, index));
     }
-    moves
 }
 
 /// Children for computed-value inheritance traversal.

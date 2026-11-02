@@ -88,12 +88,6 @@ pub(crate) struct TaffyConfig {
     /// Resolves an opaque `calc()` handle against its percentage basis.
     #[cfg(feature = "calc")]
     pub(crate) calc_resolver: fn(*const (), f32) -> f32,
-    /// Keys the expression a `calc()` handle names (see [`TaffyTree::set_calc_key`])
-    pub(crate) calc_key: Option<fn(*const ()) -> u64>,
-    /// Root layouts take perform slots in order (see [`TaffyTree::begin_perform_slots`])
-    pub(crate) perform_slots: bool,
-    /// The slot the next root layout takes
-    pub(crate) slot_ordinal: usize,
 }
 
 #[cfg(feature = "calc")]
@@ -106,9 +100,6 @@ impl Default for TaffyConfig {
         Self {
             use_rounding: true,
             subtree_keys: false,
-            calc_key: None,
-            perform_slots: false,
-            slot_ordinal: 0,
             #[cfg(feature = "calc")]
             calc_resolver: default_calc_resolver,
         }
@@ -123,16 +114,27 @@ struct NodeData {
     /// The layout strategy used by this node
     pub(crate) style: Style,
 
-    /// The layout results of perform slot 0 (see [`TaffyTree::begin_perform_slots`])
-    pub(crate) slot0: NodeSlot,
-    /// The layout results of perform slots 1 and up, grown when first written
-    pub(crate) more_slots: Vec<NodeSlot>,
+    /// The always unrounded results of the layout computation. We must store this separately from the rounded
+    /// layout to avoid errors from rounding already-rounded values. See <https://github.com/DioxusLabs/taffy/issues/501>.
+    pub(crate) unrounded_layout: Layout,
+
+    /// The final results of the layout computation.
+    /// These may be rounded or unrounded depending on what the `use_rounding` config setting is set to.
+    pub(crate) final_layout: Layout,
 
     /// Whether the node has context data associated with it or not
     pub(crate) has_context: bool,
 
     /// The cached results of the layout computation
     pub(crate) cache: Cache,
+
+    /// The computation result from layout algorithm
+    #[cfg(feature = "detailed_layout_info")]
+    pub(crate) detailed_layout_info: DetailedLayoutInfo,
+
+    /// Float exclusions that shortened this leaf's line boxes during its latest final layout
+    #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+    pub(crate) float_bands: Vec<FloatBand>,
 
     /// The node is the root of an inline formatting context, laid out by the tree's inline
     /// layout function (see [`TaffyTree::set_inline_layout_function`]) instead of by its display.
@@ -149,6 +151,12 @@ struct NodeData {
     #[cfg(all(feature = "block_layout", feature = "float_layout"))]
     pub(crate) float_key: u64,
 
+    /// `unrounded_layout` changed since `final_layout` was last rounded from it
+    pub(crate) round_stale: bool,
+    /// The node or a descendant needs rounding again (its layout or its children changed)
+    pub(crate) round_subtree_stale: bool,
+    /// The bits of the cumulative offset `final_layout` was rounded at
+    pub(crate) round_origin: (u32, u32),
     /// The hash of `style`, `None` until needed after a change
     pub(crate) style_key: Option<u64>,
     /// What the node's measure function depends on, as the embedder keys it
@@ -160,89 +168,6 @@ struct NodeData {
     pub(crate) key_stale: bool,
 }
 
-/// The layout results of a node in one perform slot.
-///
-/// An embedder that runs several root layouts per frame with different styles in between (a
-/// first pass, then passes that fix up styles from what it measured) gives each root layout of
-/// the sequence its own slot ([`TaffyTree::begin_perform_slots`]). Every slot keeps its own final
-/// layout cache entry and the layouts that entry placed, so the same pass of the next frame finds
-/// its own results instead of the ones the frame's last pass left.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct NodeSlot {
-    /// The always unrounded results of the layout computation. We must store this separately from the rounded
-    /// layout to avoid errors from rounding already-rounded values. See <https://github.com/DioxusLabs/taffy/issues/501>.
-    pub(crate) unrounded_layout: Layout,
-
-    /// The final results of the layout computation.
-    /// These may be rounded or unrounded depending on what the `use_rounding` config setting is set to.
-    pub(crate) final_layout: Layout,
-
-    /// The computation result from layout algorithm
-    #[cfg(feature = "detailed_layout_info")]
-    pub(crate) detailed_layout_info: DetailedLayoutInfo,
-
-    /// Float exclusions that shortened this leaf's line boxes during its latest final layout
-    #[cfg(all(feature = "block_layout", feature = "float_layout"))]
-    pub(crate) float_bands: Vec<FloatBand>,
-
-    /// `unrounded_layout` changed since `final_layout` was last rounded from it
-    pub(crate) round_stale: bool,
-    /// The node or a descendant needs rounding again (its layout or its children changed)
-    pub(crate) round_subtree_stale: bool,
-    /// The bits of the cumulative offset `final_layout` was rounded at
-    pub(crate) round_origin: (u32, u32),
-}
-
-impl NodeSlot {
-    /// An empty slot
-    pub(crate) const fn new() -> Self {
-        Self {
-            unrounded_layout: Layout::new(),
-            final_layout: Layout::new(),
-            #[cfg(feature = "detailed_layout_info")]
-            detailed_layout_info: DetailedLayoutInfo::None,
-            #[cfg(all(feature = "block_layout", feature = "float_layout"))]
-            float_bands: Vec::new(),
-            round_stale: true,
-            round_subtree_stale: true,
-            round_origin: (u32::MAX, u32::MAX),
-        }
-    }
-}
-
-/// The results of a slot a node was never laid out in
-static EMPTY_SLOT: NodeSlot = NodeSlot::new();
-
-impl NodeData {
-    /// The node's results in the current perform slot
-    #[inline(always)]
-    pub(crate) fn slot(&self) -> &NodeSlot {
-        match super::cache::current_slot() {
-            0 => &self.slot0,
-            slot => self.more_slots.get(slot - 1).unwrap_or(&EMPTY_SLOT),
-        }
-    }
-
-    /// The node's results in the current perform slot, for writing
-    #[inline(always)]
-    pub(crate) fn slot_mut(&mut self) -> &mut NodeSlot {
-        match super::cache::current_slot() {
-            0 => &mut self.slot0,
-            slot => {
-                if self.more_slots.len() < slot {
-                    self.more_slots.resize_with(slot, NodeSlot::new);
-                }
-                &mut self.more_slots[slot - 1]
-            }
-        }
-    }
-
-    /// The node's results in every slot it has
-    pub(crate) fn all_slots_mut(&mut self) -> impl Iterator<Item = &mut NodeSlot> {
-        core::iter::once(&mut self.slot0).chain(self.more_slots.iter_mut())
-    }
-}
-
 impl NodeData {
     /// Create the data for a new node
     #[must_use]
@@ -250,13 +175,20 @@ impl NodeData {
         Self {
             style,
             cache: Cache::new(),
-            slot0: NodeSlot::new(),
-            more_slots: Vec::new(),
+            unrounded_layout: Layout::new(),
+            final_layout: Layout::new(),
             has_context: false,
+            #[cfg(feature = "detailed_layout_info")]
+            detailed_layout_info: DetailedLayoutInfo::None,
+            #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+            float_bands: Vec::new(),
             is_inline_root: false,
             float_sensitive: false,
             #[cfg(all(feature = "block_layout", feature = "float_layout"))]
             float_key: 0,
+            round_stale: true,
+            round_subtree_stale: true,
+            round_origin: (u32::MAX, u32::MAX),
             style_key: None,
             content_key: 0,
             subtree_key: 0,
@@ -301,9 +233,6 @@ pub struct TaffyTree<NodeContext = ()> {
     /// Lays out nodes marked as inline formatting context roots
     #[cfg(feature = "block_layout")]
     inline_layout: Option<InlineLayoutFn<NodeContext>>,
-
-    /// Told the slot a root layout switches to (see [`TaffyTree::begin_perform_slots`])
-    slot_hook: Option<fn(usize)>,
 }
 
 /// The tree an [`InlineLayoutFn`] lays out an inline formatting context in. It gives access to the
@@ -425,9 +354,9 @@ impl<NodeContext> PrintTree for TaffyTree<NodeContext> {
     #[inline(always)]
     fn get_final_layout(&self, node_id: NodeId) -> Layout {
         if self.config.use_rounding {
-            self.nodes[node_id.into()].slot().final_layout
+            self.nodes[node_id.into()].final_layout
         } else {
-            self.nodes[node_id.into()].slot().unrounded_layout
+            self.nodes[node_id.into()].unrounded_layout
         }
     }
 }
@@ -496,7 +425,7 @@ where
         };
         #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
         if inputs.run_mode == RunMode::PerformLayout && self.taffy.nodes[node_id.into()].has_context {
-            self.taffy.nodes[node_id.into()].slot_mut().float_bands.clone_from(&float_bands);
+            self.taffy.nodes[node_id.into()].float_bands.clone_from(&float_bands);
         }
 
         // A layout that places floats into the block formatting context it is laid out in depends on
@@ -616,7 +545,7 @@ where
     }
 
     fn get_unrounded_layout(&self, node: NodeId) -> Layout {
-        self.taffy.nodes[node.into()].slot().unrounded_layout
+        self.taffy.nodes[node.into()].unrounded_layout
     }
 
     fn style(&self, node: NodeId) -> &Style {
@@ -849,8 +778,7 @@ where
     #[inline(always)]
     #[cfg(feature = "detailed_layout_info")]
     fn set_detailed_grid_info(&mut self, node_id: NodeId, detailed_grid_info: DetailedGridInfo) {
-        self.taffy.nodes[node_id.into()].slot_mut().detailed_layout_info =
-            DetailedLayoutInfo::Grid(Box::new(detailed_grid_info));
+        self.taffy.nodes[node_id.into()].detailed_layout_info = DetailedLayoutInfo::Grid(Box::new(detailed_grid_info));
     }
 }
 
@@ -862,12 +790,12 @@ where
 {
     #[inline(always)]
     fn get_unrounded_layout(&self, node: NodeId) -> Layout {
-        self.taffy.nodes[node.into()].slot().unrounded_layout
+        self.taffy.nodes[node.into()].unrounded_layout
     }
 
     #[inline(always)]
     fn rounding_is_current(&self, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) -> bool {
-        let node = self.taffy.nodes[node_id.into()].slot();
+        let node = &self.taffy.nodes[node_id.into()];
         !node.round_stale
             && !node.round_subtree_stale
             && node.round_origin == (cumulative_x.to_bits(), cumulative_y.to_bits())
@@ -875,7 +803,7 @@ where
 
     #[inline(always)]
     fn note_rounded(&mut self, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) {
-        let node = self.taffy.nodes[node_id.into()].slot_mut();
+        let node = &mut self.taffy.nodes[node_id.into()];
         node.round_stale = false;
         node.round_subtree_stale = false;
         node.round_origin = (cumulative_x.to_bits(), cumulative_y.to_bits());
@@ -883,7 +811,7 @@ where
 
     #[inline(always)]
     fn set_final_layout(&mut self, node_id: NodeId, layout: &Layout) {
-        self.taffy.nodes[node_id.into()].slot_mut().final_layout = *layout;
+        self.taffy.nodes[node_id.into()].final_layout = *layout;
     }
 }
 
@@ -910,29 +838,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             config: TaffyConfig::default(),
             #[cfg(feature = "block_layout")]
             inline_layout: None,
-            slot_hook: None,
         }
-    }
-
-    /// How many root layouts ran since [`Self::begin_perform_slots`]
-    pub fn root_layouts_since_slots_began(&self) -> usize {
-        self.config.slot_ordinal
-    }
-
-    /// Give each following root layout of this tree its own perform slot, in order: the first
-    /// root layout from now on lays out in slot 0, the next in slot 1, and so on (the last slot
-    /// takes any beyond [`MAX_PERFORM_SLOTS`](super::cache::MAX_PERFORM_SLOTS)). A slot keeps its
-    /// own final layout cache entries and layouts, so the same sequence of root layouts run again
-    /// (the next frame, on a tree that took this one's layout state) reuses what each step
-    /// computed, even when the steps change styles in between. Reading layouts reads the slot of
-    /// the latest layout.
-    ///
-    /// `hook` is told every slot a root layout switches to, for embedder state that has to
-    /// follow (an inline layout function's results).
-    pub fn begin_perform_slots(&mut self, hook: Option<fn(usize)>) {
-        self.config.perform_slots = true;
-        self.config.slot_ordinal = 0;
-        self.slot_hook = hook;
     }
 
     /// Enable rounding of layout values. Rounding is enabled by default.
@@ -955,31 +861,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.config.calc_resolver = resolver;
     }
 
-    /// Installs a function that keys the expression a `calc()` handle names: equal keys must
-    /// mean equal values for every basis. Subtree keys then hash a handle by this key instead of
-    /// by its address, so a style holding one keeps its cache across changes and rebuilds like
-    /// any other.
-    #[cfg(feature = "calc")]
-    pub fn set_calc_key(&mut self, calc_key: fn(*const ()) -> u64) {
-        self.config.calc_key = Some(calc_key);
-    }
-
-    /// The data of a new node with `style`, its style keyed now when it holds an embedder-keyed
-    /// `calc()` handle (see [`Self::set_style`])
-    fn node_data(&self, style: Style) -> NodeData {
-        let style_key = self
-            .config
-            .calc_key
-            .filter(|_| super::subtree_key::style_uses_calc(&style))
-            .map(|calc_key| super::subtree_key::style_key(&style, Some(calc_key)));
-        let mut data = NodeData::new(style);
-        data.style_key = style_key;
-        data
-    }
-
     /// Creates and adds a new unattached leaf node to the tree, and returns the node of the new node
     pub fn new_leaf(&mut self, layout: Style) -> TaffyResult<NodeId> {
-        let id = self.nodes.insert(self.node_data(layout));
+        let id = self.nodes.insert(NodeData::new(layout));
         let _ = self.children.insert(new_vec_with_capacity(0));
         let _ = self.parents.insert(None);
 
@@ -990,7 +874,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     ///
     /// Creates and adds a new leaf node with a supplied context
     pub fn new_leaf_with_context(&mut self, layout: Style, context: NodeContext) -> TaffyResult<NodeId> {
-        let mut data = self.node_data(layout);
+        let mut data = NodeData::new(layout);
         data.has_context = true;
 
         let id = self.nodes.insert(data);
@@ -1004,7 +888,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     /// Creates and adds a new node, which may have any number of `children`
     pub fn new_with_children(&mut self, layout: Style, children: &[NodeId]) -> TaffyResult<NodeId> {
-        let id = NodeId::from(self.nodes.insert(self.node_data(layout)));
+        let id = NodeId::from(self.nodes.insert(NodeData::new(layout)));
 
         for child in children {
             self.parents[(*child).into()] = Some(id);
@@ -1021,27 +905,6 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.nodes.clear();
         self.children.clear();
         self.parents.clear();
-    }
-
-    /// Round `node` again in every perform slot, and every node on its path from the root
-    /// (a node built fresh into a tree whose other nodes took a previous tree's layout state with
-    /// [`Self::take_layout_state`])
-    pub fn note_rounding_changed(&mut self, node: NodeId) {
-        for slot in self.nodes[node.into()].all_slots_mut() {
-            slot.round_stale = true;
-            slot.round_subtree_stale = true;
-        }
-        let mut current = self.parents[node.into()];
-        while let Some(parent) = current {
-            let data = &mut self.nodes[parent.into()];
-            if data.slot0.round_subtree_stale && data.more_slots.iter().all(|slot| slot.round_subtree_stale) {
-                break;
-            }
-            for slot in data.all_slots_mut() {
-                slot.round_subtree_stale = true;
-            }
-            current = self.parents[parent.into()];
-        }
     }
 
     /// Remove a specific node from the tree and drop it
@@ -1118,14 +981,17 @@ impl<NodeContext> TaffyTree<NodeContext> {
             source.nodes.get(source_node.into()).ok_or(TaffyError::InvalidInputNode(source_node))?;
         let data = self.nodes.get_mut(node.into()).ok_or(TaffyError::InvalidInputNode(node))?;
         data.cache = source_data.cache.clone();
-        data.slot0 = source_data.slot0.clone();
-        data.more_slots.clone_from(&source_data.more_slots);
-        for slot in data.all_slots_mut() {
-            slot.round_stale = true;
-        }
+        data.unrounded_layout = source_data.unrounded_layout;
+        data.final_layout = source_data.final_layout;
+        data.round_stale = true;
         #[cfg(all(feature = "block_layout", feature = "float_layout"))]
         {
             data.float_key = source_data.float_key;
+            data.float_bands.clone_from(&source_data.float_bands);
+        }
+        #[cfg(feature = "detailed_layout_info")]
+        {
+            data.detailed_layout_info = source_data.detailed_layout_info.clone();
         }
         Ok(())
     }
@@ -1142,19 +1008,18 @@ impl<NodeContext> TaffyTree<NodeContext> {
             source.nodes.get_mut(source_node.into()).ok_or(TaffyError::InvalidInputNode(source_node))?;
         let data = self.nodes.get_mut(node.into()).ok_or(TaffyError::InvalidInputNode(node))?;
         data.cache = core::mem::take(&mut source_data.cache);
-        data.slot0 = core::mem::replace(&mut source_data.slot0, NodeSlot::new());
-        data.more_slots = core::mem::take(&mut source_data.more_slots);
-        // The rounding state comes along: rounding skips a subtree whose layouts and offset are
-        // those it rounded. The caller marks the paths to nodes that took no state with
-        // `note_rounding_changed`.
-        if std::env::var_os("TAFFY_ROUND_ALL").is_some() {
-            for slot in data.all_slots_mut() {
-                slot.round_stale = true;
-            }
-        }
+        data.unrounded_layout = source_data.unrounded_layout;
+        data.final_layout = source_data.final_layout;
+        data.round_stale = true;
         #[cfg(all(feature = "block_layout", feature = "float_layout"))]
         {
             data.float_key = source_data.float_key;
+            data.float_bands = core::mem::take(&mut source_data.float_bands);
+        }
+        #[cfg(feature = "detailed_layout_info")]
+        {
+            data.detailed_layout_info =
+                core::mem::replace(&mut source_data.detailed_layout_info, DetailedLayoutInfo::None);
         }
         Ok(())
     }
@@ -1333,24 +1198,14 @@ impl<NodeContext> TaffyTree<NodeContext> {
     pub fn set_style(&mut self, node: NodeId, style: Style) -> TaffyResult<()> {
         // With subtree keys the cached results stay: they carry the key of the subtree they were
         // computed in, so they serve again when the old style comes back. A `calc()` handle
-        // can change value with the same style, so its results go, unless the embedder keys
-        // the expressions handles name (`set_calc_key`).
-        let keep_cache = self.config.subtree_keys
-            && (self.config.calc_key.is_some() || !super::subtree_key::style_uses_calc(&style));
-        // An embedder-keyed `calc()` handle is only known valid while the embedder holds the
-        // style it came from: key the style now rather than when keys are next read.
-        let style_key = self
-            .config
-            .calc_key
-            .filter(|_| super::subtree_key::style_uses_calc(&style))
-            .map(|calc_key| super::subtree_key::style_key(&style, Some(calc_key)));
+        // can change value with the same style, so its results go.
+        let keep_cache = self.config.subtree_keys && !super::subtree_key::style_uses_calc(&style);
         let data = &mut self.nodes[node.into()];
         data.style = style;
-        data.style_key = style_key;
+        data.style_key = None;
         if keep_cache {
             self.note_changed(node);
         } else {
-            crate::compute::MISSES[2].fetch_add(1 << 32, core::sync::atomic::Ordering::Relaxed);
             self.mark_dirty(node)?;
         }
         Ok(())
@@ -1366,16 +1221,16 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn layout(&self, node: NodeId) -> TaffyResult<&Layout> {
         if self.config.use_rounding {
-            Ok(&self.nodes[node.into()].slot().final_layout)
+            Ok(&self.nodes[node.into()].final_layout)
         } else {
-            Ok(&self.nodes[node.into()].slot().unrounded_layout)
+            Ok(&self.nodes[node.into()].unrounded_layout)
         }
     }
 
     /// Store a node's unrounded layout, noting a change for the next rounding pass
     #[inline]
     fn store_unrounded_layout(&mut self, node: NodeId, layout: &Layout) {
-        let data = self.nodes[node.into()].slot_mut();
+        let data = &mut self.nodes[node.into()];
         if data.unrounded_layout != *layout || data.round_stale {
             data.unrounded_layout = *layout;
             self.note_layout_changed(node);
@@ -1385,10 +1240,10 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// The node's unrounded layout changed: round it and every node on its path from the root
     /// again (rounding skips a subtree whose layouts and offset are those it rounded last).
     fn note_layout_changed(&mut self, node: NodeId) {
-        self.nodes[node.into()].slot_mut().round_stale = true;
+        self.nodes[node.into()].round_stale = true;
         let mut current = self.parents[node.into()];
         while let Some(parent) = current {
-            let data = self.nodes[parent.into()].slot_mut();
+            let data = &mut self.nodes[parent.into()];
             if data.round_subtree_stale {
                 break;
             }
@@ -1401,7 +1256,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// (CSS fragmentation moves a box into a later column). The rounded
     /// layout moves by the rounded offset.
     pub fn translate_layout(&mut self, node: NodeId, dx: f32, dy: f32) {
-        let data = self.nodes[node.into()].slot_mut();
+        let data = &mut self.nodes[node.into()];
         data.unrounded_layout.location.x += dx;
         data.unrounded_layout.location.y += dy;
         data.final_layout.location.x += dx.round();
@@ -1412,7 +1267,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Returns this node layout with unrounded values relative to its parent.
     #[inline]
     pub fn unrounded_layout(&self, node: NodeId) -> &Layout {
-        &self.nodes[node.into()].slot().unrounded_layout
+        &self.nodes[node.into()].unrounded_layout
     }
 
     /// Get the "detailed layout info" for a node.
@@ -1422,7 +1277,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[cfg(feature = "detailed_layout_info")]
     #[inline]
     pub fn detailed_layout_info(&self, node_id: NodeId) -> &DetailedLayoutInfo {
-        &self.nodes[node_id.into()].slot().detailed_layout_info
+        &self.nodes[node_id.into()].detailed_layout_info
     }
 
     /// Float exclusion bands that shortened the line boxes of a measured leaf during its latest
@@ -1430,7 +1285,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[cfg(all(feature = "block_layout", feature = "float_layout"))]
     #[inline]
     pub fn leaf_float_bands(&self, node_id: NodeId) -> &[FloatBand] {
-        &self.nodes[node_id.into()].slot().float_bands
+        &self.nodes[node_id.into()].float_bands
     }
 
     /// Set the function that lays out inline formatting context roots (see [`Self::set_inline_root`])
@@ -1516,13 +1371,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let mut current = Some(node);
         while let Some(id) = current {
             let data = &mut self.nodes[id.into()];
-            if data.key_stale && data.slot0.round_subtree_stale {
+            if data.key_stale && data.round_subtree_stale {
                 break;
             }
             data.key_stale = true;
-            for slot in data.all_slots_mut() {
-                slot.round_subtree_stale = true;
-            }
+            data.round_subtree_stale = true;
             current = self.parents[id.into()];
         }
     }
@@ -1549,7 +1402,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             let style_key = match data.style_key {
                 Some(key) => key,
                 None => {
-                    let key = super::subtree_key::style_key(&data.style, self.config.calc_key);
+                    let key = super::subtree_key::style_key(&data.style);
                     data.style_key = Some(key);
                     key
                 }
@@ -1575,21 +1428,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         while let Some(id) = current {
             let data = &mut self.nodes[id.into()];
             data.cache.forget_final_layout();
-            for slot in data.all_slots_mut() {
-                slot.round_subtree_stale = true;
-            }
-            current = self.parents[id.into()];
-        }
-    }
-
-    /// [`Self::forget_final_layouts_to_root`] for the current perform slot only: the layouts of
-    /// `node`'s subtree changed in it, the other slots' did not
-    fn forget_current_final_layouts_to_root(&mut self, node: NodeId) {
-        let mut current = Some(node);
-        while let Some(id) = current {
-            let data = &mut self.nodes[id.into()];
-            data.cache.forget_current_final_layout();
-            data.slot_mut().round_subtree_stale = true;
+            data.round_subtree_stale = true;
             current = self.parents[id.into()];
         }
     }
@@ -1610,9 +1449,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             while let Some(key) = current {
                 let _ = nodes[key].mark_dirty();
                 // A changed style or child list changes what rounding visits below here.
-                for slot in nodes[key].all_slots_mut() {
-                    slot.round_subtree_stale = true;
-                }
+                nodes[key].round_subtree_stale = true;
                 nodes[key].key_stale = true;
                 current = parents.get(key).copied().flatten().map(Into::into);
             }
@@ -1644,46 +1481,24 @@ impl<NodeContext> TaffyTree<NodeContext> {
         if self.config.subtree_keys {
             self.refresh_subtree_keys(node_id);
         }
-        // Each root layout of a slotted sequence takes the next slot; a subtree layout stays in
-        // the current one. A tree without slots lays out in slot 0 and leaves the slot as it was
-        // (it may run inside a slotted tree's layout).
-        let previous_slot = super::cache::current_slot();
-        let slot = if !self.config.perform_slots {
-            0
-        } else if self.parents[node_id.into()].is_none() {
-            let slot = self.config.slot_ordinal.min(super::cache::MAX_PERFORM_SLOTS - 1);
-            self.config.slot_ordinal += 1;
-            slot
-        } else {
-            previous_slot
-        };
-        super::cache::set_current_slot(slot);
-        if self.config.perform_slots && slot != previous_slot {
-            if let Some(hook) = self.slot_hook {
-                hook(slot);
-            }
-        }
         // Laying out a node that has a parent (a measuring pass over one subtree) treats it as a
         // root at the origin. Keep the location its parent gave it, and dirty it so the next
         // layout of the real root places it again instead of reusing a cached parent.
         let parent_location =
-            self.parents[node_id.into()].map(|_| self.nodes[node_id.into()].slot().unrounded_layout.location);
+            self.parents[node_id.into()].map(|_| self.nodes[node_id.into()].unrounded_layout.location);
         let mut taffy_view = TaffyView { taffy: self, measure_function };
         compute_root_layout(&mut taffy_view, node_id, available_space);
         if use_rounding {
             round_layout(&mut taffy_view, node_id);
         }
         if let Some(location) = parent_location {
-            self.nodes[node_id.into()].slot_mut().unrounded_layout.location = location;
+            self.nodes[node_id.into()].unrounded_layout.location = location;
             self.note_layout_changed(node_id);
             if self.config.subtree_keys {
-                self.forget_current_final_layouts_to_root(node_id);
+                self.forget_final_layouts_to_root(node_id);
             } else {
                 let _ = self.mark_dirty(node_id);
             }
-        }
-        if !self.config.perform_slots {
-            super::cache::set_current_slot(previous_slot);
         }
         Ok(())
     }

@@ -9,41 +9,6 @@ use crate::RequestedAxis;
 
 /// The number of cache entries for each node in the tree
 const CACHE_SIZE: usize = 9;
-
-/// How many perform slots a tree's root layouts can take (see `TaffyTree::begin_perform_slots`)
-pub const MAX_PERFORM_SLOTS: usize = 12;
-
-#[cfg(feature = "std")]
-std::thread_local! {
-    /// The perform slot of the layout running on this thread
-    static PERFORM_SLOT: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
-}
-
-/// The perform slot layouts on this thread read and write
-#[inline(always)]
-pub(crate) fn current_slot() -> usize {
-    #[cfg(feature = "std")]
-    {
-        PERFORM_SLOT.with(core::cell::Cell::get)
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        0
-    }
-}
-
-/// The perform slot layouts on this thread read and write (see `TaffyTree::begin_perform_slots`)
-pub fn current_perform_slot() -> usize {
-    current_slot()
-}
-
-/// Switch the perform slot of this thread
-pub(crate) fn set_current_slot(slot: usize) {
-    #[cfg(feature = "std")]
-    PERFORM_SLOT.with(|current| current.set(slot));
-    #[cfg(not(feature = "std"))]
-    let _ = slot;
-}
 /// Most size results a node keeps beyond its nine slots. See `Cache::history`.
 const HISTORY_LIMIT: usize = 24;
 
@@ -222,10 +187,8 @@ impl MeasureOutput {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct Cache {
-    /// The cache entry for the node's final layout in perform slot 0
+    /// The cache entry for the node's final layout
     final_layout_entry: Option<CacheEntry<LayoutOutput>>,
-    /// The cache entries for the node's final layout in perform slots 1 and up
-    more_final_layout_entries: Vec<Option<CacheEntry<LayoutOutput>>>,
     /// The cache entries for the node's preliminary size measurements
     measure_entries: [Option<CacheEntry<MeasureOutput>>; CACHE_SIZE],
     /// Every distinct size result since the node was last marked dirty, up to
@@ -249,13 +212,7 @@ impl Default for Cache {
 impl Cache {
     /// Create a new empty cache
     pub const fn new() -> Self {
-        Self {
-            final_layout_entry: None,
-            more_final_layout_entries: Vec::new(),
-            measure_entries: [None; CACHE_SIZE],
-            history: Vec::new(),
-            is_empty: true,
-        }
+        Self { final_layout_entry: None, measure_entries: [None; CACHE_SIZE], history: Vec::new(), is_empty: true }
     }
 
     /// Return the cache slot to cache the current computed result in
@@ -333,7 +290,7 @@ impl Cache {
     pub fn get_in_float_context(&self, input: &LayoutInput, float_key: u64) -> Option<LayoutOutput> {
         let key = CacheKey { float_key, ..CacheKey::from(input) };
         match input.run_mode {
-            RunMode::PerformLayout => self.final_entry().filter(|entry| entry.key == key).map(|e| e.content),
+            RunMode::PerformLayout => self.final_layout_entry.filter(|entry| entry.key == key).map(|e| e.content),
             RunMode::ComputeSize => {
                 let margins = vertical_margin_context_key(input);
                 let matches = |entry: &CacheEntry<MeasureOutput>| {
@@ -364,7 +321,7 @@ impl Cache {
         match input.run_mode {
             RunMode::PerformLayout => {
                 self.is_empty = false;
-                *self.final_entry_mut() = Some(CacheEntry { key, content: layout_output })
+                self.final_layout_entry = Some(CacheEntry { key, content: layout_output })
             }
             RunMode::ComputeSize => {
                 self.is_empty = false;
@@ -387,37 +344,9 @@ impl Cache {
         }
     }
 
-    /// The final layout entry of the current perform slot
-    #[inline(always)]
-    fn final_entry(&self) -> Option<CacheEntry<LayoutOutput>> {
-        match current_slot() {
-            0 => self.final_layout_entry,
-            slot => self.more_final_layout_entries.get(slot - 1).copied().flatten(),
-        }
-    }
-
-    /// The final layout entry of the current perform slot, for writing
-    fn final_entry_mut(&mut self) -> &mut Option<CacheEntry<LayoutOutput>> {
-        match current_slot() {
-            0 => &mut self.final_layout_entry,
-            slot => {
-                if self.more_final_layout_entries.len() < slot {
-                    self.more_final_layout_entries.resize(slot, None);
-                }
-                &mut self.more_final_layout_entries[slot - 1]
-            }
-        }
-    }
-
-    /// Drop the final layout entries of every perform slot, keeping the size results
+    /// Drop the final layout entry, keeping the size results
     pub(crate) fn forget_final_layout(&mut self) {
         self.final_layout_entry = None;
-        self.more_final_layout_entries.clear();
-    }
-
-    /// Drop the final layout entry of the current perform slot
-    pub(crate) fn forget_current_final_layout(&mut self) {
-        *self.final_entry_mut() = None;
     }
 
     /// Clear all cache entries and reports clear operation outcome ([`ClearState`])
@@ -427,7 +356,6 @@ impl Cache {
         }
         self.is_empty = true;
         self.final_layout_entry = None;
-        self.more_final_layout_entries.clear();
         self.measure_entries = [None; CACHE_SIZE];
         self.history.clear();
         ClearState::Cleared
