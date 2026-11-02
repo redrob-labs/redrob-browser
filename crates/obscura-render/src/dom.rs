@@ -4358,175 +4358,181 @@ fn cascade_node_style(
                 .and_then(|value| value.trim().parse::<f32>().ok())
                 .filter(|value| value.is_finite() && *value >= 0.0);
         }
-        let mut style = crate::style::ua_style(elem.local.as_ref());
-        if elem.ns.as_ref() == "http://www.w3.org/2000/svg" && elem.local.as_ref() != "svg" {
-            // SVG content elements keep the initial `display: inline`.
-            style.css_display = crate::CssDisplay::Inline;
-        } else if elem.ns.as_ref() == "http://www.w3.org/1999/xhtml"
-            && !crate::style::is_known_html_element(elem.local.as_ref())
-        {
-            // No UA rule matches an autonomous custom element or an
-            // HTMLUnknownElement, so it keeps the initial `display: inline`
-            // (`<yt-image>` around a `height:100%` thumbnail must not become
-            // an auto-height block that the image's percentage resolves
-            // against).
-            style.display = crate::Display::Inline;
-            style.css_display = crate::CssDisplay::Inline;
-        }
-        // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
-        if matches!(elem.local.as_ref(), "a" | "area") && node.get_attribute("href").is_some() {
-            style.cursor = Some(crate::Cursor::Pointer);
-        }
-        style.is_replaced_box = crate::inline::is_replaced(elem.local.as_ref());
-        style.has_replaced_sizing = crate::inline::has_replaced_sizing(elem.local.as_ref())
-            || (elem.local.as_ref() == "input"
-                && node
-                    .get_attribute("type")
-                    .is_some_and(|value| value.eq_ignore_ascii_case("image")));
-        style.color_scheme_dark = inherited_color_scheme_dark;
-        if matches!(elem.local.as_ref(), "dir" | "dl" | "menu" | "ol" | "ul") {
-            let mut list_ancestor_count = 0usize;
-            let mut has_list_or_definition_ancestor = false;
-            let mut ancestor = node.parent;
-            while let Some(ancestor_id) = ancestor {
-                let Some(ancestor_node) = tree.borrow_node(ancestor_id) else {
-                    break;
-                };
-                if let Some(ancestor_element) = ancestor_node.as_element() {
-                    let local = ancestor_element.local.as_ref();
-                    if matches!(local, "dir" | "dl" | "menu" | "ol" | "ul") {
-                        has_list_or_definition_ancestor = true;
-                    }
-                    if matches!(local, "dir" | "menu" | "ol" | "ul") {
-                        list_ancestor_count += 1;
-                    }
-                }
-                ancestor = ancestor_node.parent;
+        // The style the author cascade starts from (UA rules and
+        // presentational hints): made only when the cascade runs, not for
+        // an element that keeps its retained style.
+        let starting_style = || {
+            let mut style = crate::style::ua_style(elem.local.as_ref());
+            if elem.ns.as_ref() == "http://www.w3.org/2000/svg" && elem.local.as_ref() != "svg" {
+                // SVG content elements keep the initial `display: inline`.
+                style.css_display = crate::CssDisplay::Inline;
+            } else if elem.ns.as_ref() == "http://www.w3.org/1999/xhtml"
+                && !crate::style::is_known_html_element(elem.local.as_ref())
+            {
+                // No UA rule matches an autonomous custom element or an
+                // HTMLUnknownElement, so it keeps the initial `display: inline`
+                // (`<yt-image>` around a `height:100%` thumbnail must not become
+                // an auto-height block that the image's percentage resolves
+                // against).
+                style.display = crate::Display::Inline;
+                style.css_display = crate::CssDisplay::Inline;
             }
-            if has_list_or_definition_ancestor {
-                style.margin.top = 0.0;
-                style.margin.bottom = 0.0;
-                style.margin_relative[0] = None;
-                style.margin_relative[2] = None;
+            // HTML's UA sheet: `a:any-link, area:any-link { cursor: pointer }`.
+            if matches!(elem.local.as_ref(), "a" | "area") && node.get_attribute("href").is_some() {
+                style.cursor = Some(crate::Cursor::Pointer);
             }
-            if matches!(elem.local.as_ref(), "dir" | "menu" | "ul") {
-                style.list_style = match list_ancestor_count {
-                    0 => Some(crate::ListStyle::Disc),
-                    1 => Some(crate::ListStyle::Circle),
-                    _ => Some(crate::ListStyle::Square),
-                };
-            }
-        }
-        if matches!(elem.local.as_ref(), "td" | "th") {
-            if let Some(padding) = inherited_cell_padding {
-                style.padding = crate::Edges {
-                    top: padding,
-                    right: padding,
-                    bottom: padding,
-                    left: padding,
-                };
-            }
-        }
-        if quirks_mode && elem.local.as_ref() == "form" {
-            // Legacy HTML/quirks rendering keeps one em after forms. Standards
-            // mode does not; Hacker News and many old document templates omit
-            // a doctype and rely on this spacing.
-            style.margin_relative[2] = Some(crate::Dimension::Em(1.0));
-        }
-        if elem.local.as_ref() == "input" {
-            let input_type = node
-                .get_attribute("type")
-                .unwrap_or("text")
-                .trim()
-                .to_ascii_lowercase();
-            if quirks_mode {
-                style.box_sizing = crate::BoxSizing::BorderBox;
-            }
-            match input_type.as_str() {
-                "checkbox" | "radio" => {
-                    style.margin = crate::Edges {
-                        top: 3.0,
-                        right: 3.0,
-                        bottom: if input_type == "radio" { 0.0 } else { 3.0 },
-                        left: if input_type == "radio" { 5.0 } else { 4.0 },
+            style.is_replaced_box = crate::inline::is_replaced(elem.local.as_ref());
+            style.has_replaced_sizing = crate::inline::has_replaced_sizing(elem.local.as_ref())
+                || (elem.local.as_ref() == "input"
+                    && node
+                        .get_attribute("type")
+                        .is_some_and(|value| value.eq_ignore_ascii_case("image")));
+            style.color_scheme_dark = inherited_color_scheme_dark;
+            if matches!(elem.local.as_ref(), "dir" | "dl" | "menu" | "ol" | "ul") {
+                let mut list_ancestor_count = 0usize;
+                let mut has_list_or_definition_ancestor = false;
+                let mut ancestor = node.parent;
+                while let Some(ancestor_id) = ancestor {
+                    let Some(ancestor_node) = tree.borrow_node(ancestor_id) else {
+                        break;
                     };
-                    style.padding = crate::Edges::default();
-                    style.border = crate::Edges::default();
-                    style.border_model.specified_widths = crate::Sides::all(0.0);
-                    style.border_model.styles = crate::Sides::all(crate::BorderStyle::None);
-                    style.border_model.colors = crate::Sides::all(None);
-                    style.border_color = None;
-                    style.background_color = None;
-                    style.box_sizing = crate::BoxSizing::BorderBox;
-                    style.cursor = Some(crate::Cursor::Default);
-                    style.cssom.ua_overrides.clear();
+                    if let Some(ancestor_element) = ancestor_node.as_element() {
+                        let local = ancestor_element.local.as_ref();
+                        if matches!(local, "dir" | "dl" | "menu" | "ol" | "ul") {
+                            has_list_or_definition_ancestor = true;
+                        }
+                        if matches!(local, "dir" | "menu" | "ol" | "ul") {
+                            list_ancestor_count += 1;
+                        }
+                    }
+                    ancestor = ancestor_node.parent;
                 }
-                "range" | "color" => {
-                    style.margin = crate::Edges {
-                        top: 2.0,
-                        right: 2.0,
-                        bottom: 2.0,
-                        left: 2.0,
+                if has_list_or_definition_ancestor {
+                    style.margin.top = 0.0;
+                    style.margin.bottom = 0.0;
+                    style.margin_relative[0] = None;
+                    style.margin_relative[2] = None;
+                }
+                if matches!(elem.local.as_ref(), "dir" | "menu" | "ul") {
+                    style.list_style = match list_ancestor_count {
+                        0 => Some(crate::ListStyle::Disc),
+                        1 => Some(crate::ListStyle::Circle),
+                        _ => Some(crate::ListStyle::Square),
                     };
-                    style.padding = crate::Edges::default();
-                    style.border = crate::Edges::default();
-                    style.cursor = Some(crate::Cursor::Default);
                 }
-                "submit" | "reset" | "button" => {
-                    // `input[type=submit|reset|button]` takes the button UA
-                    // rules: `padding: 1px 6px; border: 2px outset
-                    // ButtonBorder; background-color: ButtonFace`.
+            }
+            if matches!(elem.local.as_ref(), "td" | "th") {
+                if let Some(padding) = inherited_cell_padding {
                     style.padding = crate::Edges {
-                        top: 1.0,
-                        right: 6.0,
-                        bottom: 1.0,
-                        left: 6.0,
+                        top: padding,
+                        right: padding,
+                        bottom: padding,
+                        left: padding,
                     };
-                    style.background_color = Some([239, 239, 239, 255]);
-                    style.text_align = Some(taffy::AlignItems::CENTER);
-                    style.cssom.text_align = Some("center");
-                    style.white_space = Some(crate::WhiteSpace::Pre);
-                    style.box_sizing = crate::BoxSizing::BorderBox;
-                    style.cursor = Some(crate::Cursor::Default);
-                    style
-                        .cssom
-                        .ua_overrides
-                        .retain(|(property, _)| !property.starts_with("border"));
-                    style.cssom.ua_overrides.extend([
-                        ("border-top-style", "outset"),
-                        ("border-right-style", "outset"),
-                        ("border-bottom-style", "outset"),
-                        ("border-left-style", "outset"),
-                        ("border-top-color", "rgb(0, 0, 0)"),
-                        ("border-right-color", "rgb(0, 0, 0)"),
-                        ("border-bottom-color", "rgb(0, 0, 0)"),
-                        ("border-left-color", "rgb(0, 0, 0)"),
-                    ]);
                 }
-                "file" | "image" | "hidden" => style.cursor = Some(crate::Cursor::Default),
-                _ => {}
             }
-        }
-        // UA rule `[hidden]:not([hidden=until-found]) { display: none }`.
-        // Applied before the author cascade so a matching author `display`
-        // still wins (UA origin, per the HTML rendering spec). Sites ship
-        // dialogs, tab panels, and menus with a plain `hidden` attribute and
-        // reveal them by removing it (eBay's homepage interstitial uses
-        // `.lightbox-dialog[role=dialog]:not([hidden]){display:flex}`), so
-        // without this the hidden overlay paints its full-page dark backdrop.
-        if let Some(h) = node.get_attribute("hidden") {
-            if !h.eq_ignore_ascii_case("until-found") {
-                style.display = crate::Display::None;
-                style.css_display = crate::CssDisplay::Layout;
+            if quirks_mode && elem.local.as_ref() == "form" {
+                // Legacy HTML/quirks rendering keeps one em after forms. Standards
+                // mode does not; Hacker News and many old document templates omit
+                // a doctype and rely on this spacing.
+                style.margin_relative[2] = Some(crate::Dimension::Em(1.0));
             }
-        }
-        apply_presentational_hints(&node, &mut style);
-        apply_table_border_hints(tree, &node, &mut style);
-        apply_picture_source_hints(tree, id, viewport, &mut style);
+            if elem.local.as_ref() == "input" {
+                let input_type = node
+                    .get_attribute("type")
+                    .unwrap_or("text")
+                    .trim()
+                    .to_ascii_lowercase();
+                if quirks_mode {
+                    style.box_sizing = crate::BoxSizing::BorderBox;
+                }
+                match input_type.as_str() {
+                    "checkbox" | "radio" => {
+                        style.margin = crate::Edges {
+                            top: 3.0,
+                            right: 3.0,
+                            bottom: if input_type == "radio" { 0.0 } else { 3.0 },
+                            left: if input_type == "radio" { 5.0 } else { 4.0 },
+                        };
+                        style.padding = crate::Edges::default();
+                        style.border = crate::Edges::default();
+                        style.border_model.specified_widths = crate::Sides::all(0.0);
+                        style.border_model.styles = crate::Sides::all(crate::BorderStyle::None);
+                        style.border_model.colors = crate::Sides::all(None);
+                        style.border_color = None;
+                        style.background_color = None;
+                        style.box_sizing = crate::BoxSizing::BorderBox;
+                        style.cursor = Some(crate::Cursor::Default);
+                        style.cssom.ua_overrides.clear();
+                    }
+                    "range" | "color" => {
+                        style.margin = crate::Edges {
+                            top: 2.0,
+                            right: 2.0,
+                            bottom: 2.0,
+                            left: 2.0,
+                        };
+                        style.padding = crate::Edges::default();
+                        style.border = crate::Edges::default();
+                        style.cursor = Some(crate::Cursor::Default);
+                    }
+                    "submit" | "reset" | "button" => {
+                        // `input[type=submit|reset|button]` takes the button UA
+                        // rules: `padding: 1px 6px; border: 2px outset
+                        // ButtonBorder; background-color: ButtonFace`.
+                        style.padding = crate::Edges {
+                            top: 1.0,
+                            right: 6.0,
+                            bottom: 1.0,
+                            left: 6.0,
+                        };
+                        style.background_color = Some([239, 239, 239, 255]);
+                        style.text_align = Some(taffy::AlignItems::CENTER);
+                        style.cssom.text_align = Some("center");
+                        style.white_space = Some(crate::WhiteSpace::Pre);
+                        style.box_sizing = crate::BoxSizing::BorderBox;
+                        style.cursor = Some(crate::Cursor::Default);
+                        style
+                            .cssom
+                            .ua_overrides
+                            .retain(|(property, _)| !property.starts_with("border"));
+                        style.cssom.ua_overrides.extend([
+                            ("border-top-style", "outset"),
+                            ("border-right-style", "outset"),
+                            ("border-bottom-style", "outset"),
+                            ("border-left-style", "outset"),
+                            ("border-top-color", "rgb(0, 0, 0)"),
+                            ("border-right-color", "rgb(0, 0, 0)"),
+                            ("border-bottom-color", "rgb(0, 0, 0)"),
+                            ("border-left-color", "rgb(0, 0, 0)"),
+                        ]);
+                    }
+                    "file" | "image" | "hidden" => style.cursor = Some(crate::Cursor::Default),
+                    _ => {}
+                }
+            }
+            // UA rule `[hidden]:not([hidden=until-found]) { display: none }`.
+            // Applied before the author cascade so a matching author `display`
+            // still wins (UA origin, per the HTML rendering spec). Sites ship
+            // dialogs, tab panels, and menus with a plain `hidden` attribute and
+            // reveal them by removing it (eBay's homepage interstitial uses
+            // `.lightbox-dialog[role=dialog]:not([hidden]){display:flex}`), so
+            // without this the hidden overlay paints its full-page dark backdrop.
+            if let Some(h) = node.get_attribute("hidden") {
+                if !h.eq_ignore_ascii_case("until-found") {
+                    style.display = crate::Display::None;
+                    style.css_display = crate::CssDisplay::Layout;
+                }
+            }
+            apply_presentational_hints(&node, &mut style);
+            apply_table_border_hints(tree, &node, &mut style);
+            apply_picture_source_hints(tree, id, viewport, &mut style);
+            style
+        };
         let node_id = node.get_attribute("id");
-        let classes: Vec<String> = node
+        let classes: Vec<&str> = node
             .get_attribute("class")
-            .map(|c| c.split_whitespace().map(|s| s.to_string()).collect())
+            .map(|c| c.split_whitespace().collect())
             .unwrap_or_default();
         let shadow_host_sheet = tree
             .shadow_root(id)
@@ -4572,6 +4578,7 @@ fn cascade_node_style(
             }
         }
         let cx = cx.filter(|_| signable);
+        let mut style: crate::LayoutStyle;
         let mut pseudo_matches = None;
         if let Some(cx) = cx {
             let epoch = sheet.epoch();
@@ -4683,6 +4690,7 @@ fn cascade_node_style(
                     ));
                 }
             }
+            style = starting_style();
             match signature {
                 Some(signature) => {
                     cx.signatures.insert(id, signature);
@@ -4734,6 +4742,7 @@ fn cascade_node_style(
                 }
             }
         } else {
+            style = starting_style();
             let effective_props = sheet.apply_with_shadow_scopes_at_animation_time(
                 shadow_host_sheet.map(|sheet| &**sheet),
                 &slotted_scopes,

@@ -4405,7 +4405,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4438,7 +4438,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4479,7 +4479,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4514,7 +4514,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4586,7 +4586,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
     ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
@@ -4609,7 +4609,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
         part: MatchPart,
@@ -4699,7 +4699,7 @@ impl Stylesheet {
             consider(by_id.get(id), &mut normal_matched, &mut important_matched);
         }
         if !by_class.is_empty() {
-            for c in classes {
+            for c in classes.iter().map(AsRef::as_ref) {
                 if filters.is_some_and(|(classes, _)| !classes.may_contain(c)) {
                     continue;
                 }
@@ -4791,7 +4791,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
     ) -> MatchedRules {
         let (normal, important) =
@@ -4810,7 +4810,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         cached: Option<&ContextFreeMatches>,
     ) -> (MatchedRules, PseudoMatches, Option<ContextFreeMatches>) {

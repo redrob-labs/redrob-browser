@@ -427,7 +427,7 @@ impl BuildReuse {
         written.sort_unstable_by_key(|id| id.index());
         written.dedup();
         written.retain(|id| match pending_before.get(id) {
-            Some(old) => old.as_ref() != styles.get(id),
+            Some(old) => old.as_deref() != styles.get(id),
             None => !styles.is_as_before(id),
         });
         let mut affected = vec![false; tree.node_slot_count()];
@@ -1049,7 +1049,7 @@ pub(super) fn mark_style_changes(
             .as_ref()
             .and_then(|pending| pending.get(&id))
             .or_else(|| before.as_ref().and_then(|before| before.get(&id)));
-        let unchanged = baseline.is_some_and(|old| old.as_ref() == styles.get(&id));
+        let unchanged = baseline.is_some_and(|old| old.as_deref() == styles.get(&id));
         if !unchanged {
             changed += 1;
             reuse.style_changed(tree, id);
