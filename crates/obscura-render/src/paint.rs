@@ -4237,6 +4237,14 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
         signatures: std::mem::take(&mut previous.layout.cascade_signatures),
         definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
         previous_rendered: previous.layout.rendered_tree.take(),
+        geometry: Some(crate::dom::RetainedGeometry {
+            rects: std::mem::take(&mut previous.layout.rects),
+            clip_rects: std::mem::take(&mut previous.layout.clip_rects),
+            translates: std::mem::take(&mut previous.layout.translates),
+            transforms: std::mem::take(&mut previous.layout.transforms),
+            projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
+            clip_inputs: previous.layout.clip_inputs,
+        }),
     };
     drop(previous);
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(

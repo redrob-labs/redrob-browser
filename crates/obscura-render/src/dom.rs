@@ -323,6 +323,9 @@ pub struct DomLayout {
     /// through three of their projected corners for 2D consumers (paint);
     /// CSSOM geometry and hit testing project through this one.
     pub projective_transforms: HashMap<NodeId, crate::Mat4>,
+    /// The root font size and viewport `clip_rects` and the transforms were
+    /// resolved with (see `RetainedGeometry`).
+    pub(crate) clip_inputs: (f32, (f32, f32)),
     /// Per-word geometry for text nodes: a text DOM node lays out as one
     /// taffy leaf per word (see `build_text_words`), each wrapping
     /// independently within its container, so its rendered content is a list
@@ -565,11 +568,11 @@ fn retain_taffy_tree(
     tree: TaffyTree<usize>,
     root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
+    by_dom: HashMap<NodeId, taffy::NodeId>,
 ) {
     if !taffy_reuse_enabled() {
         return;
     }
-    let by_dom = id_map.iter().map(|(taffy, dom)| (*dom, *taffy)).collect();
     let retained = RetainedTaffy {
         tree,
         root,
@@ -1130,6 +1133,21 @@ pub(crate) struct RetainedStyleMaps {
     pub definite_heights: Option<HashSet<NodeId>>,
     /// The rendered tree of the layout these styles come from.
     pub(crate) previous_rendered: Option<std::rc::Rc<FlatTree>>,
+    /// The boxes and clips of the layout these styles come from.
+    pub(crate) geometry: Option<RetainedGeometry>,
+}
+
+/// The rects of a completed layout and what `resolve_clip_rects` made of
+/// them, so the next retained layout recomputes clips and transforms only
+/// where a box, a style or the rendered tree changed.
+pub(crate) struct RetainedGeometry {
+    pub(crate) rects: HashMap<NodeId, Rect>,
+    pub(crate) clip_rects: HashMap<NodeId, Option<OverflowClip>>,
+    pub(crate) translates: HashMap<NodeId, (f32, f32)>,
+    pub(crate) transforms: HashMap<NodeId, crate::Affine2>,
+    pub(crate) projective_transforms: HashMap<NodeId, crate::Mat4>,
+    /// The root font size and viewport the clips were resolved with.
+    pub(crate) clip_inputs: (f32, (f32, f32)),
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -1729,6 +1747,7 @@ impl DomLayout {
                 .get(&root_id)
                 .and_then(|style| style.font_size)
                 .unwrap_or(16.0);
+            self.clip_inputs = (root_font_size, viewport);
             resolve_clip_rects(
                 tree,
                 root_id,
@@ -1744,6 +1763,7 @@ impl DomLayout {
                 &mut self.projective_transforms,
                 root_font_size,
                 viewport,
+                None,
             );
         }
 
@@ -2888,7 +2908,16 @@ fn resolve_clip_rects(
     projective: &mut HashMap<NodeId, crate::Mat4>,
     root_font_size: f32,
     viewport: (f32, f32),
+    // A retained layout's changes, and whether what `id` inherits is what it
+    // inherited in that layout: then a subtree without changes keeps the
+    // entries the maps already hold for it.
+    retained: Option<(&ClipDirty, bool)>,
 ) {
+    if let Some((dirty, same_inputs)) = retained {
+        if same_inputs && !dirty.in_subtree(id) {
+            return;
+        }
+    }
     clip_rects.insert(id, inherited.clone());
     let style = styles.get(&id);
     let rect = rects.get(&id).copied().unwrap_or_default();
@@ -2920,16 +2949,23 @@ fn resolve_clip_rects(
     let (tx, ty) = (tx + own_tx, ty + own_ty);
     if tx != 0.0 || ty != 0.0 {
         translates.insert(id, (tx, ty));
+    } else if retained.is_some() {
+        translates.remove(&id);
     }
     let transform = if own_transform.is_identity() {
         parent_transform
     } else {
         parent_transform.then(own_transform)
     };
+    if retained.is_some() {
+        projective.remove(&id);
+    }
     if transform.is_2d() {
         let affine = transform.to_affine();
         if !affine.is_identity() {
             transforms.insert(id, affine);
+        } else if retained.is_some() {
+            transforms.remove(&id);
         }
     } else {
         projective.insert(id, transform);
@@ -2982,6 +3018,8 @@ fn resolve_clip_rects(
         }
         _ => inherited,
     };
+    let retained_child =
+        retained.map(|(dirty, same_inputs)| (dirty, same_inputs && !dirty.changed(id)));
     for cid in rendered_children_ref(tree, id).iter().copied() {
         resolve_clip_rects(
             tree,
@@ -2998,7 +3036,81 @@ fn resolve_clip_rects(
             projective,
             root_font_size,
             viewport,
+            retained_child,
         );
+    }
+}
+
+/// What changed for `resolve_clip_rects` since a retained layout: nodes whose
+/// rect or style (or a neighbour's style) changed, and their ancestors.
+pub(crate) struct ClipDirty {
+    /// By node index: the node changed.
+    own: Vec<bool>,
+    /// By node index: the node or a descendant changed.
+    subtree: Vec<bool>,
+}
+
+impl ClipDirty {
+    fn new(
+        tree: &DomTree,
+        old_rects: &HashMap<NodeId, Rect>,
+        rects: &HashMap<NodeId, Rect>,
+        fresh: &HashSet<NodeId>,
+    ) -> Self {
+        let slots = tree.node_slot_count();
+        let mut dirty = Self {
+            own: vec![false; slots],
+            subtree: vec![false; slots],
+        };
+        for (id, rect) in rects {
+            if old_rects.get(id) != Some(rect) {
+                dirty.mark(tree, *id);
+            }
+        }
+        for id in old_rects.keys() {
+            if !rects.contains_key(id) {
+                dirty.mark(tree, *id);
+            }
+        }
+        let document = tree.document();
+        for &id in fresh {
+            // The document has no box; a retained layout names it fresh
+            // whenever it restyles anything.
+            if id == document {
+                continue;
+            }
+            dirty.mark(tree, id);
+            if let Some(parent) = rendered_parent(tree, id) {
+                dirty.mark(tree, parent);
+            }
+            for child in rendered_children_ref(tree, id).iter().copied() {
+                dirty.mark(tree, child);
+            }
+        }
+        dirty
+    }
+
+    fn mark(&mut self, tree: &DomTree, id: NodeId) {
+        let Some(own) = self.own.get_mut(id.index()) else {
+            return;
+        };
+        *own = true;
+        let mut current = Some(id);
+        while let Some(node) = current {
+            match self.subtree.get_mut(node.index()) {
+                Some(seen) if !*seen => *seen = true,
+                _ => break,
+            }
+            current = rendered_parent(tree, node);
+        }
+    }
+
+    fn changed(&self, id: NodeId) -> bool {
+        self.own.get(id.index()).copied().unwrap_or(true)
+    }
+
+    fn in_subtree(&self, id: NodeId) -> bool {
+        self.subtree.get(id.index()).copied().unwrap_or(true)
     }
 }
 
@@ -7205,6 +7317,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                     signatures: std::mem::take(&mut laid.cascade_signatures),
                     definite_heights: None,
                     previous_rendered: None,
+                    geometry: None,
                 });
             }
         }
@@ -7328,15 +7441,19 @@ fn layout_dom_once(
 ) {
     let t1 = std::time::Instant::now();
     let mut matcher = tree.matcher();
+    let mut retained_geometry = None;
     let (mut styles, mut custom_properties, mut fresh_styles, signatures, prior_definite_heights) =
         match retained {
-            Some((retained, fresh)) => (
-                retained.styles,
-                retained.custom_properties,
-                Some(fresh),
-                retained.signatures,
-                retained.definite_heights,
-            ),
+            Some((retained, fresh)) => {
+                retained_geometry = retained.geometry;
+                (
+                    retained.styles,
+                    retained.custom_properties,
+                    Some(fresh),
+                    retained.signatures,
+                    retained.definite_heights,
+                )
+            }
             // Sized up front: growing a map of computed styles moves every
             // (large) style each time it doubles.
             None => (
@@ -7394,8 +7511,8 @@ fn layout_dom_once(
     let cascade_signatures = std::mem::take(&mut cascade_cx.signatures);
     resolve_css_counters(tree, &mut styles);
     let cascade_time = t1.elapsed();
-    let mut phase_marks: Vec<(&'static str, std::time::Instant)> =
-        vec![("cascade", std::time::Instant::now())];
+    let mut phase_marks: Vec<(&'static str, (std::time::Instant, u64))> =
+        vec![("cascade", crate::prof::mark())];
     let (signature, query_stats) = evaluator.map_or_else(
         || (None, crate::css::ContainerQueryStats::default()),
         |evaluator| {
@@ -7652,7 +7769,7 @@ fn layout_dom_once(
         // subtree keeps that layout's entries and is not walked.
         let prior_definite_known = prior_definite_heights.is_some();
         definite_height_nodes = prior_definite_heights.unwrap_or_default();
-        phase_marks.push(("pre", std::time::Instant::now()));
+        phase_marks.push(("pre", crate::prof::mark()));
         // (element, inherited context, an ancestor got a fresh style)
         let mut queue = vec![(root_id, root_inh, false)];
         while let Some((id, mut inh, path_fresh)) = queue.pop() {
@@ -8896,7 +9013,7 @@ fn layout_dom_once(
             }
         }
 
-        phase_marks.push(("inherit", std::time::Instant::now()));
+        phase_marks.push(("inherit", crate::prof::mark()));
         // Root/body overflow propagated to the viewport leaves the source
         // element itself overflow-visible for Taffy and BFC decisions.
         mark_viewport_overflow_source(tree, root_id, &mut styles);
@@ -9136,8 +9253,9 @@ fn layout_dom_once(
             );
         }
 
-        phase_marks.push(("fixups", std::time::Instant::now()));
+        phase_marks.push(("fixups", crate::prof::mark()));
         resolve_grid_areas(tree, root_id, &mut styles);
+        phase_marks.push(("r.grid", crate::prof::mark()));
 
         // A fieldset's rendered legend (its first legend child, in flow)
         // sits on the fieldset's top border: the border and padding-top
@@ -9177,6 +9295,7 @@ fn layout_dom_once(
             }
         }
 
+        phase_marks.push(("r.fieldset", crate::prof::mark()));
         // The root's outer display is always blockified. Keep a declared
         // inline-flex/grid root's inner mode, but remove its inline
         // participation marker before box construction.
@@ -9323,6 +9442,7 @@ fn layout_dom_once(
         // subtree (nextjs.org's nav stretched to a full 688px, burying the
         // hero), so it is gone.
 
+        phase_marks.push(("r.repairs", crate::prof::mark()));
         // Capture the definite containing width for ratio-only auto/auto
         // replaced boxes before installing their metadata. The inline layout
         // stand-in asks atomic items for max-content before its own percentage
@@ -9368,10 +9488,11 @@ fn layout_dom_once(
             }
         }
 
+        phase_marks.push(("r.intrinsic", crate::prof::mark()));
         let deferred_cyclic_inline_sizes =
             defer_cyclic_flex_inline_sizes(tree, &mut styles, root_fs, vw, vh);
 
-        phase_marks.push(("resolve", std::time::Instant::now()));
+        phase_marks.push(("resolve", crate::prof::mark()));
         let built_root = build(
             tree,
             root_id,
@@ -9381,7 +9502,10 @@ fn layout_dom_once(
             &mut ifc_items,
             &styles,
         );
-        phase_marks.push(("build", std::time::Instant::now()));
+        // Every box of each DOM node, by node (the last one built wins).
+        let mut taffy_by_dom: HashMap<NodeId, taffy::NodeId> =
+            id_map.iter().map(|(&taffy, &dom)| (dom, taffy)).collect();
+        phase_marks.push(("build", crate::prof::mark()));
         if let Some(taffy_root) = built_root {
             // Taffy has no outer display type and only gives an auto-width
             // Block root the initial-containing-block width. CSS blockifies
@@ -9464,14 +9588,16 @@ fn layout_dom_once(
             };
 
             mark_float_sensitive(&mut taffy_tree, taffy_root);
+            phase_marks.push(("s.float", crate::prof::mark()));
             let static_position_candidates = reparent_inset_positioned_nodes(
                 tree,
                 &mut taffy_tree,
                 initial_containing_block,
-                &id_map,
+                &taffy_by_dom,
                 &styles,
                 &ifc_items.static_positions,
             );
+            phase_marks.push(("s.reparent", crate::prof::mark()));
             assign_content_keys(
                 &mut taffy_tree,
                 taffy_root,
@@ -9480,6 +9606,7 @@ fn layout_dom_once(
                 &ifc_items.ifc,
                 fresh_styles.as_ref(),
             );
+            phase_marks.push(("s.keys", crate::prof::mark()));
             let (seeded, previous_nodes) =
                 seed_from_retained_taffy(&mut taffy_tree, taffy_root, &id_map, &mut ifc_items.ifc);
             if crate::prof::enabled() {
@@ -9488,7 +9615,7 @@ fn layout_dom_once(
                     taffy_tree.total_node_count(),
                 );
             }
-            phase_marks.push(("seed", std::time::Instant::now()));
+            phase_marks.push(("seed", crate::prof::mark()));
             let available = taffy::Size {
                 width: taffy::AvailableSpace::Definite(initial_cb_width),
                 height: taffy::AvailableSpace::Definite(viewport.1),
@@ -10094,9 +10221,9 @@ fn layout_dom_once(
                     table_index = group_end;
                 }
 
-                phase_marks.push(("c.tables", std::time::Instant::now()));
+                phase_marks.push(("c.tables", crate::prof::mark()));
                 let _ = taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
-                phase_marks.push(("c.first", std::time::Instant::now()));
+                phase_marks.push(("c.first", crate::prof::mark()));
                 if deferred_cyclic_inline_sizes.is_empty()
                     && apply_fit_content_widths(
                         &mut taffy_tree,
@@ -10120,7 +10247,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.fit", std::time::Instant::now()));
+                phase_marks.push(("c.fit", crate::prof::mark()));
                 if resolve_inline_percentage_heights(
                     tree,
                     &mut taffy_tree,
@@ -10132,17 +10259,17 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.pcth", std::time::Instant::now()));
+                phase_marks.push(("c.pcth", crate::prof::mark()));
                 if repair_intrinsic_column_flex_negative_margins(&mut taffy_tree, &id_map, &styles)
                 {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.negm", std::time::Instant::now()));
+                phase_marks.push(("c.negm", crate::prof::mark()));
                 let _ = resolve_deferred_flex_inline_sizes(
                     tree,
                     &mut taffy_tree,
-                    &id_map,
+                    &taffy_by_dom,
                     &mut styles,
                     &deferred_cyclic_inline_sizes,
                     root_fs,
@@ -10184,7 +10311,7 @@ fn layout_dom_once(
                         }
                     },
                 );
-                phase_marks.push(("c.defer", std::time::Instant::now()));
+                phase_marks.push(("c.defer", crate::prof::mark()));
                 if apply_multicol_balance(&mut taffy_tree, &ifc_items.multicol) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -10201,7 +10328,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.mcol", std::time::Instant::now()));
+                phase_marks.push(("c.mcol", crate::prof::mark()));
                 if apply_table_cell_baseline_alignment(
                     tree,
                     &mut taffy_tree,
@@ -10212,16 +10339,16 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.cbase", std::time::Instant::now()));
+                phase_marks.push(("c.cbase", crate::prof::mark()));
                 if apply_table_row_geometry(&mut taffy_tree, &id_map, &styles, &ifc_items) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.rowgeo", std::time::Instant::now()));
+                phase_marks.push(("c.rowgeo", crate::prof::mark()));
                 if apply_full_span_column_subgrids(
                     tree,
                     &mut taffy_tree,
-                    &id_map,
+                    &taffy_by_dom,
                     &styles,
                     |tree, node| {
                         tree.compute_layout_with_measure(
@@ -10239,12 +10366,12 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.subgrid", std::time::Instant::now()));
+                phase_marks.push(("c.subgrid", crate::prof::mark()));
                 if apply_table_cell_block_alignment(tree, &mut taffy_tree, &id_map, &styles) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.calign", std::time::Instant::now()));
+                phase_marks.push(("c.calign", crate::prof::mark()));
                 // A fully-auto positioned axis uses the box's static position
                 // in its original formatting context. Harvest that coordinate
                 // only after every intrinsic/table/fragmentation repair has
@@ -10261,7 +10388,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                phase_marks.push(("c.static", std::time::Instant::now()));
+                phase_marks.push(("c.static", crate::prof::mark()));
             }
             #[cfg(not(feature = "paint"))]
             {
@@ -10308,7 +10435,7 @@ fn layout_dom_once(
                 let _ = resolve_deferred_flex_inline_sizes(
                     tree,
                     &mut taffy_tree,
-                    &id_map,
+                    &taffy_by_dom,
                     &mut styles,
                     &deferred_cyclic_inline_sizes,
                     root_fs,
@@ -10383,7 +10510,7 @@ fn layout_dom_once(
                 if apply_full_span_column_subgrids(
                     tree,
                     &mut taffy_tree,
-                    &id_map,
+                    &taffy_by_dom,
                     &styles,
                     |tree, node| {
                         tree.compute_layout_with_measure(
@@ -10424,7 +10551,7 @@ fn layout_dom_once(
                 &styles,
             );
             ifc_items.ifc.deactivate();
-            phase_marks.push(("compute", std::time::Instant::now()));
+            phase_marks.push(("compute", crate::prof::mark()));
             sync_resolved_percentage_padding(
                 &taffy_tree,
                 taffy_root,
@@ -10451,9 +10578,11 @@ fn layout_dom_once(
                 &generated_nodes,
                 &mut generated_rects,
             );
+            phase_marks.push(("x.abs", crate::prof::mark()));
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
             fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
+            phase_marks.push(("x.collect", crate::prof::mark()));
             fractional_rects = collect_fractional_rects(
                 &taffy_tree,
                 taffy_root,
@@ -10477,6 +10606,7 @@ fn layout_dom_once(
                         .collect::<HashSet<_>>()
                 },
             );
+            phase_marks.push(("x.frac", crate::prof::mark()));
             inline_fragments = place_inline_content(
                 &taffy_tree,
                 initial_cb_x,
@@ -10485,6 +10615,7 @@ fn layout_dom_once(
                 &mut text_runs,
                 &mut generated_rects,
             );
+            phase_marks.push(("x.inline", crate::prof::mark()));
             // A box split across columns: its client rects are its column
             // fragments and its bounding box their union (CSSOM View).
             let (multicol_fragments, multicol_used) = multicol_fragments;
@@ -10674,25 +10805,56 @@ fn layout_dom_once(
                 }
             }
             synthesize_column_rects(&taffy_tree, &id_map, &ifc_items, &mut rects);
+            phase_marks.push(("x.rows", crate::prof::mark()));
             retain_taffy_tree(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
                 taffy_root,
                 &id_map,
+                std::mem::take(&mut taffy_by_dom),
             );
         }
     }
     sync_positioned_pseudo_percentage_padding(&rects, &mut styles);
 
-    phase_marks.push(("rects", std::time::Instant::now()));
+    phase_marks.push(("rects", crate::prof::mark()));
     let mut clip_rects = HashMap::default();
     let mut translates = HashMap::default();
     let mut transforms = HashMap::default();
     let mut projective_transforms = HashMap::default();
+    let root_font_size = root
+        .and_then(|root_id| styles.get(&root_id))
+        .and_then(|style| style.font_size)
+        .unwrap_or(16.0);
+    let clip_inputs = (root_font_size, viewport);
     if let Some(root_id) = root {
-        let root_font_size = styles
-            .get(&root_id)
-            .and_then(|style| style.font_size)
-            .unwrap_or(16.0);
+        let dirty = retained_geometry
+            .take()
+            .filter(|geometry| geometry.clip_inputs == clip_inputs)
+            .zip(fresh_styles.as_ref())
+            .map(|(geometry, fresh)| {
+                let dirty = ClipDirty::new(tree, &geometry.rects, &rects, fresh);
+                if crate::prof::enabled() {
+                    eprintln!(
+                        "[timing] clip-dirty own={} subtree={} old_rects={} rects={}",
+                        dirty.own.iter().filter(|b| **b).count(),
+                        dirty.subtree.iter().filter(|b| **b).count(),
+                        geometry.rects.len(),
+                        rects.len()
+                    );
+                }
+                clip_rects = geometry.clip_rects;
+                translates = geometry.translates;
+                transforms = geometry.transforms;
+                projective_transforms = geometry.projective_transforms;
+                // Entries of nodes no longer rendered go; the walk below
+                // reaches every node that is rendered and was not before.
+                let flat = current_flat_tree(tree);
+                clip_rects.retain(|id, _| flat.contains(*id));
+                translates.retain(|id, _| flat.contains(*id));
+                transforms.retain(|id, _| flat.contains(*id));
+                projective_transforms.retain(|id, _| flat.contains(*id));
+                dirty
+            });
         resolve_clip_rects(
             tree,
             root_id,
@@ -10708,10 +10870,11 @@ fn layout_dom_once(
             &mut projective_transforms,
             root_font_size,
             viewport,
+            dirty.as_ref().map(|dirty| (dirty, true)),
         );
     }
 
-    phase_marks.push(("clips", std::time::Instant::now()));
+    phase_marks.push(("clips", crate::prof::mark()));
     for index in ifc_items.ifc_nodes.clone() {
         let Some(root) = ifc_items.ifc.get(index).map(|ifc| ifc.root) else {
             continue;
@@ -10721,15 +10884,22 @@ fn layout_dom_once(
             ifc.clip = clip;
         }
     }
-    phase_marks.push(("finalize", std::time::Instant::now()));
-    phase_marks.push(("post", std::time::Instant::now()));
+    phase_marks.push(("finalize", crate::prof::mark()));
+    phase_marks.push(("post", crate::prof::mark()));
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
-        let mut line = format!("[timing] layout-phases nodes={}", styles.len());
+        let mut line = format!(
+            "[timing] layout-phases nodes={} style_bytes={}",
+            styles.len(),
+            std::mem::size_of::<crate::LayoutStyle>()
+        );
         line.push_str(&crate::prof::take());
-        let mut last = t1;
-        for (name, at) in &phase_marks {
-            line.push_str(&format!(" {name}={:?}", at.duration_since(last)));
-            last = *at;
+        let mut last = (t1, phase_marks.first().map_or(0, |(_, (_, ifc))| *ifc));
+        for (name, (at, ifc)) in &phase_marks {
+            line.push_str(&format!(" {name}={:?}", at.duration_since(last.0)));
+            if *ifc > last.1 {
+                line.push_str(&format!(" {name}.ifc={}", ifc - last.1));
+            }
+            last = (*at, *ifc);
         }
         eprintln!("{line}");
     }
@@ -10765,6 +10935,7 @@ fn layout_dom_once(
             translates,
             transforms,
             projective_transforms,
+            clip_inputs,
             text_runs,
             text_engine: engine,
             ifc: ifc_items.ifc,
@@ -11556,15 +11727,13 @@ fn fixed_grid_tracks(widths: &[f32]) -> Vec<taffy::GridTemplateComponent<String>
 fn apply_full_span_column_subgrids<F>(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
+    taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     mut measure_max_content: F,
 ) -> bool
 where
     F: FnMut(&mut TaffyTree<usize>, taffy::NodeId) -> Option<f32>,
 {
-    let taffy_by_dom: HashMap<NodeId, taffy::NodeId> =
-        id_map.iter().map(|(taffy, dom)| (*dom, *taffy)).collect();
     let mut plans = Vec::new();
 
     for (&dom, style) in styles {
@@ -12056,16 +12225,15 @@ fn reparent_inset_positioned_nodes(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
     taffy_root: taffy::NodeId,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
+    reverse: &HashMap<NodeId, taffy::NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     static_positions: &HashMap<NodeId, taffy::NodeId>,
 ) -> Vec<StaticPositionCandidate> {
-    let reverse: HashMap<NodeId, taffy::NodeId> = id_map
-        .iter()
-        .map(|(&taffy_id, &dom_id)| (dom_id, taffy_id))
-        .collect();
-    let mut nearest_abs_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::default();
-    let mut nearest_fixed_cb_for_children: HashMap<NodeId, taffy::NodeId> = HashMap::default();
+    // By node index.
+    let mut nearest_abs_cb_for_children: Vec<Option<taffy::NodeId>> =
+        vec![None; tree.node_slot_count()];
+    let mut nearest_fixed_cb_for_children: Vec<Option<taffy::NodeId>> =
+        vec![None; tree.node_slot_count()];
     let mut static_candidates = Vec::new();
 
     for dom_id in rendered_descendants(tree, tree.document()) {
@@ -12074,10 +12242,20 @@ fn reparent_inset_positioned_nodes(
         };
         let parent = rendered_parent(tree, dom_id);
         let inherited_abs_cb = parent
-            .and_then(|id| nearest_abs_cb_for_children.get(&id).copied())
+            .and_then(|id| {
+                nearest_abs_cb_for_children
+                    .get(id.index())
+                    .copied()
+                    .flatten()
+            })
             .unwrap_or(taffy_root);
         let inherited_fixed_cb = parent
-            .and_then(|id| nearest_fixed_cb_for_children.get(&id).copied())
+            .and_then(|id| {
+                nearest_fixed_cb_for_children
+                    .get(id.index())
+                    .copied()
+                    .flatten()
+            })
             .unwrap_or(taffy_root);
 
         // Record this before any candidate early-exit so all descendants get
@@ -12096,8 +12274,12 @@ fn reparent_inset_positioned_nodes(
         } else {
             inherited_fixed_cb
         };
-        nearest_abs_cb_for_children.insert(dom_id, abs_child_cb);
-        nearest_fixed_cb_for_children.insert(dom_id, fixed_child_cb);
+        if let Some(slot) = nearest_abs_cb_for_children.get_mut(dom_id.index()) {
+            *slot = Some(abs_child_cb);
+        }
+        if let Some(slot) = nearest_fixed_cb_for_children.get_mut(dom_id.index()) {
+            *slot = Some(fixed_child_cb);
+        }
 
         if !matches!(style.position, Some(taffy::Position::Absolute)) {
             continue;
@@ -17526,7 +17708,7 @@ fn defer_cyclic_flex_inline_sizes(
 fn resolve_deferred_flex_inline_sizes<F>(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
+    taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
     styles: &mut HashMap<NodeId, crate::LayoutStyle>,
     deferred: &[DeferredCyclicInlineSize],
     root_fs: f32,
@@ -17540,8 +17722,6 @@ where
     if deferred.is_empty() {
         return false;
     }
-    let taffy_by_dom: HashMap<NodeId, taffy::NodeId> =
-        id_map.iter().map(|(&taffy, &dom)| (dom, taffy)).collect();
 
     // This is the final-reflow boundary: preserve the main size selected by
     // the outer flex algorithm while descendants are resolved against it.
@@ -21028,6 +21208,7 @@ mod tests {
                 signatures: HashMap::default(),
                 definite_heights: None,
                 previous_rendered: None,
+                geometry: None,
             };
             let (mut active, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -21071,6 +21252,7 @@ mod tests {
                 signatures: HashMap::default(),
                 definite_heights: None,
                 previous_rendered: None,
+                geometry: None,
             };
             let (inactive, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -21172,6 +21354,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21296,6 +21479,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
@@ -21380,6 +21564,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let mutations = [
             TreeStyleMutation::Insert {
@@ -21453,6 +21638,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (_, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21756,6 +21942,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21858,6 +22045,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22199,6 +22387,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22250,6 +22439,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let mutations = mutations
             .iter()
@@ -22887,6 +23077,7 @@ mod tests {
                 signatures: HashMap::default(),
                 definite_heights: None,
                 previous_rendered: None,
+                geometry: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -23099,6 +23290,7 @@ mod tests {
                 signatures: HashMap::default(),
                 definite_heights: None,
                 previous_rendered: None,
+                geometry: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -23272,6 +23464,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -23324,6 +23517,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -23382,6 +23576,7 @@ mod tests {
             signatures: HashMap::default(),
             definite_heights: None,
             previous_rendered: None,
+            geometry: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -24142,6 +24337,7 @@ mod tests {
                 signatures: HashMap::default(),
                 definite_heights: None,
                 previous_rendered: None,
+                geometry: None,
             };
             let (incremental, _) = layout_dom_with_web_fonts_pass_limit(
                 &tree,

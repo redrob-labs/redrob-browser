@@ -84,6 +84,15 @@ pub mod prof {
         }
     }
 
+    /// A phase mark: now, and how many inline formatting contexts were laid
+    /// out so far.
+    pub fn mark() -> (std::time::Instant, u64) {
+        (
+            std::time::Instant::now(),
+            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed),
+        )
+    }
+
     /// Format and reset every counter.
     pub fn take() -> String {
         let mut out = String::new();
