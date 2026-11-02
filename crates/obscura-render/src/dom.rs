@@ -10247,8 +10247,12 @@ fn layout_dom_once(
         // The root's outer display is always blockified. Keep a declared
         // inline-flex/grid root's inner mode, but remove its inline
         // participation marker before box construction.
-        if let Some(root_style) = styles.get_mut(&root_id) {
-            crate::blockify_outer_display(root_style);
+        // Each repair below writes a style only when it changes it: a write
+        // is a copy for the retained build and a comparison after it.
+        if styles.get(&root_id).is_some_and(crate::blockify_changes) {
+            if let Some(root_style) = styles.get_mut(&root_id) {
+                crate::blockify_outer_display(root_style);
+            }
         }
 
         // The repairs below read an element's own style and its parent's and
@@ -10308,19 +10312,18 @@ fn layout_dom_once(
             .collect();
         for parent in intrinsic_column_flex_parents {
             for child in tree.children(parent) {
-                let Some(style) = styles.get_mut(&child) else {
-                    continue;
-                };
-                let zero_basis = matches!(
-                    style.flex_basis,
-                    crate::Dimension::Px(value) | crate::Dimension::Percent(value)
-                        if value == 0.0
-                );
-                if zero_basis
-                    && style.height == crate::Dimension::Auto
-                    && style.min_height == crate::Dimension::Auto
-                {
-                    style.flex_basis = crate::Dimension::Auto;
+                let zero_basis_auto_height = styles.get(&child).is_some_and(|style| {
+                    matches!(
+                        style.flex_basis,
+                        crate::Dimension::Px(value) | crate::Dimension::Percent(value)
+                            if value == 0.0
+                    ) && style.height == crate::Dimension::Auto
+                        && style.min_height == crate::Dimension::Auto
+                });
+                if zero_basis_auto_height {
+                    if let Some(style) = styles.get_mut(&child) {
+                        style.flex_basis = crate::Dimension::Auto;
+                    }
                 }
             }
         }
@@ -10371,6 +10374,15 @@ fn layout_dom_once(
         // Absolute/fixed boxes and floats are blockified externally but retain
         // their inner formatting mode and their context-specific shrink-fit.
         for id in repair_candidates(&styles) {
+            let changes = styles.get(&id).is_some_and(|style| {
+                ((matches!(style.position, Some(taffy::Position::Absolute))
+                    || style.float.is_some())
+                    && crate::blockify_changes(style))
+                    || generated_pseudos_blockify_changes(style)
+            });
+            if !changes {
+                continue;
+            }
             let Some(style) = styles.get_mut(&id) else {
                 continue;
             };
@@ -16133,17 +16145,30 @@ fn blockify_layout_children(tree: &DomTree, parent: NodeId, styles: &mut StyleMa
             .get(&child)
             .is_some_and(|style| style.display_contents && style.display != crate::Display::None);
         if transparent {
-            if let Some(style) = styles.get_mut(&child) {
-                for pseudo in [style.before_pseudo.as_mut(), style.after_pseudo.as_mut()]
-                    .into_iter()
-                    .flatten()
-                {
-                    crate::blockify_outer_display(pseudo);
+            let pseudo_changes = styles.get(&child).is_some_and(|style| {
+                [
+                    style.before_pseudo.as_deref(),
+                    style.after_pseudo.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .any(crate::blockify_changes)
+            });
+            if pseudo_changes {
+                if let Some(style) = styles.get_mut(&child) {
+                    for pseudo in [style.before_pseudo.as_mut(), style.after_pseudo.as_mut()]
+                        .into_iter()
+                        .flatten()
+                    {
+                        crate::blockify_outer_display(pseudo);
+                    }
                 }
             }
             blockify_layout_children(tree, child, styles);
-        } else if let Some(style) = styles.get_mut(&child) {
-            crate::blockify_outer_display(style);
+        } else if styles.get(&child).is_some_and(crate::blockify_changes) {
+            if let Some(style) = styles.get_mut(&child) {
+                crate::blockify_outer_display(style);
+            }
         }
     }
 }
@@ -16152,6 +16177,22 @@ fn blockify_layout_children(tree: &DomTree, parent: NodeId, styles: &mut StyleMa
 /// fixups as real elements. They are stored inside their host style rather
 /// than in the DOM map, so the normal root/item/float/positioned loops above
 /// cannot reach them.
+/// Whether `blockify_generated_pseudos` would change `host`.
+fn generated_pseudos_blockify_changes(host: &crate::LayoutStyle) -> bool {
+    let host_is_item_container =
+        matches!(host.display, crate::Display::Flex | crate::Display::Grid)
+            && !host.internal_flex_container;
+    [host.before_pseudo.as_deref(), host.after_pseudo.as_deref()]
+        .into_iter()
+        .flatten()
+        .any(|pseudo| {
+            (host_is_item_container
+                || matches!(pseudo.position, Some(taffy::Position::Absolute))
+                || pseudo.float.is_some())
+                && crate::blockify_changes(pseudo)
+        })
+}
+
 fn blockify_generated_pseudos(host: &mut crate::LayoutStyle) {
     {
         let host_is_item_container =

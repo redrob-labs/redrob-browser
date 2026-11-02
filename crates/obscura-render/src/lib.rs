@@ -2331,6 +2331,12 @@ pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
     style.display == Display::Inline || style.is_inline_block
 }
 
+/// Whether `blockify_outer_display` would change `style` (it leaves a
+/// blockified box that is not inline-level as it is).
+pub(crate) fn blockify_changes(style: &LayoutStyle) -> bool {
+    !style.blockified || is_inline_level_box(style)
+}
+
 /// Apply CSS Display blockification while preserving the inner display mode.
 /// Thus inline-flex becomes flex and inline-grid becomes grid, while
 /// inline-block/plain inline become block.

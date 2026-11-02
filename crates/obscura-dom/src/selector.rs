@@ -53,12 +53,17 @@ impl ToCss for CssString {
 
 impl PrecomputedHash for CssString {
     fn precomputed_hash(&self) -> u32 {
-        let mut h: u32 = 5381;
-        for b in self.0.as_bytes() {
-            h = h.wrapping_mul(33).wrapping_add(*b as u32);
-        }
-        h
+        css_string_hash(&self.0)
     }
+}
+
+/// `CssString::precomputed_hash` of a borrowed string.
+fn css_string_hash(value: &str) -> u32 {
+    let mut h: u32 = 5381;
+    for b in value.as_bytes() {
+        h = h.wrapping_mul(33).wrapping_add(*b as u32);
+    }
+    h
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -565,11 +570,27 @@ impl<'a> Element for DomElement<'a> {
             .with_node(self.node_id, |n| {
                 n.get_attribute("class")
                     .map(|class_attr| {
-                        // Most checks miss: reject those without splitting.
-                        if case_sensitivity == CaseSensitivity::CaseSensitive
-                            && !class_attr.contains(name.0.as_str())
-                        {
-                            return false;
+                        if case_sensitivity == CaseSensitivity::CaseSensitive {
+                            // A class is an occurrence bounded by ASCII
+                            // whitespace (the separators `split_whitespace`
+                            // also splits on) or the ends: no split.
+                            let needle = name.0.as_str();
+                            if needle.is_empty() || needle.chars().any(char::is_whitespace) {
+                                return false;
+                            }
+                            if !class_attr.is_ascii() {
+                                return class_attr.split_whitespace().any(|class| class == needle);
+                            }
+                            let bytes = class_attr.as_bytes();
+                            // The ASCII characters `char::is_whitespace` holds.
+                            let separator = |byte: u8| {
+                                matches!(byte, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
+                            };
+                            return class_attr.match_indices(needle).any(|(start, _)| {
+                                let end = start + needle.len();
+                                (start == 0 || separator(bytes[start - 1]))
+                                    && (end == bytes.len() || separator(bytes[end]))
+                            });
                         }
                         let name = name.0.as_bytes();
                         class_attr
@@ -1036,14 +1057,18 @@ impl Matcher {
 /// the filter holds exactly the hashes of the current node's ancestor chain.
 struct AncestorFilter {
     filter: Box<selectors::bloom::BloomFilter>,
-    /// Hashes pushed per tree-depth level, so `pop` knows what to remove.
-    levels: Vec<Vec<u32>>,
+    /// The hashes pushed, all levels in one list.
+    hashes: Vec<u32>,
+    /// Where each tree-depth level's hashes start in `hashes`, so `pop`
+    /// knows what to remove.
+    levels: Vec<usize>,
 }
 
 impl AncestorFilter {
     fn new() -> Self {
         AncestorFilter {
             filter: Box::default(),
+            hashes: Vec::new(),
             levels: Vec::new(),
         }
     }
@@ -1053,38 +1078,27 @@ impl AncestorFilter {
     }
 
     fn push(&mut self, tree: &DomTree, nid: NodeId) {
-        let mut hashes = Vec::new();
+        self.levels.push(self.hashes.len());
+        let hashes = &mut self.hashes;
+        let filter = &mut self.filter;
         tree.with_node(nid, |node| {
             if let Some(elem) = node.as_element() {
-                push_hash(
-                    &mut hashes,
-                    &mut self.filter,
-                    CssLocalName(elem.local.clone()).precomputed_hash(),
-                );
+                push_hash(hashes, filter, elem.local.precomputed_hash());
                 if let Some(id) = node.get_attribute("id") {
-                    push_hash(
-                        &mut hashes,
-                        &mut self.filter,
-                        CssString(id.to_string()).precomputed_hash(),
-                    );
+                    push_hash(hashes, filter, css_string_hash(id));
                 }
                 if let Some(class) = node.get_attribute("class") {
                     for c in class.split_whitespace() {
-                        push_hash(
-                            &mut hashes,
-                            &mut self.filter,
-                            CssString(c.to_string()).precomputed_hash(),
-                        );
+                        push_hash(hashes, filter, css_string_hash(c));
                     }
                 }
             }
         });
-        self.levels.push(hashes);
     }
 
     fn pop(&mut self) {
-        if let Some(hashes) = self.levels.pop() {
-            for h in hashes {
+        if let Some(start) = self.levels.pop() {
+            for h in self.hashes.drain(start..) {
                 self.filter.remove_hash(h);
             }
         }

@@ -2105,9 +2105,30 @@ impl KeyFilter {
     }
 
     fn may_contain(&self, key: &str) -> bool {
-        let bit = Self::bit(key);
+        self.may_contain_bit(Self::bit(key))
+    }
+
+    fn may_contain_bit(&self, bit: usize) -> bool {
         self.0[bit / 64] & (1 << (bit % 64)) != 0
     }
+}
+
+/// An element's class and its `KeyFilter` bit, split and hashed once for
+/// every rule map an element is matched against.
+#[derive(Clone, Copy)]
+pub(crate) struct ClassKey<'a> {
+    name: &'a str,
+    bit: usize,
+}
+
+fn class_keys<'a>(classes: impl IntoIterator<Item = &'a str>) -> Vec<ClassKey<'a>> {
+    classes
+        .into_iter()
+        .map(|name| ClassKey {
+            name,
+            bit: KeyFilter::bit(name),
+        })
+        .collect()
 }
 
 impl ContextualBuckets {
@@ -3860,7 +3881,14 @@ impl Stylesheet {
         nid: NodeId,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
     ) -> PseudoMatches {
-        self.pseudo_matches_part(tree, matcher, nid, evaluator, MatchPart::All)
+        let node = tree.borrow_node(nid);
+        let classes = class_keys(
+            node.as_ref()
+                .and_then(|node| node.get_attribute("class"))
+                .into_iter()
+                .flat_map(str::split_whitespace),
+        );
+        self.pseudo_matches_part(tree, matcher, nid, &classes, evaluator, MatchPart::All)
     }
 
     fn pseudo_matches_part(
@@ -3868,6 +3896,7 @@ impl Stylesheet {
         tree: &DomTree,
         matcher: &mut Matcher,
         nid: NodeId,
+        classes: &[ClassKey<'_>],
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
         part: MatchPart,
     ) -> PseudoMatches {
@@ -3881,10 +3910,19 @@ impl Stylesheet {
                 tree,
                 matcher,
                 nid,
+                classes,
                 evaluator,
                 part,
             ),
-            after: self.pseudo_rule_matches(&self.after_rules, tree, matcher, nid, evaluator, part),
+            after: self.pseudo_rule_matches(
+                &self.after_rules,
+                tree,
+                matcher,
+                nid,
+                classes,
+                evaluator,
+                part,
+            ),
             placeholder: supports_placeholder
                 .then(|| {
                     self.pseudo_rule_matches(
@@ -3892,6 +3930,7 @@ impl Stylesheet {
                         tree,
                         matcher,
                         nid,
+                        classes,
                         evaluator,
                         part,
                     )
@@ -3936,12 +3975,14 @@ impl Stylesheet {
 
     /// The `rules` (one pseudo-element's) matching `nid`, normal and
     /// important, each in cascade order; `None` when none match.
+    #[allow(clippy::too_many_arguments)]
     fn pseudo_rule_matches(
         &self,
         rules: &PseudoRuleMap,
         tree: &DomTree,
         matcher: &mut Matcher,
         nid: NodeId,
+        classes: &[ClassKey<'_>],
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
         part: MatchPart,
     ) -> Option<PseudoMatch> {
@@ -4024,13 +4065,13 @@ impl Stylesheet {
             if let Some(id) = node.get_attribute("id").filter(|_| !by_id.is_empty()) {
                 consider(by_id.get(id), &mut normal_matched, &mut important_matched);
             }
-            if let Some(classes) = node.get_attribute("class").filter(|_| !by_class.is_empty()) {
-                for class in classes.split_whitespace() {
-                    if filters.is_some_and(|(classes, _)| !classes.may_contain(class)) {
+            if !by_class.is_empty() {
+                for class in classes {
+                    if filters.is_some_and(|(filter, _)| !filter.may_contain_bit(class.bit)) {
                         continue;
                     }
                     consider(
-                        by_class.get(class),
+                        by_class.get(class.name),
                         &mut normal_matched,
                         &mut important_matched,
                     );
@@ -4590,12 +4631,13 @@ impl Stylesheet {
         local: &str,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
     ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
+        let classes = class_keys(classes.iter().map(AsRef::as_ref));
         self.collect_matched_rules_part(
             tree,
             matcher,
             nid,
             id,
-            classes,
+            &classes,
             local,
             evaluator,
             MatchPart::All,
@@ -4609,7 +4651,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[impl AsRef<str>],
+        classes: &[ClassKey<'_>],
         local: &str,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
         part: MatchPart,
@@ -4699,11 +4741,15 @@ impl Stylesheet {
             consider(by_id.get(id), &mut normal_matched, &mut important_matched);
         }
         if !by_class.is_empty() {
-            for c in classes.iter().map(AsRef::as_ref) {
-                if filters.is_some_and(|(classes, _)| !classes.may_contain(c)) {
+            for class in classes {
+                if filters.is_some_and(|(filter, _)| !filter.may_contain_bit(class.bit)) {
                     continue;
                 }
-                consider(by_class.get(c), &mut normal_matched, &mut important_matched);
+                consider(
+                    by_class.get(class.name),
+                    &mut normal_matched,
+                    &mut important_matched,
+                );
             }
         }
         if !by_attribute.is_empty() {
@@ -4819,9 +4865,10 @@ impl Stylesheet {
         } else {
             MatchPart::All
         };
+        let classes = class_keys(classes.iter().map(AsRef::as_ref));
         let (normal, important) = self
-            .collect_matched_rules_part(tree, matcher, nid, id, classes, local, &mut None, part);
-        let pseudo = self.pseudo_matches_part(tree, matcher, nid, &mut None, part);
+            .collect_matched_rules_part(tree, matcher, nid, id, &classes, local, &mut None, part);
+        let pseudo = self.pseudo_matches_part(tree, matcher, nid, &classes, &mut None, part);
         let matched = MatchedRules { normal, important };
         let Some(cached) = cached else {
             let keep = |list: &[(u32, usize, usize)], flags: &[bool]| {
