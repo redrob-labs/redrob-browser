@@ -1209,7 +1209,8 @@ impl StickyLayout {
             let cumulative = root_only_cumulative_scroll(scroll_tree, scroll);
             return self.resolved_frame_offsets(viewport, scroll_tree, &cumulative);
         }
-        let mut frame_offsets = HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
+        let mut frame_offsets =
+            HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
         for frame in &self.frames {
             let inherited = frame
                 .parent_sticky
@@ -1291,7 +1292,8 @@ impl StickyLayout {
         scroll_tree: &ScrollTree,
         cumulative_scroll: &[(f32, f32)],
     ) -> HashMap<NodeId, (f32, f32)> {
-        let mut frame_offsets = HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
+        let mut frame_offsets =
+            HashMap::with_capacity_and_hasher(self.frames.len(), Default::default());
         for frame in &self.frames {
             let inherited = frame
                 .parent_sticky

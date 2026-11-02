@@ -14,8 +14,8 @@
 //! sticky boxes at their normal-flow position. Content that only script can
 //! scroll (`overflow: hidden`) stays painted at its live offset.
 
-use std::cell::RefCell;
 use crate::{HashMap, HashSet};
+use std::cell::RefCell;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 

@@ -149,7 +149,8 @@ impl DamageSnapshot {
         // unchanged epoch has the same styles and text.
         let same_epoch = self.started && self.epoch == prepared.paint_epoch;
         let mut restyled: HashSet<NodeId> = HashSet::default();
-        let mut live: HashSet<NodeId> = HashSet::with_capacity_and_hasher(laid.styles.len(), Default::default());
+        let mut live: HashSet<NodeId> =
+            HashSet::with_capacity_and_hasher(laid.styles.len(), Default::default());
         let walk = &self.walk;
         let mut check_style =
             |id: NodeId, owner: NodeId, styles: &mut HashMap<NodeId, LayoutStyle>| {
@@ -180,7 +181,8 @@ impl DamageSnapshot {
         }
 
         // Boxes.
-        let mut items: HashMap<Key, Item> = HashMap::with_capacity_and_hasher(self.items.len(), Default::default());
+        let mut items: HashMap<Key, Item> =
+            HashMap::with_capacity_and_hasher(self.items.len(), Default::default());
         let mut generated: HashMap<NodeId, Rect> = HashMap::default();
         for g in &laid.generated_boxes {
             add_rect(&mut generated, g.host, g.rect);

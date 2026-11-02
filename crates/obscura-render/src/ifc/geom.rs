@@ -95,8 +95,7 @@ impl Ifc {
         order.sort_by_key(|span| {
             std::cmp::Reverse(depths.get(*span as usize).copied().unwrap_or(0))
         });
-        let mut memo: crate::HashMap<u32, Vec<(f32, f32, f32, u32)>> =
-            crate::HashMap::default();
+        let mut memo: crate::HashMap<u32, Vec<(f32, f32, f32, u32)>> = crate::HashMap::default();
         for span in order {
             let culled = self.spans.get(span as usize).is_some_and(|s| s.culled);
             let rects = if !culled {

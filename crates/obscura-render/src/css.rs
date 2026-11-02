@@ -7,10 +7,10 @@
 //! of rules). The indexed cascade is closer to how real browsers match: bucket
 //! rules, gather candidates per element, then match and sort by specificity.
 
+use crate::HashMap;
 use obscura_dom::selector::{CompiledSelector, Matcher, SelectorKey};
 use obscura_dom::tree::{DomTree, NodeId};
 use std::borrow::Cow;
-use crate::HashMap;
 use std::sync::Arc;
 
 use crate::LayoutStyle;
@@ -8787,7 +8787,8 @@ mod tests {
             "#
             .to_string()],
         );
-        let parent_props = HashMap::from_iter([("--inherited-size".to_string(), "37px".to_string())]);
+        let parent_props =
+            HashMap::from_iter([("--inherited-size".to_string(), "37px".to_string())]);
         let mut matcher = tree.matcher();
         let mut style = LayoutStyle::default();
         let effective = sheet.apply(

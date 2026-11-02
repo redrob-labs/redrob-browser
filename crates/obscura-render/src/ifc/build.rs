@@ -4,8 +4,8 @@
 //! Portions derived from Blitz (https://github.com/DioxusLabs/blitz), MIT OR Apache-2.0
 //! (`blitz-dom/src/layout/inline/build.rs`).
 
-use std::borrow::Cow;
 use crate::HashMap;
+use std::borrow::Cow;
 
 use obscura_dom::tree::{DomTree, NodeId};
 use parley::{

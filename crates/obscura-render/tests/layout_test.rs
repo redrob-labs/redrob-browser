@@ -4,8 +4,8 @@
 //! site-specific hacks that used to live in obscura-render for this exact markup.
 
 use obscura_dom::tree_sink::parse_html;
-use obscura_render::{layout_dom, layout_dom_with_images};
 use obscura_render::HashMap;
+use obscura_render::{layout_dom, layout_dom_with_images};
 
 #[test]
 fn word_spacing_changes_intrinsic_width() {

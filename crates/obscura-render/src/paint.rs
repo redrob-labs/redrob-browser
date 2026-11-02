@@ -6,9 +6,9 @@
 //! dependencies, so a screenshot is reproducible across hosts.
 
 use crate::canvas::{Canvas, ClipMask, PixmapCanvas};
+use crate::{HashMap, HashSet};
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use obscura_dom::tree::DomTree;
-use crate::{HashMap, HashSet};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -5343,8 +5343,7 @@ fn paint_laid_dom_scrolled(
     // their painting is owned by that raster, so they are skipped in both the
     // box/text loop below and the inline-formatting loop after it (an svg
     // `<text>` element must not also paint its glyphs on top of the raster).
-    let mut svg_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> =
-        crate::HashSet::default();
+    let mut svg_subtree_skip: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     // Text is painted in a second pass, after the box-order loop. Remember
     // every subtree already painted into an opacity layer so its shaped text
     // is not drawn a second time at full opacity in the outer pass.
@@ -5354,8 +5353,7 @@ fn paint_laid_dom_scrolled(
     // sprite file so a `<use href="url#id">` resolves. One sprite backs many
     // icons (a whole logo/icon band), so cache the parsed symbol across every
     // inline svg on the page rather than re-parsing the sprite per icon.
-    let mut sprite_cache: crate::HashMap<String, Option<String>> =
-        crate::HashMap::default();
+    let mut sprite_cache: crate::HashMap<String, Option<String>> = crate::HashMap::default();
     // An overflow clip is inherited by every descendant until another clip
     // joins the chain. Rasterizing the same full-surface alpha mask per child
     // made clipped long pages scale as surface area times descendant count.
@@ -5383,12 +5381,10 @@ fn paint_laid_dom_scrolled(
     let mut pos_layers: Vec<(i32, Vec<obscura_dom::tree::NodeId>)> = Vec::new();
     let mut float_layers: Vec<obscura_dom::tree::NodeId> = Vec::new();
     let mut normal: Vec<obscura_dom::tree::NodeId> = Vec::new();
-    let mut consumed: crate::HashSet<obscura_dom::tree::NodeId> =
-        crate::HashSet::default();
+    let mut consumed: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     // Members of z >= 0 layers (Appendix E step 8 and up): the inline
     // content of this context paints before them.
-    let mut positive_members: crate::HashSet<obscura_dom::tree::NodeId> =
-        crate::HashSet::default();
+    let mut positive_members: crate::HashSet<obscura_dom::tree::NodeId> = crate::HashSet::default();
     let mut paint_nodes = paint_root.into_iter().collect::<Vec<_>>();
     paint_nodes.extend(crate::dom::rendered_descendants(
         tree,
@@ -5477,12 +5473,11 @@ fn paint_laid_dom_scrolled(
     let mut generated_after_at: Vec<Vec<crate::dom::GeneratedBox>> =
         vec![Vec::new(); paint_order.len()];
     if !laid.generated_boxes.is_empty() {
-        let paint_indices: crate::HashMap<obscura_dom::tree::NodeId, usize> =
-            paint_order
-                .iter()
-                .enumerate()
-                .map(|(index, &nid)| (nid, index))
-                .collect();
+        let paint_indices: crate::HashMap<obscura_dom::tree::NodeId, usize> = paint_order
+            .iter()
+            .enumerate()
+            .map(|(index, &nid)| (nid, index))
+            .collect();
         let mut last_index: crate::HashMap<obscura_dom::tree::NodeId, usize> =
             paint_indices.clone();
         let dom_preorder = paint_nodes.clone();
@@ -7721,10 +7716,7 @@ fn viewport_fixed_clip_map(
         sticky: &crate::HashMap<obscura_dom::tree::NodeId, (f32, f32)>,
         id: obscura_dom::tree::NodeId,
         inherited: Option<crate::dom::OverflowClip>,
-        out: &mut crate::HashMap<
-            obscura_dom::tree::NodeId,
-            Option<crate::dom::OverflowClip>,
-        >,
+        out: &mut crate::HashMap<obscura_dom::tree::NodeId, Option<crate::dom::OverflowClip>>,
     ) {
         out.insert(id, inherited.clone());
         let next = match (laid.styles.get(&id), laid.rects.get(&id)) {
@@ -7753,7 +7745,8 @@ fn viewport_fixed_clip_map(
         }
     }
 
-    let mut out = crate::HashMap::with_capacity_and_hasher(viewport_fixed.len(), Default::default());
+    let mut out =
+        crate::HashMap::with_capacity_and_hasher(viewport_fixed.len(), Default::default());
     for &id in viewport_fixed {
         let starts_subtree = crate::dom::rendered_parent(tree, id)
             .is_none_or(|parent| !viewport_fixed.contains(&parent));
@@ -14411,10 +14404,7 @@ fn serialize_svg_node(
     is_root: bool,
     styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &crate::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<crate::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     buf: &mut String,
@@ -14443,10 +14433,7 @@ fn serialize_svg_node_impl(
     is_root: bool,
     styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &crate::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<crate::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     suppress_opacity_for: Option<obscura_dom::tree::NodeId>,
     use_clone: bool,
@@ -14943,10 +14930,7 @@ fn inject_external_sprites(
     root: obscura_dom::tree::NodeId,
     styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
     custom_properties: Option<
-        &crate::HashMap<
-            obscura_dom::tree::NodeId,
-            std::rc::Rc<crate::HashMap<String, String>>,
-        >,
+        &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
     base_url: Option<&str>,
     markup: &mut String,
@@ -14996,8 +14980,7 @@ fn inject_external_sprites(
     }
     let mut defs = String::new();
     let mut rewrites: Vec<(String, String)> = Vec::new();
-    let wanted_local: crate::HashSet<&str> =
-        local_fragments.iter().map(String::as_str).collect();
+    let wanted_local: crate::HashSet<&str> = local_fragments.iter().map(String::as_str).collect();
     let mut local_nodes = crate::HashMap::default();
     if !wanted_local.is_empty() {
         for nid in tree.descendants(tree.document()) {
@@ -24612,7 +24595,8 @@ mod scene_text_tests {
             ))
         );
         let raster = |scroll_y: f32| {
-            let scroll: std::collections::HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
+            let scroll: std::collections::HashMap<u64, (f32, f32)> =
+                [(0u64, (0.0, scroll_y))].into();
             redrob_scene_raster::rasterize(
                 &built.frame,
                 &redrob_scene_raster::ResourceStore::new(),

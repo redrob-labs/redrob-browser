@@ -13,8 +13,8 @@
 //! `direct_pixels` can differ by rounding, because they are composited from an
 //! intermediate image there.
 
-use std::cell::{Cell, RefCell};
 use crate::HashMap;
+use std::cell::{Cell, RefCell};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use serde::{Deserialize, Serialize};

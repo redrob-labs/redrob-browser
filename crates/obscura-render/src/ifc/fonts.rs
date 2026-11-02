@@ -682,11 +682,9 @@ fn font_files_under(roots: Vec<PathBuf>) -> Vec<PathBuf> {
 /// spells it and the files that hold its faces. Built once, from the
 /// fonts' own name tables (typographic and legacy family names).
 fn host_font_index() -> &'static crate::HashMap<String, (String, Vec<PathBuf>)> {
-    static INDEX: OnceLock<crate::HashMap<String, (String, Vec<PathBuf>)>> =
-        OnceLock::new();
+    static INDEX: OnceLock<crate::HashMap<String, (String, Vec<PathBuf>)>> = OnceLock::new();
     INDEX.get_or_init(|| {
-        let mut index: crate::HashMap<String, (String, Vec<PathBuf>)> =
-            crate::HashMap::default();
+        let mut index: crate::HashMap<String, (String, Vec<PathBuf>)> = crate::HashMap::default();
         for path in font_files_under(host_font_directories()) {
             let Ok(data) = std::fs::read(&path) else {
                 continue;
