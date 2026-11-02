@@ -6133,15 +6133,17 @@ fn element_local_name(tree: &DomTree, node: NodeId) -> Option<String> {
 /// used left of a sibling combinator additionally reaches following siblings.
 fn add_structural_candidate_scope(
     tree: &DomTree,
-    map: &crate::css::InvalidationMap,
-    state: &str,
+    invalidations: &[&crate::css::StructuralInvalidation],
     candidate: NodeId,
     parent: NodeId,
     dirty: &mut HashSet<NodeId>,
 ) {
-    let invalidations = map
-        .structural_invalidations(state)
-        .into_iter()
+    if invalidations.is_empty() {
+        return;
+    }
+    let invalidations = invalidations
+        .iter()
+        .copied()
         .filter(|invalidation| {
             !invalidation.inside_relational && invalidation.subject_may_match(tree, candidate)
         })
@@ -6184,8 +6186,9 @@ fn add_inserted_structural_scopes(
         return;
     };
     let mut add = |state: &str, candidates: &[NodeId]| {
+        let invalidations = map.structural_invalidations(state);
         for candidate in candidates.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &invalidations, candidate, parent, dirty);
         }
     };
 
@@ -6262,19 +6265,20 @@ fn add_removed_structural_scopes(
 ) {
     let siblings = element_children(tree, parent);
     if let Some(first) = siblings.first().copied() {
-        add_structural_candidate_scope(tree, map, "first-child", first, parent, dirty);
+        add_structural_candidate_scope(tree, &map.structural_invalidations("first-child"), first, parent, dirty);
     }
     if let Some(last) = siblings.last().copied() {
-        add_structural_candidate_scope(tree, map, "last-child", last, parent, dirty);
+        add_structural_candidate_scope(tree, &map.structural_invalidations("last-child"), last, parent, dirty);
     }
     if siblings.len() <= 1 {
         for candidate in siblings.iter().copied() {
-            add_structural_candidate_scope(tree, map, "only-child", candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &map.structural_invalidations("only-child"), candidate, parent, dirty);
         }
     }
     for state in ["nth-child", "nth-last-child"] {
+        let invalidations = map.structural_invalidations(state);
         for candidate in siblings.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &invalidations, candidate, parent, dirty);
         }
     }
 
@@ -6287,19 +6291,20 @@ fn add_removed_structural_scopes(
         .filter(|candidate| element_local_name(tree, *candidate).as_deref() == Some(&local))
         .collect::<Vec<_>>();
     if let Some(first) = same_type.first().copied() {
-        add_structural_candidate_scope(tree, map, "first-of-type", first, parent, dirty);
+        add_structural_candidate_scope(tree, &map.structural_invalidations("first-of-type"), first, parent, dirty);
     }
     if let Some(last) = same_type.last().copied() {
-        add_structural_candidate_scope(tree, map, "last-of-type", last, parent, dirty);
+        add_structural_candidate_scope(tree, &map.structural_invalidations("last-of-type"), last, parent, dirty);
     }
     if same_type.len() <= 1 {
         for candidate in same_type.iter().copied() {
-            add_structural_candidate_scope(tree, map, "only-of-type", candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &map.structural_invalidations("only-of-type"), candidate, parent, dirty);
         }
     }
     for state in ["nth-of-type", "nth-last-of-type"] {
+        let invalidations = map.structural_invalidations(state);
         for candidate in same_type.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &invalidations, candidate, parent, dirty);
         }
     }
 }
@@ -19859,14 +19864,48 @@ fn defer_cyclic_flex_inline_sizes(
 ) -> Vec<DeferredCyclicInlineSize> {
     let mut previous = std::mem::take(memo);
     let incremental = affected.is_some() && !previous.candidates.is_empty();
+    // The previous decisions stay in their map: a kept decision is not moved.
+    // The entries of the nodes written since are set aside (their slots are
+    // found again) and those of nodes without a style are dropped, so the map
+    // holds this layout's candidates only, as one made afresh would.
+    let mut outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
+        if incremental {
+            std::mem::take(&mut previous.outcomes)
+        } else {
+            HashMap::default()
+        };
+    let mut written_outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
+        HashMap::default();
     let candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)> = match affected {
         Some((_, written)) if incremental => {
-            let written: HashSet<NodeId> = written.iter().copied().collect();
+            let mut is_written = vec![false; tree.node_slot_count()];
+            for &id in written {
+                if let Some(seen) = is_written.get_mut(id.index()) {
+                    *seen = true;
+                }
+            }
+            let is_written = |id: NodeId| is_written.get(id.index()).copied().unwrap_or(true);
             let mut candidates: Vec<_> = std::mem::take(&mut previous.candidates)
                 .into_iter()
-                .filter(|(id, _, _)| !written.contains(id) && styles.contains_key(id))
+                .filter(|&(id, slot, _)| {
+                    if is_written(id) {
+                        if let Some(outcome) = outcomes.remove(&(id, slot)) {
+                            written_outcomes.insert((id, slot), outcome);
+                        }
+                        false
+                    } else if !styles.contains_key(&id) {
+                        outcomes.remove(&(id, slot));
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .collect();
-            for &id in &written {
+            let mut found = HashSet::default();
+            for &id in written {
+                if !found.insert(id) {
+                    continue;
+                }
                 if let Some(style) = styles.get(&id) {
                     candidates.extend(deferral_candidate_slots(id, style));
                 }
@@ -19884,12 +19923,16 @@ fn defer_cyclic_flex_inline_sizes(
             .is_none_or(|(affected, _)| affected.get(id.index()).copied().unwrap_or(true))
     };
     let mut deferred = Vec::new();
-    let mut outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
-        HashMap::default();
 
     for &(id, slot, ref source) in &candidates {
         if !affected_at(id) {
-            if let Some(outcome) = previous.outcomes.remove(&(id, slot)) {
+            if let Some(outcome) = outcomes.get(&(id, slot)) {
+                if let Some(entry) = outcome {
+                    deferred.push(entry.clone());
+                }
+                continue;
+            }
+            if let Some(outcome) = written_outcomes.remove(&(id, slot)) {
                 if let Some(entry) = &outcome {
                     deferred.push(entry.clone());
                 }

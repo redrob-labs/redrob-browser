@@ -349,11 +349,16 @@ pub(crate) struct RelationalKeySummary {
 impl RelationalKeySummary {
     pub(crate) fn of(tree: &DomTree, nodes: &[NodeId]) -> Self {
         let quirks = tree.is_quirks();
-        let fold = |value: &str| {
-            if quirks {
-                value.to_ascii_lowercase()
-            } else {
-                value.to_owned()
+        // Insert `value` (lowercased in quirks mode), copying it only when
+        // the set does not hold it yet.
+        let add = |set: &mut crate::HashSet<String>, value: &str, lower: bool| {
+            if lower && value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                let value = value.to_ascii_lowercase();
+                if !set.contains(&value) {
+                    set.insert(value);
+                }
+            } else if !set.contains(value) {
+                set.insert(value.to_owned());
             }
         };
         let mut summary = Self {
@@ -370,22 +375,18 @@ impl RelationalKeySummary {
             let Some(element) = dom_node.as_element() else {
                 continue;
             };
-            summary
-                .locals
-                .insert(element.local.as_ref().to_ascii_lowercase());
+            add(&mut summary.locals, element.local.as_ref(), true);
             if let Some(id) = dom_node.get_attribute("id") {
-                summary.ids.insert(fold(id));
+                add(&mut summary.ids, id, quirks);
             }
             if let Some(classes) = dom_node.get_attribute("class") {
-                summary.classes.extend(classes.split_whitespace().map(fold));
+                for class in classes.split_whitespace() {
+                    add(&mut summary.classes, class, quirks);
+                }
             }
             if let Some(attributes) = dom_node.attrs() {
                 for attribute in attributes {
-                    if !summary.attributes.contains(attribute.name.local.as_ref()) {
-                        summary
-                            .attributes
-                            .insert(attribute.name.local.as_ref().to_owned());
-                    }
+                    add(&mut summary.attributes, attribute.name.local.as_ref(), false);
                 }
             }
         }

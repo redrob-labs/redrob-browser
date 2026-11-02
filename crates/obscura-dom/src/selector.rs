@@ -603,23 +603,38 @@ impl<'a> Element for DomElement<'a> {
                             // A class is an occurrence bounded by ASCII
                             // whitespace (the separators `split_whitespace`
                             // also splits on) or the ends: no split.
-                            let needle = name.0.as_str();
-                            if needle.is_empty() || needle.chars().any(char::is_whitespace) {
+                            let needle = name.0.as_bytes();
+                            if needle.is_empty() {
                                 return false;
                             }
                             if !class_attr.is_ascii() {
-                                return class_attr.split_whitespace().any(|class| class == needle);
+                                return class_attr
+                                    .split_whitespace()
+                                    .any(|class| class.as_bytes() == needle);
                             }
-                            let bytes = class_attr.as_bytes();
                             // The ASCII characters `char::is_whitespace` holds.
+                            // A token holds none of them, so a needle with
+                            // whitespace (or any non-ASCII one) never equals
+                            // one; a scan of the tokens builds no searcher.
                             let separator = |byte: u8| {
                                 matches!(byte, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
                             };
-                            return class_attr.match_indices(needle).any(|(start, _)| {
-                                let end = start + needle.len();
-                                (start == 0 || separator(bytes[start - 1]))
-                                    && (end == bytes.len() || separator(bytes[end]))
-                            });
+                            let bytes = class_attr.as_bytes();
+                            let mut at = 0;
+                            while at < bytes.len() {
+                                if separator(bytes[at]) {
+                                    at += 1;
+                                    continue;
+                                }
+                                let start = at;
+                                while at < bytes.len() && !separator(bytes[at]) {
+                                    at += 1;
+                                }
+                                if &bytes[start..at] == needle {
+                                    return true;
+                                }
+                            }
+                            return false;
                         }
                         let name = name.0.as_bytes();
                         class_attr
