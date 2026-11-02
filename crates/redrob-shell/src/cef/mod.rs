@@ -90,12 +90,46 @@ impl Sink {
         (self.wake)(Some(tab));
     }
 
+    /// Have the window look at the tab behind `browser_id` again (a dialog
+    /// it shows was answered elsewhere).
+    pub fn wake(&self, browser_id: i32) {
+        if let Some(tab) = self.tab_of(browser_id) {
+            (self.wake)(Some(tab));
+        }
+    }
+
     /// Report an event that belongs to no tab (downloads use tab 0).
     #[allow(dead_code)]
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
     }
+}
+
+/// Each tab's CDP target id and its browser, so the relay can reach what
+/// the window holds for a target (its page dialogs).
+fn targets() -> &'static Mutex<HashMap<String, i32>> {
+    static TARGETS: OnceLock<Mutex<HashMap<String, i32>>> = OnceLock::new();
+    TARGETS.get_or_init(Default::default)
+}
+
+/// `target` is the CDP target id of the browser `browser_id`.
+pub fn note_target(target: &str, browser_id: i32) {
+    if let Ok(mut t) = targets().lock() {
+        t.insert(target.to_string(), browser_id);
+    }
+}
+
+/// The browser `browser_id` closed.
+pub fn forget_browser(browser_id: i32) {
+    if let Ok(mut t) = targets().lock() {
+        t.retain(|_, b| *b != browser_id);
+    }
+}
+
+/// The browser behind a CDP target id, for a window tab.
+pub fn browser_of(target: &str) -> Option<i32> {
+    targets().lock().ok()?.get(target).copied()
 }
 
 /// Run a CEF subprocess (renderer, GPU, utility, zygote) when this process

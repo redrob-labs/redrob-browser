@@ -51,10 +51,40 @@ impl Dialog {
     }
 }
 
-/// The dialogs each browser has open, so a reset (the page navigated or
-/// closed) can drop them from the window.
-fn open_dialogs() -> &'static Mutex<HashMap<i32, Vec<Arc<AtomicBool>>>> {
-    static OPEN: OnceLock<Mutex<HashMap<i32, Vec<Arc<AtomicBool>>>>> = OnceLock::new();
+/// A dialog a page has open, as the relay sees it (relay.rs): agents learn
+/// of it with `Page.javascriptDialogOpening` and close it with
+/// `Page.handleJavaScriptDialog`, as in Chrome.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Open {
+    /// `alert`, `confirm`, `prompt` or `beforeunload`, as CDP names them.
+    pub kind: &'static str,
+    pub message: String,
+    pub default_prompt: String,
+    /// The page that asks.
+    pub url: String,
+}
+
+/// CDP's name for a dialog kind.
+pub fn cdp_kind(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Alert => "alert",
+        Kind::Confirm => "confirm",
+        Kind::Prompt { .. } => "prompt",
+        Kind::BeforeUnload { .. } => "beforeunload",
+    }
+}
+
+struct Entry {
+    open: Arc<AtomicBool>,
+    callback: JsdialogCallback,
+    info: Open,
+    sink: Sink,
+}
+
+/// The dialogs each browser has open: a reset (the page navigated or
+/// closed) drops them from the window, and agents may answer them.
+fn open_dialogs() -> &'static Mutex<HashMap<i32, Vec<Entry>>> {
+    static OPEN: OnceLock<Mutex<HashMap<i32, Vec<Entry>>>> = OnceLock::new();
     OPEN.get_or_init(Default::default)
 }
 
@@ -67,10 +97,44 @@ fn close_all(browser: Option<&mut Browser>) {
         .ok()
         .and_then(|mut o| o.remove(&b.identifier()))
     {
-        for open in list {
-            open.store(false, Ordering::Relaxed);
+        for e in list {
+            e.open.store(false, Ordering::Relaxed);
+            e.sink.wake(b.identifier());
         }
     }
+}
+
+/// The dialog `browser_id`'s page has open, if any.
+pub fn open_on(browser_id: i32) -> Option<Open> {
+    let o = open_dialogs().lock().ok()?;
+    o.get(&browser_id)?
+        .iter()
+        .find(|e| e.open.load(Ordering::Relaxed))
+        .map(|e| e.info.clone())
+}
+
+/// Answer the dialog `browser_id`'s page has open, as the person would in
+/// the window, which drops it. False when none is open.
+pub fn answer_on(browser_id: i32, ok: bool, text: Option<&str>) -> bool {
+    let Ok(o) = open_dialogs().lock() else {
+        return false;
+    };
+    let Some(e) = o
+        .get(&browser_id)
+        .and_then(|l| l.iter().find(|e| e.open.load(Ordering::Relaxed)))
+    else {
+        return false;
+    };
+    if !e.open.swap(false, Ordering::Relaxed) {
+        return false;
+    }
+    // Without a text, a prompt keeps what it started with, as Chrome's
+    // Page.handleJavaScriptDialog does.
+    let text = text.unwrap_or(&e.info.default_prompt).to_string();
+    let callback = e.callback.clone();
+    super::on_ui(move || callback.cont(ok as i32, Some(&CefString::from(text.as_str()))));
+    e.sink.wake(browser_id);
+    true
 }
 
 /// The title Chrome gives a dialog: the page's host, or the whole origin for
@@ -166,8 +230,25 @@ impl Dialogs {
             return 1;
         }
         let open = Arc::new(AtomicBool::new(true));
+        let info = Open {
+            kind: cdp_kind(&kind),
+            message: message.clone(),
+            default_prompt: match &kind {
+                Kind::Prompt { default_text } => default_text.clone(),
+                _ => String::new(),
+            },
+            url: browser
+                .main_frame()
+                .map(|f| super::text(&f.url()))
+                .unwrap_or_default(),
+        };
         if let Ok(mut o) = open_dialogs().lock() {
-            o.entry(id).or_default().push(open.clone());
+            o.entry(id).or_default().push(Entry {
+                open: open.clone(),
+                callback: callback.clone(),
+                info,
+                sink: self.sink.clone(),
+            });
         }
         self.sink.send(
             id,

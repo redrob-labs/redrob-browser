@@ -314,6 +314,7 @@ wrap_life_span_handler! {
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser {
                 self.ctx.sink.unbind(b.identifier());
+                super::forget_browser(b.identifier());
             }
             set_place(self.ctx.tab, None);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));

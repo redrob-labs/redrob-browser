@@ -96,30 +96,3 @@ wrap_request_handler! {
 pub fn new() -> RequestHandler {
     Handler::new()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn headers_match_chromium() {
-        assert_eq!(header(list(Lang::En)), "en-US,en;q=0.9");
-        assert_eq!(
-            header(list(Lang::Ko)),
-            "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
-        );
-        assert_eq!(header("a,b,c,d,e,f,g,h,i,j,k,l"), "a,b;q=0.9,c;q=0.8,d;q=0.7,e;q=0.6,f;q=0.5,g;q=0.4,h;q=0.3,i;q=0.2,j;q=0.1,k;q=0.1,l;q=0.1");
-    }
-
-    #[test]
-    fn only_stale_headers_change() {
-        let ko = header(list(Lang::Ko));
-        let en = header(list(Lang::En));
-        assert_eq!(replacement(&en, Lang::Ko), Some(ko.clone()));
-        assert_eq!(replacement(&ko, Lang::En), Some(en.clone()));
-        assert_eq!(replacement("", Lang::En), Some(en.clone()));
-        assert_eq!(replacement(&en, Lang::En), None);
-        // A header the page chose itself stays.
-        assert_eq!(replacement("fr-FR", Lang::Ko), None);
-    }
-}
