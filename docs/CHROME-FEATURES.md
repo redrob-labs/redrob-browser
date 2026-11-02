@@ -13,7 +13,10 @@ pages back to Alloy style.
 `cef_window_info_t` documentation (CEF 156): "Alloy style will always be
 used if |windowless_rendering_enabled| is true or if |parent_view| is
 provided." Chrome style on macOS needs a window CEF creates itself (its
-own NSWindow, or a Views `CefWindow`), which cannot sit inside our window.
+own NSWindow, or a Views `CefWindow`), which cannot sit inside our window's
+view; `REDROB_MAC_HOSTED=1` keeps such a window over the page area as a
+child window instead (docs/CEF.md "Pages as Chrome windows"; then the
+Linux / Windows column applies, unverified on a Mac).
 The macOS column says what Alloy gives; nothing in it was run on a Mac
 (no macOS hardware on the build host; the code is checked with the
 aarch64-apple-darwin target only).
@@ -34,7 +37,7 @@ but needs hardware or an account the host does not have.
 | Extensions: install | Works: Chrome Web Store "Add to Chrome" shows Chrome's install dialog; Dark Reader and uBlock Origin Lite installed into the profile | CEF limit: Alloy runs no extensions |
 | Extensions: toolbar icons, menu, pinning | Works: the plug button lists every installed extension with Pin / Unpin; pins are Chrome's own `extensions.pinned_extensions`, so chrome://extensions agrees; pinned icons sit after the address field | Nothing to show (no extensions) |
 | Extensions: popups | Works: a click opens the action's popup page under its icon, sized to its content (Dark Reader 276x580). Dark Reader's popup names the page (localhost:8471) and its Off button turns the page light (mean 0.20 -> 0.92). Closes on a click elsewhere, a click in the page, or another tab | Nothing to show |
-| Extensions: actions without a popup | Works, as in Chrome on Linux: Chrome runs the action (its hidden toolbar holds the actions, docs/CEF.md "Pages as Chrome windows"), granting `activeTab` and running `onClicked`. Measured: an `activeTab`-only extension read the tab's title on click; an `activeTab` + `scripting` one changed the page title with `scripting.executeScript`. An action with a popup gets `activeTab` too (its popup read the tab's title). Windows (child pages): `onClicked` runs in the extension's worker without `activeTab`; `Extensions.triggerAction` would crash Chromium there (no `ExtensionsContainer`) | Nothing to show |
+| Extensions: actions without a popup | Works, as in Chrome on Linux: Chrome runs the action (its hidden toolbar holds the actions, docs/CEF.md "Pages as Chrome windows"), granting `activeTab` and running `onClicked`. Measured: an `activeTab`-only extension read the tab's title on click; an `activeTab` + `scripting` one changed the page title with `scripting.executeScript`. An action with a popup gets `activeTab` too (its popup read the tab's title). Windows: pages are Chrome windows there too (cef/host.rs), so the same path applies; not yet run on Windows. With `REDROB_CHILD_PAGES=1` (child pages) `onClicked` runs without `activeTab`, and `Extensions.triggerAction` would crash Chromium (no `ExtensionsContainer`) | Nothing to show |
 | Extensions: badges | Works: `chrome.action.setBadgeText`, `setBadgeBackgroundColor` and `setBadgeTextColor` are drawn on the pinned icon as Chrome draws them, per tab and within a second of the call: a test extension's default "7" on red (14x14 px, #d00000) shows on every tab; its click sets "T1" green with yellow text on that tab only (the other tabs keep "7"), "T2" redraws 68 of the badge's 196 px; a reload clears the tab's own badge back to "7", as Chrome's `getBadgeText` then says. Not seen: the blocked-request count Chrome itself computes for `declarativeNetRequest` (`displayActionCountAsBadgeText`) | Nothing to show |
 | chrome://extensions | Works: lists the installed extensions (3 items with an unpacked one) | Not available in Alloy |
 | Picture in picture | Works: a video's PiP window "Picture in picture" 331x186 | CEF limit: Alloy has no PiP window |
