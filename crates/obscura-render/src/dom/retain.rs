@@ -122,6 +122,72 @@ struct Frame {
     children: Vec<NodeId>,
 }
 
+/// Elements whose style has a property a few whole-tree passes look for,
+/// kept up to date from the styles each layout writes, so those passes visit
+/// these elements instead of every style. An entry can be stale (the
+/// element's style was dropped with its subtree): users check the style.
+#[derive(Default)]
+pub(crate) struct StyleIndex {
+    /// Up to date with the styles of the layout the index was kept from.
+    valid: bool,
+    /// Percentage or `calc()` padding, own or on a `::before`/`::after`.
+    pub(super) percent_padding: crate::HashSet<NodeId>,
+    /// A `container-type` or `container-name`.
+    pub(crate) containers: crate::HashSet<NodeId>,
+}
+
+impl StyleIndex {
+    pub(super) fn has_percent_padding(style: &crate::LayoutStyle) -> bool {
+        style.padding_percent.iter().any(Option::is_some)
+            || style.padding_calc.iter().any(Option::is_some)
+            || style
+                .before_pseudo
+                .as_deref()
+                .is_some_and(|pseudo| pseudo.padding_percent.iter().any(Option::is_some))
+            || style
+                .after_pseudo
+                .as_deref()
+                .is_some_and(|pseudo| pseudo.padding_percent.iter().any(Option::is_some))
+    }
+
+    pub(crate) fn is_container(style: &crate::LayoutStyle) -> bool {
+        style.container_type != crate::ContainerType::Normal || !style.container_names.is_empty()
+    }
+
+    fn set(&mut self, id: NodeId, style: Option<&crate::LayoutStyle>) {
+        let toggle = |set: &mut crate::HashSet<NodeId>, on: bool| {
+            if on {
+                set.insert(id);
+            } else {
+                set.remove(&id);
+            }
+        };
+        toggle(
+            &mut self.percent_padding,
+            style.is_some_and(Self::has_percent_padding),
+        );
+        toggle(&mut self.containers, style.is_some_and(Self::is_container));
+    }
+
+    /// Bring the index up to date: the styles of `ids` were written, or,
+    /// when it is not valid, every style may have changed.
+    pub(super) fn update(&mut self, ids: &[NodeId], styles: &HashMap<NodeId, crate::LayoutStyle>) {
+        if !self.valid {
+            *self = Self {
+                valid: true,
+                ..Self::default()
+            };
+            for (&id, style) in styles {
+                self.set(id, Some(style));
+            }
+            return;
+        }
+        for &id in ids {
+            self.set(id, styles.get(&id));
+        }
+    }
+}
+
 /// The slots `defer_cyclic_flex_inline_sizes` rewrote before a build, with
 /// the value written and whether the source was a plain percentage: those
 /// writes are not noted by the style map (the layout undoes them), so a
@@ -195,6 +261,13 @@ pub(super) struct BuildReuse {
     /// their styles at that build (`None`: unknown, all count as changed).
     pending: Vec<NodeId>,
     pending_before: Option<super::stylemap::BeforeWrites>,
+    /// Elements whose children or text changed (see `BuildDamage::nodes`).
+    damage_nodes: Vec<NodeId>,
+    /// What deferred flex percentages the build saw decided (see
+    /// `super::DeferralMemo`).
+    pub(super) deferral_memo: super::DeferralMemo,
+    /// The elements with properties some passes look for.
+    pub(super) index: StyleIndex,
     pub(super) kept: usize,
     pub(super) built: usize,
     /// Why boxes were not kept (debug counts).
@@ -223,6 +296,9 @@ impl BuildReuse {
             deferrals: Deferrals::default(),
             pending: Vec::new(),
             pending_before: None,
+            damage_nodes: Vec::new(),
+            deferral_memo: super::DeferralMemo::default(),
+            index: StyleIndex::default(),
             kept: 0,
             built: 0,
             misses: [0; 8],
@@ -251,6 +327,67 @@ impl BuildReuse {
     /// `id`'s box must be built again (its children or text changed).
     pub(super) fn box_changed(&mut self, tree: &DomTree, id: NodeId) {
         self.mark_subtree(tree, id);
+    }
+
+    /// By node index: the node, an ancestor of it or one of its children had
+    /// its style written (`written`, or after the previous build) or its
+    /// children or text changed; `None` when the previous layout's decisions
+    /// cannot be reused. For `super::defer_cyclic_flex_inline_sizes`.
+    pub(super) fn deferral_affected(
+        &self,
+        tree: &DomTree,
+        styles: &super::StyleMap,
+    ) -> Option<(Vec<bool>, Vec<NodeId>)> {
+        if !self.reuse {
+            return None;
+        }
+        // Only writes that changed a style count (see `mark_style_changes`).
+        let pending_before = self.pending_before.as_ref()?;
+        let mut written: Vec<NodeId> = styles
+            .changed_nodes()?
+            .iter()
+            .chain(&self.pending)
+            .copied()
+            .collect();
+        written.sort_unstable_by_key(|id| id.index());
+        written.dedup();
+        written.retain(|id| match pending_before.get(id) {
+            Some(old) => old.as_ref() != styles.get(id),
+            None => !styles.is_as_before(id),
+        });
+        let mut affected = vec![false; tree.node_slot_count()];
+        // Subtrees already walked.
+        let mut walked = vec![false; tree.node_slot_count()];
+        let mut stack = Vec::new();
+        for &id in &written {
+            if let Some(parent) = rendered_parent(tree, id) {
+                if let Some(slot) = affected.get_mut(parent.index()) {
+                    *slot = true;
+                }
+            }
+            stack.push(id);
+            while let Some(node) = stack.pop() {
+                match walked.get_mut(node.index()) {
+                    Some(slot) if !*slot => *slot = true,
+                    _ => continue,
+                }
+                if let Some(slot) = affected.get_mut(node.index()) {
+                    *slot = true;
+                }
+                stack.extend(super::rendered_children_ref(tree, node).iter().copied());
+            }
+        }
+        for &id in &self.damage_nodes {
+            if let Some(slot) = affected.get_mut(id.index()) {
+                *slot = true;
+            }
+        }
+        Some((affected, written))
+    }
+
+    /// Whether `index` is up to date with this layout's styles.
+    pub(super) fn index_valid(&self) -> bool {
+        self.index.valid
     }
 
     fn style_dirty(&self, id: NodeId) -> bool {
@@ -567,6 +704,8 @@ pub(crate) struct RetainedLayoutTree {
     deferrals: Deferrals,
     /// The styles of `pending` at the build (see `BuildReuse::pending`).
     pending_before: Option<super::stylemap::BeforeWrites>,
+    deferral_memo: super::DeferralMemo,
+    index: StyleIndex,
     /// What the tree was built for.
     pub(super) viewport: (f32, f32),
     pub(super) needs_emoji_font: bool,
@@ -644,6 +783,9 @@ impl RetainedLayoutTree {
         reuse.deferrals = std::mem::take(&mut self.deferrals);
         reuse.pending = std::mem::take(&mut self.pending);
         reuse.pending_before = self.pending_before.take();
+        reuse.damage_nodes = damage.nodes.clone();
+        reuse.deferral_memo = std::mem::take(&mut self.deferral_memo);
+        reuse.index = std::mem::take(&mut self.index);
         if crate::prof::enabled() {
             eprintln!(
                 "[timing] retained-tree damage nodes={} context={} subtrees={} pending={}",
@@ -712,6 +854,8 @@ pub(super) fn mark_style_changes(
                 eprintln!("[timing] retained-tree full-rebuild reason=all-styles");
             }
             reuse.reuse = false;
+            reuse.index.valid = false;
+            reuse.index.update(&[], styles);
             return;
         }
         super::stylemap::StyleChanges::Nodes(nodes) => nodes,
@@ -722,6 +866,10 @@ pub(super) fn mark_style_changes(
     written.append(&mut reuse.pending);
     written.sort_unstable_by_key(|id| id.index());
     written.dedup();
+    if !reuse.reuse {
+        reuse.index.valid = false;
+    }
+    reuse.index.update(&written, styles);
     let pending_before = reuse.pending_before.take();
     let mut changed = 0;
     for id in written {
@@ -812,6 +960,7 @@ pub(super) fn retain(
     id_map: HashMap<taffy::NodeId, NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
     items: &mut IfcRegistry,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
     pending: Vec<NodeId>,
     pending_before: Option<super::stylemap::BeforeWrites>,
     viewport: (f32, f32),
@@ -824,6 +973,8 @@ pub(super) fn retain(
         }
         return None;
     }
+    let mut reuse = reuse;
+    reuse.index.update(&pending, styles);
     let tables = BuildTables::take(items);
     let registry = IfcRegistry {
         table_cols: std::mem::take(&mut items.table_cols),
@@ -844,6 +995,8 @@ pub(super) fn retain(
         tables,
         records: reuse.records,
         deferrals: reuse.deferrals,
+        deferral_memo: reuse.deferral_memo,
+        index: reuse.index,
         pending,
         pending_before,
         viewport,

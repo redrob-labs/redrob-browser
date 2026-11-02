@@ -351,6 +351,9 @@ pub struct DomLayout {
     /// The box tree, kept for the next layout of the document (see
     /// `retain`). It names the IFCs in `ifc` and the leaves in `text_engine`.
     pub(crate) layout_tree: Option<Box<retain::RetainedLayoutTree>>,
+    /// Every element whose style has a `container-type` or `container-name`
+    /// (and maybe a few whose style no longer does), when known.
+    pub(crate) container_nodes: Option<Vec<NodeId>>,
 }
 
 /// Whether `OBSCURA_LAYOUT_VERIFY` asks every incremental layout to be checked
@@ -2644,19 +2647,22 @@ fn sync_resolved_percentage_padding(
     id_map: &HashMap<taffy::NodeId, NodeId>,
     generated: &[GeneratedBoxBuild],
     styles: &mut StyleMap,
+    // The elements with percentage padding (`retain::StyleIndex`) and their
+    // boxes: only those are visited.
+    indexed: Option<(&HashSet<NodeId>, &HashMap<NodeId, taffy::NodeId>)>,
 ) {
-    let has_percentage_padding = styles.values().any(|style| {
-        style.padding_percent.iter().any(Option::is_some)
-            || style.padding_calc.iter().any(Option::is_some)
-            || style
-                .before_pseudo
-                .as_deref()
-                .is_some_and(|pseudo| pseudo.padding_percent.iter().any(Option::is_some))
-            || style
-                .after_pseudo
-                .as_deref()
-                .is_some_and(|pseudo| pseudo.padding_percent.iter().any(Option::is_some))
-    });
+    if let Some((candidates, by_dom)) = indexed {
+        sync_indexed_percentage_padding(
+            taffy_tree,
+            initial_containing_block_width,
+            generated,
+            styles,
+            candidates,
+            by_dom,
+        );
+        return;
+    }
+    let has_percentage_padding = styles.values().any(retain::StyleIndex::has_percent_padding);
     if !has_percentage_padding {
         return;
     }
@@ -2764,6 +2770,111 @@ fn sync_resolved_percentage_padding(
         &generated,
         styles,
     );
+}
+
+/// The resolved padding of `style` in a containing block `width` wide.
+fn synced_percentage_padding(style: &crate::LayoutStyle, width: f32) -> crate::Edges {
+    let mut padding = style.padding;
+    for (index, percent) in style.padding_percent.iter().enumerate() {
+        let Some(percent) = percent else {
+            continue;
+        };
+        let value = percent * width;
+        match index {
+            0 => padding.top = value,
+            1 => padding.right = value,
+            2 => padding.bottom = value,
+            _ => padding.left = value,
+        }
+    }
+    for (index, calc) in style.padding_calc.iter().enumerate() {
+        let Some(calc) = calc else {
+            continue;
+        };
+        let px = crate::style::resolve_grid_calc(std::sync::Arc::as_ptr(calc).cast(), width);
+        match index {
+            0 => padding.top = px,
+            1 => padding.right = px,
+            2 => padding.bottom = px,
+            _ => padding.left = px,
+        }
+    }
+    padding
+}
+
+/// `sync_resolved_percentage_padding` for the indexed elements only: each
+/// box's containing block is its parent box's content box.
+fn sync_indexed_percentage_padding(
+    taffy_tree: &TaffyTree<usize>,
+    initial_containing_block_width: f32,
+    generated: &[GeneratedBoxBuild],
+    styles: &mut StyleMap,
+    candidates: &HashSet<NodeId>,
+    by_dom: &HashMap<NodeId, taffy::NodeId>,
+) {
+    let containing_width = |node: taffy::NodeId| {
+        taffy_tree
+            .parent(node)
+            .and_then(|parent| taffy_tree.layout(parent).ok())
+            .map_or(initial_containing_block_width, |layout| {
+                layout.content_box_width().max(0.0)
+            })
+    };
+    let mut own = Vec::new();
+    for &id in candidates {
+        let Some(style) = styles.get(&id) else {
+            continue;
+        };
+        if !retain::StyleIndex::has_percent_padding(style) {
+            continue;
+        }
+        let Some(&node) = by_dom.get(&id) else {
+            continue;
+        };
+        if taffy_tree.layout(node).is_err() {
+            continue;
+        }
+        let padding = synced_percentage_padding(style, containing_width(node));
+        if padding != style.padding {
+            own.push((id, padding));
+        }
+    }
+    for (id, padding) in own {
+        if let Some(style) = styles.get_mut(&id) {
+            style.padding = padding;
+        }
+    }
+    let mut pseudos = Vec::new();
+    for generated in generated {
+        if !candidates.contains(&generated.host) || taffy_tree.layout(generated.node).is_err() {
+            continue;
+        }
+        let Some(host) = styles.get(&generated.host) else {
+            continue;
+        };
+        let pseudo = match generated.kind {
+            GeneratedBoxKind::Before => host.before_pseudo.as_deref(),
+            GeneratedBoxKind::After => host.after_pseudo.as_deref(),
+        };
+        let Some(pseudo) = pseudo else {
+            continue;
+        };
+        let padding = synced_percentage_padding(pseudo, containing_width(generated.node));
+        if padding != pseudo.padding {
+            pseudos.push((generated.host, generated.kind, padding));
+        }
+    }
+    for (host, kind, padding) in pseudos {
+        if let Some(style) = styles.get_mut(&host) {
+            let pseudo = match kind {
+                GeneratedBoxKind::Before => style.before_pseudo.as_deref_mut(),
+                GeneratedBoxKind::After => style.after_pseudo.as_deref_mut(),
+            };
+            if let Some(pseudo) = pseudo {
+                pseudo.padding = padding;
+            }
+        }
+    }
 }
 
 /// Taffy's flex stand-in for an inline formatting context can lose the
@@ -9484,24 +9595,26 @@ fn layout_dom_once(
         // font; author CSS widths/heights remain authoritative. Without this
         // replaced-control sizing, inputs/selects are empty auto-sized leaves
         // (0px tall and often stretched to their container).
-        let native_control_grid_stretch: HashMap<NodeId, (bool, bool)> = styles
-            .iter()
-            .filter_map(|(&id, style)| {
-                let node = tree.borrow_node(id)?;
-                let element = node.as_element()?;
-                matches!(element.local.as_ref(), "input" | "select" | "textarea").then(|| {
-                    (
-                        id,
+        let native_control_grid_stretch: HashMap<NodeId, (bool, bool)> =
+            rendered_nodes_of_kind(tree, ElementKind::CONTROL)
+                .into_iter()
+                .filter_map(|id| {
+                    let style = styles.get(&id)?;
+                    let node = tree.borrow_node(id)?;
+                    let element = node.as_element()?;
+                    matches!(element.local.as_ref(), "input" | "select" | "textarea").then(|| {
                         (
-                            container_auto_inline_size(tree, id, style, &styles)
-                                == ContainerAutoInlineSize::StretchedGridItem,
-                            container_auto_block_size(tree, id, style, &styles)
-                                == ContainerAutoBlockSize::StretchedGridItem,
-                        ),
-                    )
+                            id,
+                            (
+                                container_auto_inline_size(tree, id, style, &styles)
+                                    == ContainerAutoInlineSize::StretchedGridItem,
+                                container_auto_block_size(tree, id, style, &styles)
+                                    == ContainerAutoBlockSize::StretchedGridItem,
+                            ),
+                        )
+                    })
                 })
-            })
-            .collect();
+                .collect();
         let control_ids: Vec<NodeId> = native_control_grid_stretch.keys().copied().collect();
         // Each control's style is written back only when it changed.
         for id in control_ids {
@@ -10013,8 +10126,29 @@ fn layout_dom_once(
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes r.intrinsic {}", styles.changed_len());
         }
-        let deferred_cyclic_inline_sizes =
-            defer_cyclic_flex_inline_sizes(tree, &mut styles, root_fs, vw, vh);
+        // A retained build decides again only for the slots whose inputs
+        // changed (see `DeferralMemo`).
+        let (mut deferral_memo, deferral_affected) = match ifc_items.reuse.as_mut() {
+            Some(reuse) => (
+                std::mem::take(&mut reuse.deferral_memo),
+                reuse.deferral_affected(tree, &styles),
+            ),
+            None => (DeferralMemo::default(), None),
+        };
+        let deferred_cyclic_inline_sizes = defer_cyclic_flex_inline_sizes(
+            tree,
+            &mut styles,
+            root_fs,
+            vw,
+            vh,
+            &mut deferral_memo,
+            deferral_affected
+                .as_ref()
+                .map(|(affected, written)| (affected.as_slice(), written.as_slice())),
+        );
+        if let Some(reuse) = ifc_items.reuse.as_mut() {
+            reuse.deferral_memo = deferral_memo;
+        }
 
         phase_marks.push(("resolve", crate::prof::mark()));
         styles.set_pass("after resolve");
@@ -11219,6 +11353,11 @@ fn layout_dom_once(
                 &id_map,
                 &ifc_items.generated,
                 &mut styles,
+                ifc_items
+                    .reuse
+                    .as_ref()
+                    .filter(|reuse| reuse.index_valid())
+                    .map(|reuse| (&reuse.index.percent_padding, &taffy_by_dom)),
             );
             let generated_nodes: HashMap<taffy::NodeId, usize> = ifc_items
                 .generated
@@ -11661,6 +11800,18 @@ fn layout_dom_once(
 
     // Keep the box tree for the next layout of this document, with the
     // styles written after the build: their boxes are built again then.
+    let container_nodes = ifc_items
+        .reuse
+        .as_mut()
+        .filter(|reuse| reuse.index_valid())
+        .and_then(|reuse| {
+            if let Some(pending) = styles.changed_nodes() {
+                reuse.index.update(pending, &styles);
+                Some(reuse.index.containers.iter().copied().collect())
+            } else {
+                None
+            }
+        });
     let layout_tree = kept_tree
         .zip(root)
         .and_then(|((taffy, taffy_root, by_dom), root_id)| {
@@ -11677,6 +11828,7 @@ fn layout_dom_once(
                 id_map,
                 by_dom,
                 &mut ifc_items,
+                &styles,
                 pending,
                 pending_before,
                 viewport,
@@ -11711,6 +11863,7 @@ fn layout_dom_once(
             counters_used,
             emoji,
             layout_tree,
+            container_nodes,
         },
         signature,
         query_stats,
@@ -11888,7 +12041,17 @@ fn container_snapshot(tree: &DomTree, layout: &DomLayout) -> crate::css::Contain
         root_font_size,
         ..Default::default()
     };
-    for (&id, style) in &layout.styles {
+    let indexed = layout.container_nodes.as_ref().map(|nodes| {
+        nodes
+            .iter()
+            .filter_map(|id| layout.styles.get_key_value(id))
+            .collect::<Vec<_>>()
+    });
+    let styles: Box<dyn Iterator<Item = (&NodeId, &crate::LayoutStyle)>> = match indexed {
+        Some(indexed) => Box::new(indexed.into_iter()),
+        None => Box::new(layout.styles.iter()),
+    };
+    for (&id, style) in styles {
         let available_type = if style.display_contents {
             crate::ContainerType::Normal
         } else {
@@ -12006,7 +12169,7 @@ fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut StyleMap) {
     let is_tag = |id: NodeId, tags: &[&str]| -> bool {
         with_local_name(tree, id, |local| tags.contains(&local)).unwrap_or(false)
     };
-    for tr in rendered_descendants(tree, tree.document()) {
+    for tr in rendered_nodes_of_kind(tree, ElementKind::ROW_OR_SECTION) {
         if !is_tag(tr, &["tr"]) {
             continue;
         }
@@ -12065,7 +12228,7 @@ fn propagate_border_spacing(tree: &DomTree, styles: &mut StyleMap) {
         }
     }
 
-    for id in rendered_descendants(tree, tree.document()) {
+    for id in rendered_nodes_of_kind(tree, ElementKind::TABLE) {
         if !is_element(tree, id, "table") {
             continue;
         }
@@ -14579,6 +14742,8 @@ impl ElementKind {
     /// `td`, `th`.
     pub(crate) const CELL: u8 = 8;
     pub(crate) const TABLE: u8 = 16;
+    /// `input`, `select`, `textarea`.
+    pub(crate) const CONTROL: u8 = 32;
     const UNKNOWN: u8 = 0x80;
 
     fn of(tree: &DomTree, id: NodeId) -> u8 {
@@ -14588,10 +14753,29 @@ impl ElementKind {
             "tr" | "tbody" | "thead" | "tfoot" => Self::ROW_OR_SECTION,
             "td" | "th" => Self::CELL,
             "table" => Self::TABLE,
+            "input" | "select" | "textarea" => Self::CONTROL,
             _ => 0,
         })
         .unwrap_or(0)
     }
+}
+
+/// The rendered nodes of `tree`'s current state that have one of the
+/// `ElementKind` bits `kinds`, in preorder.
+pub(crate) fn rendered_nodes_of_kind(tree: &DomTree, kinds: u8) -> Vec<NodeId> {
+    let flat = current_flat_tree(tree);
+    if flat.kinds_present & kinds == 0 {
+        return Vec::new();
+    }
+    flat.walk
+        .iter()
+        .copied()
+        .filter(|id| {
+            flat.kinds
+                .get(id.index())
+                .is_some_and(|kind| kind & kinds != 0)
+        })
+        .collect()
 }
 
 /// The `ElementKind` bits of some node on the rendered tree of `tree`'s
@@ -18486,61 +18670,166 @@ fn definite_row_flex_intrinsic_width(
 /// Keep the non-percentage part for the intrinsic pass (percentage basis zero),
 /// and remember enough information to resolve the complete expression after
 /// flex sizing has selected the item's used width.
+/// What `defer_cyclic_flex_inline_sizes` decided for each candidate slot,
+/// kept with a retained box tree so the next layout decides again only for
+/// slots whose inputs (their node's style, its ancestors' and children's,
+/// its rendered children) changed.
+#[derive(Clone, Default)]
+pub(crate) struct DeferralMemo {
+    candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)>,
+    outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>>,
+}
+
+/// The slots of `style` whose inline size can be a cyclic percentage.
+fn deferral_candidate_slots(
+    id: NodeId,
+    style: &crate::LayoutStyle,
+) -> impl Iterator<Item = (NodeId, usize, DeferredCyclicInlineSource)> + '_ {
+    [0usize, 2, 4]
+        .into_iter()
+        .filter(|_| !style.ignores_used_box_sizes())
+        .filter_map(move |slot| {
+            let functional = style.size_expressions[slot]
+                .as_ref()
+                .filter(|expression| expression.contains('%'))
+                .filter(|_| slot != 4 || !style.has_replaced_sizing)
+                .cloned()
+                .map(DeferredCyclicInlineSource::Expression);
+            let dimension = match slot {
+                0 => style.width,
+                2 => style.min_width,
+                4 => style.max_width,
+                _ => unreachable!(),
+            };
+            functional
+                .or(match dimension {
+                    crate::Dimension::Percent(percent)
+                        if slot != 4 || !style.has_replaced_sizing =>
+                    {
+                        Some(DeferredCyclicInlineSource::Percent(percent))
+                    }
+                    _ => None,
+                })
+                .map(|source| (id, slot, source))
+        })
+}
+
+/// A box with a definite width ends a deferral chain.
+fn is_definite_width_box(style: &crate::LayoutStyle) -> bool {
+    matches!(style.width, crate::Dimension::Px(_))
+        && style.size_expressions[0]
+            .as_deref()
+            .is_none_or(|expression| !expression.contains('%'))
+        && !style.display_contents
+        && (style.display != crate::Display::Inline
+            || style.is_inline_block
+            || style.is_replaced_box)
+}
+
+/// During a flex item's intrinsic-size calculation, percentages in descendant
+/// inline sizes are cyclic: their containing block does not have its used
+/// width yet. Resolving those percentages against the width inherited from a
+/// more distant ancestor turns the temporary value into a permanent
+/// min-content floor. Gecko instead measures the flex item first, then reflows
+/// its descendants under the item's final main size.
+///
+/// Keep the non-percentage part for the intrinsic pass (percentage basis zero),
+/// and remember enough information to resolve the complete expression after
+/// flex sizing has selected the item's used width.
+///
+/// With `memo` (the previous layout's decisions) and `affected` (by node
+/// index: the node, an ancestor or a child changed), a slot whose node is not
+/// affected keeps its previous decision; `written` are the nodes whose
+/// styles were written since, whose candidate slots are found again. The
+/// decisions made are left in `memo` for the next layout.
 fn defer_cyclic_flex_inline_sizes(
     tree: &DomTree,
     styles: &mut StyleMap,
     root_fs: f32,
     vw: f32,
     vh: f32,
+    memo: &mut DeferralMemo,
+    affected: Option<(&[bool], &[NodeId])>,
 ) -> Vec<DeferredCyclicInlineSize> {
-    let candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)> = styles
-        .iter()
-        .filter(|(_, style)| !style.ignores_used_box_sizes())
-        .flat_map(|(&id, style)| {
-            [0usize, 2, 4].into_iter().filter_map(move |slot| {
-                let functional = style.size_expressions[slot]
-                    .as_ref()
-                    .filter(|expression| expression.contains('%'))
-                    .filter(|_| slot != 4 || !style.has_replaced_sizing)
-                    .cloned()
-                    .map(DeferredCyclicInlineSource::Expression);
-                let dimension = match slot {
-                    0 => style.width,
-                    2 => style.min_width,
-                    4 => style.max_width,
-                    _ => unreachable!(),
-                };
-                functional
-                    .or(match dimension {
-                        crate::Dimension::Percent(percent)
-                            if slot != 4 || !style.has_replaced_sizing =>
-                        {
-                            Some(DeferredCyclicInlineSource::Percent(percent))
-                        }
-                        _ => None,
-                    })
-                    .map(|source| (id, slot, source))
-            })
-        })
-        .collect();
+    let previous = std::mem::take(memo);
+    let incremental = affected.is_some() && !previous.candidates.is_empty();
+    let candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)> = match affected {
+        Some((_, written)) if incremental => {
+            let written: HashSet<NodeId> = written.iter().copied().collect();
+            let mut candidates: Vec<_> = previous
+                .candidates
+                .iter()
+                .filter(|(id, _, _)| !written.contains(id) && styles.contains_key(id))
+                .cloned()
+                .collect();
+            for &id in &written {
+                if let Some(style) = styles.get(&id) {
+                    candidates.extend(deferral_candidate_slots(id, style));
+                }
+            }
+            candidates
+        }
+        _ => styles
+            .iter()
+            .flat_map(|(&id, style)| deferral_candidate_slots(id, style))
+            .collect(),
+    };
+    let affected_at = |id: NodeId| {
+        affected
+            .filter(|_| incremental)
+            .is_none_or(|(affected, _)| affected.get(id.index()).copied().unwrap_or(true))
+    };
     let mut deferred = Vec::new();
-    // Read before the loop below rewrites deferred widths to pixels.
-    let definite_width_boxes: HashSet<NodeId> = styles
-        .iter()
-        .filter(|(_, style)| {
-            matches!(style.width, crate::Dimension::Px(_))
-                && style.size_expressions[0]
-                    .as_deref()
-                    .is_none_or(|expression| !expression.contains('%'))
-                && !style.display_contents
-                && (style.display != crate::Display::Inline
-                    || style.is_inline_block
-                    || style.is_replaced_box)
-        })
-        .map(|(&id, _)| id)
-        .collect();
+    let mut outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
+        HashMap::default();
+    // Read before the loop below rewrites deferred widths to pixels. A
+    // retained layout reads them on the chains it walks, as they were before
+    // the rewrite (only a deferred width slot turns a box definite).
+    let definite_width_boxes: Option<HashSet<NodeId>> = (!incremental).then(|| {
+        styles
+            .iter()
+            .filter(|(_, style)| is_definite_width_box(style))
+            .map(|(&id, _)| id)
+            .collect()
+    });
+    let mut rewritten_widths: HashSet<NodeId> = HashSet::default();
+    let memo_candidates = candidates.clone();
 
     for (id, slot, source) in candidates {
+        if !affected_at(id) {
+            if let Some(outcome) = previous.outcomes.get(&(id, slot)) {
+                if let Some(entry) = outcome {
+                    if let Some(style) = styles.get_mut_untracked(&id) {
+                        match slot {
+                            0 => {
+                                style.width = entry.written;
+                                style.deferred_percent_width = style.has_replaced_sizing
+                                    && matches!(
+                                        entry.source,
+                                        DeferredCyclicInlineSource::Percent(_)
+                                    );
+                            }
+                            2 => style.min_width = entry.written,
+                            4 => style.max_width = crate::Dimension::Auto,
+                            _ => unreachable!(),
+                        }
+                    }
+                    if slot == 0 {
+                        rewritten_widths.insert(id);
+                    }
+                    deferred.push(entry.clone());
+                }
+                outcomes.insert((id, slot), outcome.clone());
+                continue;
+            }
+        }
+        let is_definite = |item: NodeId, styles: &StyleMap| match &definite_width_boxes {
+            Some(boxes) => boxes.contains(&item),
+            None => {
+                !rewritten_widths.contains(&item)
+                    && styles.get(&item).is_some_and(is_definite_width_box)
+            }
+        };
         // Start at the expression's containing-box chain, not the sized
         // node itself. A percentage-sized direct child of a nested flex
         // container makes that container's contribution cyclic when the
@@ -18553,7 +18842,7 @@ fn defer_cyclic_flex_inline_sizes(
             // sizing does (`yt-img-shadow{width:36px}` around a
             // `width:100%` avatar must not hand the image's 88px natural
             // width to the flex item above it).
-            if definite_width_boxes.contains(&item) {
+            if is_definite(item, styles) {
                 break;
             }
             let mut parent = rendered_parent(tree, item);
@@ -18590,6 +18879,7 @@ fn defer_cyclic_flex_inline_sizes(
             candidate = rendered_parent(tree, item);
         }
         let Some(flex_item) = flex_item else {
+            outcomes.insert((id, slot), None);
             continue;
         };
 
@@ -18604,6 +18894,7 @@ fn defer_cyclic_flex_inline_sizes(
             DeferredCyclicInlineSource::Percent(_) => Some(0.0),
         };
         let Some(intrinsic) = intrinsic else {
+            outcomes.insert((id, slot), None);
             continue;
         };
         let definite_row_width = (slot == 0
@@ -18639,15 +18930,32 @@ fn defer_cyclic_flex_inline_sizes(
                 _ => unreachable!(),
             }
         }
-        deferred.push(DeferredCyclicInlineSize {
+        if slot == 0 {
+            rewritten_widths.insert(id);
+        }
+        let entry = DeferredCyclicInlineSize {
             node: id,
             flex_item,
             slot,
-            source,
+            source: source.clone(),
             written,
-        });
+        };
+        outcomes.insert((id, slot), Some(entry.clone()));
+        deferred.push(entry);
     }
 
+    if crate::prof::enabled() {
+        eprintln!(
+            "[timing] deferrals candidates={} deferred={} incremental={incremental} affected={}",
+            memo_candidates.len(),
+            deferred.len(),
+            affected.map_or(0, |(affected, _)| affected.iter().filter(|a| **a).count())
+        );
+    }
+    *memo = DeferralMemo {
+        candidates: memo_candidates,
+        outcomes,
+    };
     deferred
 }
 

@@ -99,6 +99,23 @@ impl StyleMap {
         StyleChanges::Nodes(std::mem::take(&mut self.changed))
     }
 
+    /// Whether `id`'s style is as it was before its first write since the
+    /// last `take_before` (false when that is not known).
+    pub(crate) fn is_as_before(&self, id: &NodeId) -> bool {
+        !self.before_overflow
+            && self
+                .before
+                .as_ref()
+                .and_then(|before| before.get(id))
+                .is_some_and(|old| old.as_ref() == self.map.get(id))
+    }
+
+    /// The nodes written since the last `take_changes` (may repeat; empty
+    /// after a write the map could not attribute).
+    pub(crate) fn changed_nodes(&self) -> Option<&[NodeId]> {
+        (!self.all_changed).then_some(&self.changed)
+    }
+
     /// How many writes were noted since the last `take_changes`.
     pub(crate) fn changed_len(&self) -> usize {
         if self.all_changed {
