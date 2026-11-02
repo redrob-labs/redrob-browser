@@ -6714,7 +6714,7 @@ fn layout_dom_once(
         },
     );
     grow_trailing_auto_cells(tree, &mut styles);
-    shrink_block_level_buttons(tree, &mut styles);
+    shrink_block_level_buttons(tree, &mut styles, fresh_styles.as_ref());
 
     let descendants = tree.descendants(tree.document());
     // Style and script text never renders, and is often megabytes of CSS.
@@ -9352,7 +9352,9 @@ fn layout_dom_once(
                     table_index = group_end;
                 }
 
+                phase_marks.push(("c.tables", std::time::Instant::now()));
                 let _ = taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
+                phase_marks.push(("c.first", std::time::Instant::now()));
                 if deferred_cyclic_inline_sizes.is_empty()
                     && apply_fit_content_widths(
                         &mut taffy_tree,
@@ -9376,6 +9378,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.fit", std::time::Instant::now()));
                 if resolve_inline_percentage_heights(
                     tree,
                     &mut taffy_tree,
@@ -9387,11 +9390,13 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.pcth", std::time::Instant::now()));
                 if repair_intrinsic_column_flex_negative_margins(&mut taffy_tree, &id_map, &styles)
                 {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.negm", std::time::Instant::now()));
                 let _ = resolve_deferred_flex_inline_sizes(
                     tree,
                     &mut taffy_tree,
@@ -9437,6 +9442,7 @@ fn layout_dom_once(
                         }
                     },
                 );
+                phase_marks.push(("c.defer", std::time::Instant::now()));
                 if apply_multicol_balance(&mut taffy_tree, &ifc_items.multicol) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -9453,6 +9459,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.mcol", std::time::Instant::now()));
                 if apply_table_cell_baseline_alignment(
                     tree,
                     &mut taffy_tree,
@@ -9463,10 +9470,12 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.cbase", std::time::Instant::now()));
                 if apply_table_row_geometry(&mut taffy_tree, &id_map, &styles, &ifc_items) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.rowgeo", std::time::Instant::now()));
                 if apply_full_span_column_subgrids(
                     tree,
                     &mut taffy_tree,
@@ -9488,10 +9497,12 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.subgrid", std::time::Instant::now()));
                 if apply_table_cell_block_alignment(tree, &mut taffy_tree, &id_map, &styles) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.calign", std::time::Instant::now()));
                 // A fully-auto positioned axis uses the box's static position
                 // in its original formatting context. Harvest that coordinate
                 // only after every intrinsic/table/fragmentation repair has
@@ -9508,6 +9519,7 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
+                phase_marks.push(("c.static", std::time::Instant::now()));
             }
             #[cfg(not(feature = "paint"))]
             {
@@ -10255,9 +10267,18 @@ fn container_snapshot(tree: &DomTree, layout: &DomLayout) -> crate::css::Contain
 /// auto` in block flow shrinks to fit like an inline-block one (Chrome: the
 /// flex button in a 600px block is 158px wide). As a flex or grid item it
 /// keeps the container's sizing (grid items stretch).
-fn shrink_block_level_buttons(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
+///
+/// A retained style already carries this decision from the layout that
+/// computed it; running it again on that final style would re-decide from
+/// values later passes rewrote, so only freshly cascaded styles take part.
+fn shrink_block_level_buttons(
+    tree: &DomTree,
+    styles: &mut HashMap<NodeId, crate::LayoutStyle>,
+    fresh: Option<&HashSet<NodeId>>,
+) {
     let buttons: Vec<NodeId> = styles
         .iter()
+        .filter(|(id, _)| fresh.is_none_or(|fresh| fresh.contains(id)))
         .filter(|(_, style)| {
             style.width == crate::Dimension::Auto
                 && !style.width_set
