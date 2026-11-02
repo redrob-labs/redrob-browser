@@ -1005,6 +1005,7 @@ mod tests {
             cookie_jar: Arc::new(CookieJar::new()),
             extra_headers: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            identity: None,
         };
         let url = Url::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
         let error = client
