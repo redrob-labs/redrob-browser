@@ -8,8 +8,8 @@
       "sha256": "aabe1df4aca6e07bf45c3eee7156dedb194bb01402ef84ad0db2873874bb252f"
     },
     {
-      "file": "crates/redrob-shell/assets/redrob-ui/redrob-browser-icon.svg",
-      "sha256": "017841c0c856d6b6e7eab34c8db6f6f48d53ce20d915732c7eeafbecf43d2c29"
+      "file": "crates/redrob-shell/assets/redrob-ui/redrob-browser-icon-web.svg",
+      "sha256": "1ce12193746cdeb767c058300dc9f3e7756ea187f53a8f2671480e620c91db8e"
     },
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/anonymous.svg",
