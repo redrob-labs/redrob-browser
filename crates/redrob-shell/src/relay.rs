@@ -550,6 +550,9 @@ async fn serve(
     let places = window.places.clone();
     let reader_tx = to_client.clone();
     let reader_primary = primary.clone();
+    // The client's sessions that know of their page's open dialog.
+    let told: Arc<Mutex<HashSet<String>>> = Default::default();
+    let reader_told = told.clone();
     let reader = tokio::spawn(async move {
         while let Some(m) = rx.recv().await {
             let mut v = match m {
@@ -559,6 +562,20 @@ async fn serve(
                     break;
                 }
             };
+            if let Some(s) = v["sessionId"].as_str() {
+                match v["method"].as_str() {
+                    // Told already (dialog_opening): not twice.
+                    Some("Page.javascriptDialogOpening")
+                        if !reader_told.lock().unwrap().insert(s.to_string()) =>
+                    {
+                        continue;
+                    }
+                    Some("Page.javascriptDialogClosed") => {
+                        reader_told.lock().unwrap().remove(s);
+                    }
+                    _ => {}
+                }
+            }
             if v["sessionId"] == reader_primary.as_str() {
                 if let Some(o) = v.as_object_mut() {
                     o.remove("sessionId");
@@ -705,6 +722,52 @@ async fn serve(
                     marks.lock().unwrap().insert((id, session.clone()));
                 }
             }
+            "Page.handleJavaScriptDialog" => {
+                // The dialog the window shows (every page dialog, since the
+                // window answers them): answered as the person would, so
+                // the window drops it too and every session that waits on
+                // the page goes on, as in Chrome.
+                let target = session
+                    .as_deref()
+                    .and_then(|s| hub.target_of(s))
+                    .or_else(|| page.clone())
+                    .unwrap_or_default();
+                let answered = crate::cef::browser_of(&target).is_some_and(|b| {
+                    crate::cef::handlers::jsdialog::answer_on(
+                        b,
+                        params["accept"].as_bool().unwrap_or(false),
+                        params["promptText"].as_str(),
+                    )
+                });
+                if answered {
+                    let _ = to_client.send(reply(Ok(json!({}))));
+                    continue;
+                }
+            }
+            "Page.enable" => {
+                // A session that turns Page on while its page shows a
+                // dialog is told of it, as one that had it on before is.
+                let key = session.clone().unwrap_or_else(|| primary.clone());
+                let target = session
+                    .as_deref()
+                    .and_then(|s| hub.target_of(s))
+                    .or_else(|| page.clone())
+                    .unwrap_or_default();
+                let open = crate::cef::browser_of(&target)
+                    .and_then(crate::cef::handlers::jsdialog::open_on);
+                if let Some(d) = open {
+                    if told.lock().unwrap().insert(key) {
+                        if session.is_none() {
+                            req["sessionId"] = json!(primary);
+                        }
+                        if hub.out.send(req.to_string()).is_err() {
+                            break;
+                        }
+                        let _ = to_client.send(dialog_opening(&target, &d, &session));
+                        continue;
+                    }
+                }
+            }
             _ => {}
         }
         if session.is_none() {
@@ -727,6 +790,30 @@ async fn serve(
         )
         .await;
     Ok(())
+}
+
+/// `Page.javascriptDialogOpening` for a dialog the page already shows.
+fn dialog_opening(
+    target: &str,
+    d: &crate::cef::handlers::jsdialog::Open,
+    session: &Option<String>,
+) -> Message {
+    let mut m = json!({
+        "method": "Page.javascriptDialogOpening",
+        "params": {
+            "url": d.url,
+            // The main frame's id, which is the target's.
+            "frameId": target,
+            "message": d.message,
+            "type": d.kind,
+            "hasBrowserHandler": true,
+            "defaultPrompt": d.default_prompt,
+        },
+    });
+    if let Some(s) = session {
+        m["sessionId"] = json!(s);
+    }
+    Message::Text(m.to_string().into())
 }
 
 /// A reply under the client's own request id (and session).

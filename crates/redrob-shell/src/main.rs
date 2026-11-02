@@ -2,8 +2,9 @@
 //!
 //! Tabs, a toolbar with back, forward, reload, an address field with
 //! suggestions and a bookmarks bar. Every tab is a Chromium page (CEF,
-//! docs/CEF.md) rendered off screen and drawn as a texture (compositor/);
-//! input inside the page area goes to Chromium as CEF input events.
+//! docs/CEF.md) in a native child window placed over the page area; egui
+//! draws the chrome around it, and what floats over the page (menus,
+//! suggestions, tooltips) in small windows of its own (popup.rs).
 
 // A GUI program on Windows: no console window behind the browser. Its errors
 // go to a log file and a message box instead (startup.rs).
@@ -11,18 +12,17 @@
 
 mod account;
 mod agent_bridge;
-mod autoscroll;
 mod browser;
 mod bundle;
 mod cdp;
 mod cef;
-mod compositor;
 mod i18n;
 mod ime;
 mod import_chrome;
 mod instance;
 mod internal;
 mod model;
+mod popup;
 mod profile;
 mod relay;
 mod self_update;
@@ -34,7 +34,8 @@ mod vault;
 use std::sync::mpsc;
 
 use cdp::{Command, Event, Op, Update};
-use egui::{Color32, CornerRadius, Key, Modifiers, Rect, Sense, Stroke, Vec2};
+use cef::keys::Shortcut;
+use egui::{Color32, CornerRadius, Key, Rect, Sense, Stroke, Vec2};
 use i18n::{t, tf};
 use model::{Model, SuggestionKind, Tab, TabId};
 use theme::{size, Bar, Icon};
@@ -128,7 +129,13 @@ fn run() -> anyhow::Result<()> {
             restore.first().and_then(|w| w.bounds),
             restore.first().is_some_and(|w| w.maximized),
         ),
-        wgpu_options: browser::wgpu_options(),
+        // Linux: Chromium's pages are X11 child windows, so the window is an
+        // X11 window too (XWayland under a Wayland session).
+        #[cfg(target_os = "linux")]
+        event_loop_builder: Some(Box::new(|b| {
+            use winit::platform::x11::EventLoopBuilderExtX11 as _;
+            b.with_x11();
+        })),
         ..Default::default()
     };
     let start = browser::Start {
@@ -232,17 +239,36 @@ struct Window {
     /// does, so scrolling keys (Page Down, Space, End) reach the page.
     focus_page: bool,
     error: Option<String>,
-    last_size: (u32, u32, f32, (i32, i32)),
+    /// The page area last sent to the engine.
+    last_place: Option<(cef::native::Place, bool)>,
     last_title: String,
     address_id: egui::Id,
-    /// Pointer, click and wheel state of the page area (cef/input.rs).
-    page_input: cef::input::State,
     /// Permission prompts, page dialogs, the context menu, find and zoom
     /// (cef/handlers/ui.rs).
     prompts: cef::handlers::ui::Prompts,
-    /// Whether the page area had keyboard focus last frame.
+    /// Whether the page has the keyboard (Chromium says when it takes it;
+    /// the window takes it back on a click in its chrome).
     page_focused: bool,
-    autoscroll: autoscroll::Autoscroll,
+    /// The page took the keyboard this frame: this window is the one in front.
+    took_focus: bool,
+    /// Whether the window itself had the keyboard last frame.
+    window_focused: bool,
+    /// Whether the address bar had the keyboard last frame.
+    address_focused: bool,
+    /// The window is in front with its own controls (not the page) having
+    /// the keyboard (browser.rs).
+    chrome_keyboard: bool,
+    /// Minimized: its page is hidden to Chromium (browser.rs).
+    minimized: bool,
+    /// Window shortcuts pressed while the page had the keyboard.
+    page_shortcuts: Vec<Shortcut>,
+    /// The link under the pointer in the page.
+    status: Option<String>,
+    /// This window's own native handle, once found (`find_native`), and the
+    /// title it looks for itself by until then.
+    native: Option<cef::native::Handle>,
+    native_token: String,
+    native_tries: u32,
     /// A private window (`--incognito`).
     incognito: bool,
     /// Which window this is, for the engine connection all windows share.
@@ -267,8 +293,6 @@ struct Window {
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
-    /// Draws pages; the reason when the GPU cannot.
-    gpu: Result<compositor::Gpu, String>,
 }
 
 impl Window {
@@ -378,10 +402,14 @@ impl Window {
                 t.url.clone()
             };
             let id = t.id;
+            let web = t.url != NEW_TAB && !internal::is_internal(&t.url);
             self.op(id, Op::Activate);
-            // The page area keeps keyboard focus across a tab switch.
-            if self.page_focused {
-                self.op(id, Op::Focus(true));
+            // The tab on screen gets the keyboard, as in Chrome: its page,
+            // or the address bar of a new tab.
+            if web {
+                self.focus_page = true;
+            } else if t.url == NEW_TAB {
+                self.focus_address = true;
             }
         }
     }
@@ -398,6 +426,15 @@ impl Window {
                 }
                 return;
             }
+            // The page shows at once (a new tab page or settings make way
+            // for it) and gets the keyboard, as in Chrome.
+            if let Some(t) = self.model.active_tab_mut() {
+                if t.url == NEW_TAB || internal::is_internal(&t.url) {
+                    t.url = url.clone();
+                    t.loading = true;
+                }
+            }
+            self.focus_page = true;
             self.op(id, Op::Navigate(url));
         }
     }
@@ -449,6 +486,9 @@ impl Window {
                 t.loading = true;
                 // A tab no page opened came from outside the window: an agent.
                 t.agent = opener.is_none();
+                if t.agent {
+                    self.op(tab, Op::Agent);
+                }
                 // Next to its opener, as in Chrome.
                 let keep = self.model.active;
                 if let Some(i) = opener.and_then(|o| self.model.index_of(o)) {
@@ -473,6 +513,63 @@ impl Window {
                 }
                 continue;
             }
+            // Only the tab on screen can have the keyboard or the pointer,
+            // and only while its page shows (not under the new tab page or
+            // settings, where Chromium still focuses a page it creates).
+            let on_screen = self
+                .model
+                .active_tab()
+                .is_some_and(|t| t.id == tab && t.url != NEW_TAB && !internal::is_internal(&t.url));
+            let event = match event {
+                Event::Shortcut(s) => {
+                    cdp::trace(format_args!("page {tab}: shortcut {s:?}"));
+                    if on_screen {
+                        self.page_shortcuts.push(s);
+                    }
+                    continue;
+                }
+                Event::Focused => {
+                    cdp::trace(format_args!("page {tab} took the keyboard"));
+                    if on_screen {
+                        self.page_focused = true;
+                        self.took_focus = true;
+                        self.editing = false;
+                        ctx.memory_mut(|m| m.surrender_focus(self.address_id));
+                        // A click in the page closes what floats over it.
+                        popup::close_menus(ctx);
+                        self.prompts.close_menu();
+                    } else if self.model.index_of(tab).is_some() {
+                        // Chromium focuses each page it makes, out of sight
+                        // too (a new tab under the new tab page): the
+                        // keyboard goes back where it belongs.
+                        self.op(tab, Op::Focus(false));
+                        let web = self.model.active_tab().filter(|t| {
+                            t.id != tab && t.url != NEW_TAB && !internal::is_internal(&t.url)
+                        });
+                        match web.map(|t| t.id) {
+                            Some(id) if self.page_focused => self.op(id, Op::Focus(true)),
+                            _ => {
+                                self.page_focused = false;
+                                let _ = self.commands.send(Command::FocusWindow);
+                            }
+                        }
+                    }
+                    continue;
+                }
+                Event::TakeFocus => {
+                    if on_screen {
+                        self.focus_address = true;
+                    }
+                    continue;
+                }
+                Event::Status(link) => {
+                    if on_screen {
+                        self.status = link;
+                    }
+                    continue;
+                }
+                event => event,
+            };
             let active = self.active_id() == Some(tab);
             let mut visited = None;
             let mut titled = None;
@@ -525,7 +622,11 @@ impl Window {
                 | Event::FindResult { .. }
                 | Event::Zoom(_)
                 | Event::Clipboard(_)
-                | Event::OpenTab(_) => {}
+                | Event::OpenTab(_)
+                | Event::Shortcut(_)
+                | Event::Focused
+                | Event::TakeFocus
+                | Event::Status(_) => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -561,113 +662,113 @@ impl Window {
         } else {
             title
         };
-        // Setting the title wakes the window on X11: only when it changed.
-        if title != self.last_title {
+        // Setting the title wakes the window on X11: only when it changed,
+        // and not while the window looks for itself by its title.
+        if self.native.is_some() && title != self.last_title {
             self.last_title = title.clone();
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
         }
     }
 
-    /// Browser shortcuts, taken before the page sees the keys.
+    /// The window's shortcuts: from egui while the chrome has the keyboard,
+    /// from Chromium while the page has it (cef/keys.rs).
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        let cmd = Modifiers::COMMAND;
-        let shift = Modifiers::COMMAND | Modifiers::SHIFT;
-        let (new, close, reopen, address, bookmark, reload, next, prev, back, fwd) =
-            ctx.input_mut(|i| {
-                // With Shift first: a shortcut without Shift also matches
-                // the same keys with it (egui's logical matching).
-                let reopen = i.consume_key(shift, Key::T);
-                let prev = i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab)
-                    || i.consume_key(cmd, Key::PageUp);
-                (
-                    i.consume_key(cmd, Key::T),
-                    i.consume_key(cmd, Key::W),
-                    reopen,
-                    i.consume_key(cmd, Key::L),
-                    i.consume_key(cmd, Key::D),
-                    i.consume_key(cmd, Key::R) || i.consume_key(Modifiers::NONE, Key::F5),
-                    i.consume_key(Modifiers::CTRL, Key::Tab) || i.consume_key(cmd, Key::PageDown),
-                    prev,
-                    i.consume_key(Modifiers::ALT, Key::ArrowLeft),
-                    i.consume_key(Modifiers::ALT, Key::ArrowRight),
-                )
-            });
-        // Find, zoom and print (cef/handlers/ui.rs).
-        if let Some(id) = self.active_id() {
-            for op in self.prompts.keys(ctx, id) {
-                self.op(id, op);
-            }
+        let mut all = std::mem::take(&mut self.page_shortcuts);
+        all.extend(cef::keys::from_egui(ctx));
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            all.push(Shortcut::Escape);
         }
+        for s in all {
+            self.shortcut(ctx, s);
+        }
+    }
+
+    fn shortcut(&mut self, ctx: &egui::Context, s: Shortcut) {
         let n = self.model.tabs.len();
-        if new {
-            self.open_tab(NEW_TAB, true);
-        }
-        if close {
-            self.close_tab(self.model.active);
-        }
-        if reopen {
-            if let Some((url, _)) = self.model.closed.pop() {
-                self.open_tab(&url, true);
-            }
-        }
-        if address {
-            self.focus_address = true;
-        }
-        if bookmark {
-            self.toggle_bookmark();
-        }
-        if reload {
-            if let Some(id) = self.active_id() {
-                self.op(id, Op::Reload);
-            }
-        }
-        if next && n > 1 {
-            self.select_tab((self.model.active + 1) % n);
-        }
-        if prev && n > 1 {
-            self.select_tab((self.model.active + n - 1) % n);
-        }
-        if back || fwd {
-            if let Some(id) = self.active_id() {
-                self.op(id, if back { Op::Back } else { Op::Forward });
-            }
-        }
-        // Ctrl+Shift+N: a new incognito window. Ctrl+N: a new window.
-        if ctx.input_mut(|i| i.consume_key(shift, Key::N)) {
-            self.open_incognito();
-        }
-        if ctx.input_mut(|i| i.consume_key(cmd, Key::N)) {
-            self.requests.push(browser::Request::NewWindow);
-        }
-        // Ctrl+H: history.
-        if ctx.input_mut(|i| i.consume_key(cmd, Key::H)) {
-            self.open_tab(internal::HISTORY, true);
-        }
-        // F12 or Ctrl+Shift+I: developer tools.
-        let tools = ctx.input_mut(|i| {
-            i.consume_key(Modifiers::NONE, Key::F12) || i.consume_key(shift, Key::I)
-        });
-        if tools {
-            self.devtools();
-        }
-        // Ctrl+Shift+PageUp/PageDown move the active tab left or right.
-        let (left, right) = ctx.input_mut(|i| {
-            (
-                i.consume_key(shift, Key::PageUp),
-                i.consume_key(shift, Key::PageDown),
-            )
-        });
         let a = self.model.active;
-        if left && a > 0 {
-            self.model.move_tab(a, a - 1);
-        }
-        if right && a + 1 < n {
-            self.model.move_tab(a, a + 1);
+        match s {
+            Shortcut::NewTab => {
+                self.open_tab(NEW_TAB, true);
+            }
+            Shortcut::CloseTab => self.close_tab(a),
+            Shortcut::ReopenTab => {
+                if let Some((url, _)) = self.model.closed.pop() {
+                    self.open_tab(&url, true);
+                }
+            }
+            Shortcut::NewWindow => self.requests.push(browser::Request::NewWindow),
+            Shortcut::NewIncognito => self.open_incognito(),
+            Shortcut::Address => self.focus_address = true,
+            Shortcut::Bookmark => self.toggle_bookmark(),
+            Shortcut::Reload => {
+                if let Some(id) = self.active_id() {
+                    self.op(id, Op::Reload);
+                }
+            }
+            Shortcut::NextTab if n > 1 => self.select_tab((a + 1) % n),
+            Shortcut::PrevTab if n > 1 => self.select_tab((a + n - 1) % n),
+            Shortcut::Back | Shortcut::Forward => {
+                if let Some(id) = self.active_id() {
+                    self.op(
+                        id,
+                        if s == Shortcut::Back {
+                            Op::Back
+                        } else {
+                            Op::Forward
+                        },
+                    );
+                }
+            }
+            Shortcut::History => {
+                self.open_tab(internal::HISTORY, true);
+            }
+            Shortcut::DevTools => self.devtools(),
+            Shortcut::MoveTabLeft if a > 0 => self.model.move_tab(a, a - 1),
+            Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab(a, a + 1),
+            Shortcut::Escape => {
+                popup::close_menus(ctx);
+                // Escape in the address bar: its text goes back to the
+                // page's address and the page gets the keyboard back.
+                if self.address_focused {
+                    self.address_focused = false;
+                    self.editing = false;
+                    ctx.memory_mut(|m| m.surrender_focus(self.address_id));
+                    if let Some(t) = self.model.active_tab() {
+                        let web = t.url != NEW_TAB && !internal::is_internal(&t.url);
+                        self.address = if t.url == NEW_TAB {
+                            String::new()
+                        } else {
+                            t.url.clone()
+                        };
+                        if web {
+                            self.focus_page = true;
+                        }
+                    }
+                }
+                if let Some(id) = self.active_id() {
+                    if let Some(op) = self.prompts.shortcut(s, id) {
+                        self.op(id, op);
+                    }
+                }
+            }
+            _ => {
+                // Find, zoom and print (cef/handlers/ui.rs).
+                if let Some(id) = self.active_id() {
+                    if let Some(op) = self.prompts.shortcut(s, id) {
+                        self.op(id, op);
+                    }
+                }
+            }
         }
     }
 
     fn on_download(&mut self, item: model::DownloadItem) {
         let finished = matches!(item.state.as_str(), "completed" | "canceled");
+        let known = self.model.downloads.iter().any(|d| d.guid == item.guid);
+        // A save dialog the person closed: Chrome lists nothing for it.
+        if !known && item.state == "canceled" && item.path.is_empty() {
+            return;
+        }
         match self
             .model
             .downloads
@@ -679,6 +780,9 @@ impl Window {
                 d.bytes = item.bytes;
                 if !item.path.is_empty() {
                     d.path = item.path.clone();
+                }
+                if !item.filename.is_empty() {
+                    d.filename = item.filename.clone();
                 }
                 if !item.url.is_empty() {
                     d.url = item.url.clone();
@@ -713,7 +817,12 @@ impl Window {
                     "paused" => t("Paused"),
                     _ => t("Downloading"),
                 };
-                ui.label(format!("{}  {}  {} KB", d.filename, state, d.bytes / 1024));
+                ui.label(format!(
+                    "{}  {}  {}",
+                    d.filename,
+                    state,
+                    size_label(d.bytes)
+                ));
                 let path = std::path::Path::new(&d.path);
                 match d.state.as_str() {
                     "inProgress" | "paused" => {
@@ -799,16 +908,14 @@ impl Window {
         }
         let mut fill = None;
         let r = theme::icon_button(ui, Icon::Key, t("Key"));
-        egui::Popup::menu(&r)
-            .align(egui::RectAlign::BOTTOM_END)
-            .show(|ui| {
-                for l in &logins {
-                    if ui.button(tf("Sign in as {0}", &[&l.username])).clicked() {
-                        fill = Some(l.id);
-                        ui.close();
-                    }
+        popup::menu(&r, 260.0, true, |ui| {
+            for l in &logins {
+                if ui.button(tf("Sign in as {0}", &[&l.username])).clicked() {
+                    fill = Some(l.id);
+                    ui.close();
                 }
-            });
+            }
+        });
         let Some(id) = fill else { return };
         let Some(tab) = self.active_id() else { return };
         // The person's own click is also the vault unlock on platforms
@@ -1051,124 +1158,119 @@ impl Window {
                     .min_size(Vec2::new(220.0, 30.0)),
             )
         };
-        egui::Popup::menu(&r)
-            .align(egui::RectAlign::BOTTOM_END)
-            .width(248.0)
-            .show(|ui| {
-                if item(ui, Icon::Plus, t("New tab")).clicked() {
-                    self.open_tab(NEW_TAB, true);
-                    ui.close();
-                }
-                if item(ui, Icon::Plus, t("New window")).clicked() {
-                    self.requests.push(browser::Request::NewWindow);
-                    ui.close();
-                }
-                if item(ui, Icon::Incognito, t("New incognito window")).clicked() {
-                    self.open_incognito();
-                    ui.close();
-                }
-                ui.separator();
-                if item(ui, Icon::History, t("History")).clicked() {
-                    self.open_tab(internal::HISTORY, true);
-                    ui.close();
-                }
-                if item(ui, Icon::Download, t("Downloads")).clicked() {
-                    self.show_downloads = true;
-                    ui.close();
-                }
-                if item(ui, Icon::Key, t("Passwords")).clicked() {
-                    self.open_tab(internal::PASSWORDS, true);
-                    ui.close();
-                }
-                if item(ui, Icon::Code, t("Developer tools")).clicked() {
-                    self.devtools();
-                    ui.close();
-                }
-                if item(ui, Icon::Settings, t("Settings")).clicked() {
-                    self.open_tab(internal::SETTINGS, true);
-                    ui.close();
-                }
-                ui.separator();
-                let signed_in = self
-                    .profile
-                    .as_ref()
-                    .and_then(|p| p.setting("account_email"))
-                    .filter(|e| !e.is_empty());
-                match signed_in {
-                    Some(email) => {
-                        ui.add_space(2.0);
-                        ui.weak(tf("Signed in as {0}", &[&email]));
-                        if item(ui, Icon::User, t("Sign out")).clicked() {
-                            account::sign_out();
-                            if let Some(p) = &self.profile {
-                                let _ = p.set_setting("account_name", "");
-                                let _ = p.set_setting("account_email", "");
-                            }
-                            ui.close();
+        popup::menu(&r, 248.0, true, |ui| {
+            if item(ui, Icon::Plus, t("New tab")).clicked() {
+                self.open_tab(NEW_TAB, true);
+                ui.close();
+            }
+            if item(ui, Icon::Plus, t("New window")).clicked() {
+                self.requests.push(browser::Request::NewWindow);
+                ui.close();
+            }
+            if item(ui, Icon::Incognito, t("New incognito window")).clicked() {
+                self.open_incognito();
+                ui.close();
+            }
+            ui.separator();
+            if item(ui, Icon::History, t("History")).clicked() {
+                self.open_tab(internal::HISTORY, true);
+                ui.close();
+            }
+            if item(ui, Icon::Download, t("Downloads")).clicked() {
+                self.show_downloads = true;
+                ui.close();
+            }
+            if item(ui, Icon::Key, t("Passwords")).clicked() {
+                self.open_tab(internal::PASSWORDS, true);
+                ui.close();
+            }
+            if item(ui, Icon::Code, t("Developer tools")).clicked() {
+                self.devtools();
+                ui.close();
+            }
+            if item(ui, Icon::Settings, t("Settings")).clicked() {
+                self.open_tab(internal::SETTINGS, true);
+                ui.close();
+            }
+            ui.separator();
+            let signed_in = self
+                .profile
+                .as_ref()
+                .and_then(|p| p.setting("account_email"))
+                .filter(|e| !e.is_empty());
+            match signed_in {
+                Some(email) => {
+                    ui.add_space(2.0);
+                    ui.weak(tf("Signed in as {0}", &[&email]));
+                    if item(ui, Icon::User, t("Sign out")).clicked() {
+                        account::sign_out();
+                        if let Some(p) = &self.profile {
+                            let _ = p.set_setting("account_name", "");
+                            let _ = p.set_setting("account_email", "");
                         }
-                    }
-                    None => {
-                        if item(ui, Icon::SignIn, t("Sign in to Redrob")).clicked() {
-                            account::sign_in(self.account_tx.clone());
-                            ui.close();
-                        }
-                    }
-                }
-                ui.menu_button(t("Language"), |ui| {
-                    let now = i18n::current();
-                    for (lang, name) in [(i18n::Lang::En, "English"), (i18n::Lang::Ko, "한국어")]
-                    {
-                        if ui.selectable_label(now == lang, name).clicked() {
-                            i18n::set(lang);
-                            if let Some(p) = &self.profile {
-                                let _ = p.set_setting("language", i18n::code(lang));
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-                ui.menu_button(t("Import"), |ui| {
-                    let sources = import_chrome::sources();
-                    if sources.is_empty() {
-                        ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
-                    }
-                    for s in &sources {
-                        if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
-                            self.import_from(s);
-                            ui.close();
-                        }
-                        if s.profile.join("Login Data").exists()
-                            && ui
-                                .button(tf("Import passwords from {0}", &[&s.name]))
-                                .clicked()
-                        {
-                            let scratch = self
-                                .profile
-                                .as_ref()
-                                .map(|p| p.dir.join("import-tmp"))
-                                .unwrap_or_else(std::env::temp_dir);
-                            let (logins, skipped) =
-                                match import_chrome::import_passwords(s, &scratch) {
-                                    Ok((l, n)) => (Ok(l), n),
-                                    Err(e) => (Err(e), 0),
-                                };
-                            self.import_passwords(logins, skipped, s.name);
-                            ui.close();
-                        }
-                    }
-                    // Chrome's "Export passwords" writes this file to the Downloads folder.
-                    let csv = profile::downloads_dir().join("Chrome Passwords.csv");
-                    if csv.exists()
-                        && ui
-                            .button(t("Import passwords from Chrome Passwords.csv"))
-                            .clicked()
-                    {
-                        let logins = import_chrome::import_passwords_csv(&csv);
-                        self.import_passwords(logins, 0, t("the CSV file"));
                         ui.close();
                     }
-                });
+                }
+                None => {
+                    if item(ui, Icon::SignIn, t("Sign in to Redrob")).clicked() {
+                        account::sign_in(self.account_tx.clone());
+                        ui.close();
+                    }
+                }
+            }
+            popup::submenu(ui, t("Language"), |ui| {
+                let now = i18n::current();
+                for (lang, name) in [(i18n::Lang::En, "English"), (i18n::Lang::Ko, "한국어")] {
+                    if ui.selectable_label(now == lang, name).clicked() {
+                        i18n::set(lang);
+                        if let Some(p) = &self.profile {
+                            let _ = p.set_setting("language", i18n::code(lang));
+                        }
+                        ui.close();
+                    }
+                }
             });
+            popup::submenu(ui, t("Import"), |ui| {
+                let sources = import_chrome::sources();
+                if sources.is_empty() {
+                    ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
+                }
+                for s in &sources {
+                    if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
+                        self.import_from(s);
+                        ui.close();
+                    }
+                    if s.profile.join("Login Data").exists()
+                        && ui
+                            .button(tf("Import passwords from {0}", &[&s.name]))
+                            .clicked()
+                    {
+                        let scratch = self
+                            .profile
+                            .as_ref()
+                            .map(|p| p.dir.join("import-tmp"))
+                            .unwrap_or_else(std::env::temp_dir);
+                        let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
+                            Ok((l, n)) => (Ok(l), n),
+                            Err(e) => (Err(e), 0),
+                        };
+                        self.import_passwords(logins, skipped, s.name);
+                        ui.close();
+                    }
+                }
+                // Chrome's "Export passwords" writes this file to the Downloads folder.
+                let csv = profile::downloads_dir().join("Chrome Passwords.csv");
+                if csv.exists()
+                    && ui
+                        .button(t("Import passwords from Chrome Passwords.csv"))
+                        .clicked()
+                {
+                    let logins = import_chrome::import_passwords_csv(&csv);
+                    self.import_passwords(logins, 0, t("the CSV file"));
+                    ui.close();
+                }
+            });
+        });
     }
 
     /// Private windows share one process with its own memory-only engine.
@@ -1214,6 +1316,20 @@ impl Window {
         });
         self.activated();
         self.save_session();
+    }
+
+    /// A link or text dropped on the window's chrome at `at` (physical
+    /// pixels): on the tab strip it opens in a new tab, elsewhere in the
+    /// tab on screen, as Chrome does.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn dropped(&mut self, at: (i32, i32), text: &str) {
+        let scale = self.last_place.map_or(1.0, |(p, _)| p.scale);
+        let url = model::to_url(text);
+        if (at.1 as f32) / scale < 40.0 {
+            self.open_tab(&url, true);
+        } else {
+            self.navigate(url);
+        }
     }
 
     fn toggle_bookmark(&mut self) {
@@ -1344,24 +1460,25 @@ impl Window {
                         reorder = Some((i, to));
                     }
                 } else {
-                    // Out of the strip: a copy of the tab rides under the pointer.
-                    let ghost = Rect::from_min_size(pos - Vec2::new(grab, 12.0), rect.size());
-                    let fg = ui
-                        .ctx()
-                        .layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("ghost")));
-                    fg.rect_filled(ghost, CornerRadius::same(size::RADIUS_MD), p.surface_base);
-                    fg.rect_stroke(
-                        ghost,
-                        CornerRadius::same(size::RADIUS_MD),
-                        Stroke::new(1.0, p.border_subtle),
-                        egui::StrokeKind::Inside,
-                    );
-                    fg.text(
-                        egui::pos2(ghost.left() + 12.0, ghost.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        tab.label(),
-                        egui::FontId::proportional(12.5),
-                        p.ink_primary,
+                    // Out of the strip: a copy of the tab rides under the
+                    // pointer, in a window of its own (it crosses the page).
+                    let size = rect.size();
+                    let label = tab.label().to_string();
+                    popup::ghost(
+                        ui.ctx(),
+                        id.with("ghost"),
+                        pos - Vec2::new(grab, 12.0),
+                        |ui| {
+                            let (r, _) =
+                                ui.allocate_exact_size(size - Vec2::splat(12.0), Sense::hover());
+                            ui.painter().text(
+                                egui::pos2(r.left() + 6.0, r.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                label,
+                                egui::FontId::proportional(12.5),
+                                p.ink_primary,
+                            );
+                        },
                     );
                 }
             }
@@ -1480,18 +1597,18 @@ impl Window {
                         p.ink_secondary
                     },
                 );
-                if cr.on_hover_text(t("Close tab")).clicked() {
+                if popup::tip(cr, t("Close tab")).clicked() {
                     close = Some(i);
                 }
             }
-            let r = r.on_hover_text(&tab.url);
+            let r = popup::tip(r, &tab.url);
             if r.clicked() {
                 select = Some(i);
             }
             if r.middle_clicked() {
                 close = Some(i);
             }
-            r.context_menu(|ui| {
+            popup::context_menu(&r, |ui| {
                 if ui
                     .add_enabled(detachable, egui::Button::new(t("Move to new window")))
                     .clicked()
@@ -1576,7 +1693,7 @@ impl Window {
                 1 => t("Maximize"),
                 _ => t("Close"),
             };
-            if r.on_hover_text(tip).clicked() {
+            if popup::tip(r, tip).clicked() {
                 let cmd = match kind {
                     0 => egui::ViewportCommand::Minimized(true),
                     1 => egui::ViewportCommand::Maximized(!maximized),
@@ -1706,6 +1823,7 @@ impl Window {
                     let (pill, _) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::hover());
                     field_rect = pill;
                     let focused = ui.memory(|m| m.has_focus(self.address_id));
+                    self.address_focused = focused;
                     let pill_fill = if focused {
                         p.surface_base
                     } else {
@@ -1764,10 +1882,15 @@ impl Window {
                                     .color(p.ink_muted),
                             ),
                     );
-                    if self.focus_address {
+                    // Only once the window has the keyboard back from the
+                    // page: egui drops focus requests while it has not.
+                    let window_focused = self.chrome_keyboard;
+                    if self.focus_address && window_focused {
                         self.focus_address = false;
                         field.request_focus();
                         self.editing = true;
+                    } else if self.focus_address {
+                        ui.ctx().request_repaint();
                     }
                     if field.gained_focus() {
                         // Select all, like every browser, so typing replaces the address.
@@ -1794,6 +1917,10 @@ impl Window {
                     }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
                         self.editing = false;
+                        // Back to the page, as in Chrome.
+                        if url != NEW_TAB && !internal::is_internal(&url) {
+                            self.focus_page = true;
+                        }
                         self.address = if url == NEW_TAB {
                             String::new()
                         } else {
@@ -1831,78 +1958,76 @@ impl Window {
         if self.editing && ui.memory(|m| m.has_focus(self.address_id)) {
             let list = self.model.suggest(&self.address, 8);
             if !list.is_empty() {
-                egui::Area::new(egui::Id::new("suggestions"))
-                    .order(egui::Order::Foreground)
-                    .fixed_pos(egui::pos2(field_rect.left(), field_rect.bottom() + 4.0))
-                    .show(ui.ctx(), |ui| {
-                        egui::Frame::popup(ui.style())
-                            .inner_margin(egui::Margin::same(6))
-                            .corner_radius(CornerRadius::same(size::RADIUS_LG))
-                            .show(ui, |ui| {
-                                ui.set_width(field_rect.width() - 12.0);
-                                for s in list {
-                                    let icon = match s.kind {
-                                        SuggestionKind::Bookmark => Icon::Star,
-                                        SuggestionKind::History => Icon::History,
-                                        SuggestionKind::Search => Icon::Search,
-                                    };
-                                    let (row, r) = ui.allocate_exact_size(
-                                        Vec2::new(ui.available_width(), 34.0),
-                                        Sense::click(),
-                                    );
-                                    if r.hovered() {
-                                        ui.painter().rect_filled(
-                                            row,
-                                            CornerRadius::same(size::RADIUS_MD),
-                                            p.surface_sunken,
-                                        );
-                                    }
-                                    icon.paint(
-                                        ui,
-                                        Rect::from_center_size(
-                                            egui::pos2(row.left() + 18.0, row.center().y),
-                                            Vec2::splat(16.0),
-                                        ),
-                                        p.ink_muted,
-                                    );
-                                    let title = if s.title.is_empty() {
-                                        s.url.clone()
-                                    } else {
-                                        s.title.clone()
-                                    };
-                                    let painter = ui.painter_at(row.shrink2(Vec2::new(4.0, 0.0)));
-                                    let g = painter.layout_no_wrap(
-                                        theme::elide(&title, 60),
-                                        egui::FontId::proportional(13.0),
-                                        p.ink_primary,
-                                    );
-                                    let tw = g.size().x;
-                                    painter.galley(
-                                        egui::pos2(
-                                            row.left() + 38.0,
-                                            row.center().y - g.size().y / 2.0,
-                                        ),
-                                        g,
-                                        p.ink_primary,
-                                    );
-                                    if !s.title.is_empty() {
-                                        painter.text(
-                                            egui::pos2(
-                                                row.left() + 38.0 + tw + 10.0,
-                                                row.center().y,
-                                            ),
-                                            egui::Align2::LEFT_CENTER,
-                                            theme::elide(&s.url, 70),
-                                            egui::FontId::proportional(12.0),
-                                            p.ink_muted,
-                                        );
-                                    }
-                                    if r.clicked() {
-                                        go = Some(s.url.clone());
-                                    }
-                                }
-                            });
-                    });
+                // A window of its own, as Chrome's: the list covers the page.
+                let at = popup::to_screen(
+                    ui.ctx(),
+                    egui::pos2(field_rect.left(), field_rect.bottom() + 4.0),
+                );
+                popup::show(
+                    ui.ctx(),
+                    egui::Id::new("suggestions"),
+                    at,
+                    field_rect.width(),
+                    false,
+                    |ui| {
+                        ui.set_width(field_rect.width() - 12.0);
+                        for s in list {
+                            let icon = match s.kind {
+                                SuggestionKind::Bookmark => Icon::Star,
+                                SuggestionKind::History => Icon::History,
+                                SuggestionKind::Search => Icon::Search,
+                            };
+                            let (row, r) = ui.allocate_exact_size(
+                                Vec2::new(ui.available_width(), 34.0),
+                                Sense::click(),
+                            );
+                            if r.hovered() {
+                                ui.painter().rect_filled(
+                                    row,
+                                    CornerRadius::same(size::RADIUS_MD),
+                                    p.surface_sunken,
+                                );
+                            }
+                            icon.paint(
+                                ui,
+                                Rect::from_center_size(
+                                    egui::pos2(row.left() + 18.0, row.center().y),
+                                    Vec2::splat(16.0),
+                                ),
+                                p.ink_muted,
+                            );
+                            let title = if s.title.is_empty() {
+                                s.url.clone()
+                            } else {
+                                s.title.clone()
+                            };
+                            let painter = ui.painter_at(row.shrink2(Vec2::new(4.0, 0.0)));
+                            let g = painter.layout_no_wrap(
+                                theme::elide(&title, 60),
+                                egui::FontId::proportional(13.0),
+                                p.ink_primary,
+                            );
+                            let tw = g.size().x;
+                            painter.galley(
+                                egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0),
+                                g,
+                                p.ink_primary,
+                            );
+                            if !s.title.is_empty() {
+                                painter.text(
+                                    egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    theme::elide(&s.url, 70),
+                                    egui::FontId::proportional(12.0),
+                                    p.ink_muted,
+                                );
+                            }
+                            if r.clicked() {
+                                go = Some(s.url.clone());
+                            }
+                        }
+                    },
+                );
             }
         }
         if let Some(url) = go {
@@ -1981,14 +2106,14 @@ impl Window {
                             g,
                             p.ink_secondary,
                         );
-                        let r = r.on_hover_text(&b.url);
+                        let r = popup::tip(r, &b.url);
                         if r.clicked() {
                             go = Some(b.url.clone());
                         }
                         if r.middle_clicked() {
                             go_new_tab = Some(b.url.clone());
                         }
-                        r.context_menu(|ui| {
+                        popup::context_menu(&r, |ui| {
                             if ui.button(t("Open in new tab")).clicked() {
                                 go_new_tab = Some(b.url.clone());
                                 ui.close();
@@ -2215,6 +2340,16 @@ impl Window {
     fn frame(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.drain_updates(&ctx);
+        self.find_native(&ctx);
+        // Back from another program (the window manager focused the
+        // window): the page gets the keyboard back if it had it.
+        let focused = self.chrome_keyboard;
+        if focused && !self.window_focused && self.page_focused {
+            self.focus_page = true;
+        }
+        self.window_focused = focused;
+        // A click in the chrome, or Ctrl+L from the page: the chrome takes
+        // the keyboard back from the page.
         while let Ok(msg) = self.agent_rx.try_recv() {
             self.notice = Some(msg);
         }
@@ -2248,6 +2383,20 @@ impl Window {
             }
         }
         self.shortcuts(&ctx);
+        if ctx.input(|i| i.pointer.any_pressed()) {
+            self.prompts.close_menu();
+        }
+        // A page dialog or the find bar opened: the chrome types there.
+        let bar = self
+            .active_id()
+            .is_some_and(|id| self.prompts.wants_keyboard(id));
+        if self.page_focused
+            && (self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
+        {
+            cdp::trace(format_args!("window {} takes the keyboard", self.wid));
+            self.page_focused = false;
+            let _ = self.commands.send(Command::FocusWindow);
+        }
         self.resize_edges(ui);
         // A crash must not lose the open tabs.
         if self.last_session_save.elapsed() > std::time::Duration::from_secs(30) {
@@ -2264,6 +2413,12 @@ impl Window {
                 self.toolbar(ui);
                 self.bookmarks_bar(ui);
                 self.save_bar(ui);
+                // A page dialog and the find bar, above the page.
+                if let Some(id) = self.active_id() {
+                    for op in self.prompts.bars(ui, id) {
+                        self.op(id, op);
+                    }
+                }
                 if let Some(e) = self.error.clone() {
                     theme::bar(ui, Bar::Danger, |ui| {
                         ui.label(egui::RichText::new(e).color(p.danger));
@@ -2330,35 +2485,15 @@ impl Window {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(p.surface_base))
             .show(ui, |ui| {
-                let (rect, response) =
+                let (rect, _response) =
                     ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-                let scale = ctx.pixels_per_point();
-                // At a fractional scale the page area is a fractional number
-                // of CSS pixels; round up so the page covers its last column
-                // and row instead of leaving a white line.
-                // Where the page area is on screen, for popups and screenX.
-                let window_at = ctx
-                    .input(|i| i.viewport().inner_rect)
-                    .map_or(egui::Pos2::ZERO, |r| r.min);
-                let origin = (
-                    (window_at.x + rect.left()).round() as i32,
-                    (window_at.y + rect.top()).round() as i32,
-                );
-                let size = (
-                    (rect.width() - 0.01).ceil() as u32,
-                    (rect.height() - 0.01).ceil() as u32,
-                    scale,
-                    origin,
-                );
-                if size != self.last_size && size.0 > 0 && size.1 > 0 {
-                    self.last_size = size;
-                    let _ = self.commands.send(Command::Resize {
-                        width: size.0,
-                        height: size.1,
-                        scale,
-                        origin,
-                    });
-                }
+                // Our own pages and the new tab page are drawn here; a web
+                // page is Chromium's native window over this rectangle.
+                let web = self
+                    .model
+                    .active_tab()
+                    .is_some_and(|t| t.url != NEW_TAB && !internal::is_internal(&t.url));
+                self.place_page(&ctx, rect, web);
                 if self.model.tabs.is_empty() {
                     return;
                 }
@@ -2403,172 +2538,94 @@ impl Window {
                     }
                     return;
                 }
-                // Web pages are white until they paint, as in every browser.
+                // Web pages are white until Chromium's window shows.
                 ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
                 let page_id = self.model.tabs[tab_index].id;
-                self.page(ui, rect, &response, page_id);
+                self.page(&ctx, rect, page_id);
             });
+        popup::end_frame(&ctx, self.page_focused || self.chrome_keyboard);
     }
 
-    /// The page area of tab `tab`: Chromium's frame, the cursor, the link
-    /// under the pointer, and the person's input sent to the page.
-    fn page(&mut self, ui: &mut egui::Ui, rect: Rect, response: &egui::Response, tab: TabId) {
-        let ctx = ui.ctx().clone();
-        if response.clicked()
-            || response.drag_started()
-            || response.is_pointer_button_down_on()
-            || self.focus_page
-        {
-            response.request_focus();
-            self.editing = false;
-            self.focus_page = false;
-        }
-        let focused = response.has_focus();
-        if focused {
-            // Tab, arrows and Escape belong to the page while it has focus.
-            ui.memory_mut(|m| {
-                m.set_focus_lock_filter(
-                    response.id,
-                    egui::EventFilter {
-                        tab: true,
-                        horizontal_arrows: true,
-                        vertical_arrows: true,
-                        escape: true,
-                    },
-                )
-            });
-        }
-        // The page's context menu takes egui's focus, not the page's: the
-        // page keeps its caret for the menu's Paste and Cut.
-        if focused != self.page_focused && !self.prompts.menu_open() {
-            self.page_focused = focused;
-            self.op(tab, Op::Focus(focused));
-        }
-        let Some(view) = cdp::view(tab) else {
+    /// Find this window's native handle: it sets a title only it has, looks
+    /// for the window with that title, then puts its own title back.
+    fn find_native(&mut self, ctx: &egui::Context) {
+        if self.native.is_some() {
             return;
-        };
-        let pointer = ui.input(|i| i.pointer.hover_pos());
-        let hovering = response.hovered() || response.is_pointer_button_down_on();
-        let mut events = ui.input(|i| i.events.clone());
-        // Middle-click autoscroll takes its clicks before the page sees them.
-        let (link, text) = {
-            let v = cef::osr::lock(&view);
-            (v.status.clone(), v.cursor == egui::CursorIcon::Text)
-        };
-        if let Some(url) = self
-            .autoscroll
-            .filter(&mut events, rect, link.as_deref(), text)
-        {
-            self.open_tab(&url, false);
         }
-        // Clicks on the page's context menu are the menu's, not the page's.
-        if self.prompts.menu_open() {
-            events.clear();
+        if self.native_tries == 0 {
+            self.native_token =
+                format!("redrob-browser-window-{}-{}", std::process::id(), self.wid);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.native_token.clone()));
+        } else if let Some(h) = cef::native::find_window(&self.native_token) {
+            self.native = Some(h);
+            // The real title goes back on with the next frame.
+            self.last_title.clear();
         }
-        let mut ops = cef::input::to_ops(
-            &mut self.page_input,
-            &events,
-            pointer.filter(|_| hovering),
-            rect,
-            focused,
-        );
-        ops.extend(cef::input::file_drops(
-            &mut self.page_input,
-            &ctx,
-            pointer,
-            rect,
-        ));
-        if self.autoscroll.active() {
-            let step = self.autoscroll.tick(pointer, rect);
-            if let Some((x, y)) = step.wheel_at {
-                // Wheel deltas scroll up when positive.
-                ops.push(Op::Wheel {
-                    x,
-                    y,
-                    dx: -step.wheel.x.round(),
-                    dy: -step.wheel.y.round(),
-                    modifiers: cef::input::PRECISE,
-                });
+        self.native_tries += 1;
+        if self.native.is_none() {
+            if self.native_tries.is_multiple_of(50) {
+                // The title may not have reached the window: set it again.
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.native_token.clone()));
             }
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
-        for op in ops {
-            self.op(tab, op);
-        }
+    }
+
+    /// Tell the engine where the page area is (physical pixels in this
+    /// window) and whether a web page shows there.
+    fn place_page(&mut self, ctx: &egui::Context, rect: Rect, web: bool) {
+        let Some(parent) = self.native else { return };
         let scale = ctx.pixels_per_point();
-        // Whole physical pixels, so the texture maps 1:1.
-        let min = ((rect.min.to_vec2() * scale).round() / scale).to_pos2();
-        let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        match &mut self.gpu {
-            Ok(gpu) => {
-                let frame = gpu.frame(tab, &view);
-                let painter = ui.painter().with_clip_rect(rect);
-                if let Some((id, (w, h))) = frame.page {
-                    let shown = Rect::from_min_size(min, Vec2::new(w as f32, h as f32) / scale);
-                    painter.image(id, shown, uv, Color32::WHITE);
-                }
-                // An open <select> list or picker, over the page.
-                if let Some((id, at)) = frame.popup {
-                    painter.image(id, at.translate(min.to_vec2()), uv, Color32::WHITE);
-                }
-            }
-            Err(e) => {
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    tf("This page cannot be drawn: {0}", &[e]),
-                    egui::FontId::proportional(14.0),
-                    Color32::from_gray(90),
-                );
-            }
+        // Whole physical pixels; round outward so the page covers the area.
+        let x0 = (rect.left() * scale).floor() as i32;
+        let y0 = (rect.top() * scale).floor() as i32;
+        let x1 = (rect.right() * scale).ceil() as i32;
+        let y1 = (rect.bottom() * scale).ceil() as i32;
+        let place = cef::native::Place {
+            parent,
+            rect: [x0, y0, (x1 - x0).max(1), (y1 - y0).max(1)],
+            scale,
+        };
+        let visible = web && rect.width() > 1.0 && rect.height() > 1.0;
+        if self.last_place != Some((place, visible)) {
+            self.last_place = Some((place, visible));
+            let visible = visible && !self.minimized;
+            let _ = self.commands.send(Command::Place { place, visible });
         }
-        let v = cef::osr::lock(&view);
-        let in_page = pointer.is_some_and(|p| rect.contains(p)) && response.hovered();
-        if self.autoscroll.active() {
-            let p = *theme::palette(ui);
-            self.autoscroll.paint(
-                ui.painter(),
-                p.ink_primary,
-                p.surface_base.gamma_multiply(0.9),
-            );
-            ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
-        } else if in_page || response.is_pointer_button_down_on() {
-            ctx.set_cursor_icon(v.cursor);
+    }
+
+    /// The page area of web tab `tab`: the keyboard between the page and
+    /// the chrome, and what floats over the page.
+    fn page(&mut self, ctx: &egui::Context, rect: Rect, tab: TabId) {
+        if self.focus_page {
+            self.focus_page = false;
+            self.editing = false;
+            ctx.memory_mut(|m| m.surrender_focus(self.address_id));
+            self.op(tab, Op::Focus(true));
         }
-        if let Some(link) = v.status.as_deref().filter(|_| in_page) {
-            compositor::status_bubble(ui, rect, link, pointer);
+        if let Some(link) = self.status.clone() {
+            popup::status(ctx, rect, &link);
         }
-        let tooltip = v.tooltip.clone().filter(|_| in_page);
-        // A text field has focus: the input method composes there.
-        if focused && v.editing {
-            let caret = v.ime_rect.map_or(
-                Rect::from_min_size(rect.min, Vec2::new(1.0, 16.0)),
-                |[x, y, w, h]| {
-                    Rect::from_min_size(
-                        rect.min + Vec2::new(x as f32, y as f32),
-                        Vec2::new(w.max(1) as f32, h.max(1) as f32),
-                    )
-                },
-            );
-            ctx.output_mut(|o| {
-                o.ime = Some(egui::output::IMEOutput {
-                    purpose: egui::IMEPurpose::Normal,
-                    rect: caret,
-                    cursor_rect: caret,
-                    should_interrupt_composition: false,
-                })
-            });
-        }
-        drop(v);
-        if let Some(t) = tooltip {
-            response.clone().on_hover_text_at_pointer(t);
-        }
-        for op in self.prompts.show(&ctx, tab, rect) {
-            self.op(tab, op);
-        }
+        self.prompts.overlays(ctx, tab, rect);
         if self.prompts.take_refocus() {
             self.focus_page = true;
             ctx.request_repaint();
         }
+    }
+}
+
+/// A download size the way Chrome's download list shows it: B, KB, MB, GB.
+fn size_label(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }

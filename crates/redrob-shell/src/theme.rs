@@ -417,11 +417,8 @@ pub fn icon_button_sized(ui: &mut Ui, icon: Icon, tip: &str, side: f32, enabled:
             tint,
         );
     }
-    if tip.is_empty() {
-        r
-    } else {
-        r.on_hover_text(tip)
-    }
+    // In a window of its own: a toolbar tip reaches over the page.
+    crate::popup::tip(r, tip)
 }
 
 /// A primary (filled, brand) or secondary (outlined) text button.

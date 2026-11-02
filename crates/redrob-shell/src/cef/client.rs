@@ -1,5 +1,5 @@
-//! The CEF client of every tab: its render, display, load, life-span and
-//! focus handlers, which turn what Chromium does into `cdp::Event`s, and the
+//! The CEF client of every tab: its display, load, life-span, focus and
+//! keyboard handlers, which turn what Chromium does into `cdp::Event`s, and the
 //! DevTools protocol session the window keeps on each tab.
 
 use std::cell::RefCell;
@@ -9,19 +9,18 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use cef::{
     rc::Rc as _, sys, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
-    CefString, Client, ContextMenuHandler, CursorInfo, CursorType, DevToolsMessageObserver,
-    DictionaryValue, DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource,
-    Frame, ImplBrowser, ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver,
-    ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler,
-    JsdialogHandler, LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration,
-    RenderHandler, WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver,
-    WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    CefString, Client, ContextMenuHandler, DevToolsMessageObserver, DictionaryValue,
+    DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource, Frame, ImplBrowser,
+    ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler,
+    ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, JsdialogHandler, KeyboardHandler,
+    LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration, RequestHandler,
+    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
+    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
 };
 use serde_json::{json, Value};
 
-use super::handlers;
-use super::osr::{self, Gpu, SharedView};
-use super::Sink;
+use super::native::{self, Place};
+use super::{handlers, keys, Sink};
 use crate::cdp::Event;
 use crate::model::TabId;
 
@@ -34,8 +33,6 @@ static NEXT_POPUP: AtomicU64 = AtomicU64::new(1 << 40);
 pub struct TabCtx {
     pub tab: TabId,
     pub sink: Sink,
-    pub view: SharedView,
-    pub gpu: Option<Gpu>,
 }
 
 /// A browser CEF has just created, for the window's engine to adopt.
@@ -62,18 +59,22 @@ thread_local! {
     static READY: RefCell<Vec<(Reply, bool, Value)>> = const { RefCell::new(Vec::new()) };
     /// Popups CEF announced and has not created yet, by popup id.
     static POPUPS: RefCell<HashMap<i32, TabId>> = RefCell::new(HashMap::new());
-    /// Browsers closing because their tab moved to a new one (cdp.rs
-    /// `rehost`): their closing does not close the tab.
-    static RETIRED: RefCell<std::collections::HashSet<i32>> = RefCell::new(Default::default());
+    /// Where each tab's page sits (the engine keeps it current), so a
+    /// page a tab opens is born in the same window.
+    static PLACES: RefCell<HashMap<TabId, Place>> = RefCell::new(HashMap::new());
 }
 
-/// The browser `id` is closing but its tab lives on in another browser.
-pub fn retire(id: i32) {
-    RETIRED.with_borrow_mut(|r| r.insert(id));
+/// Where `tab`'s page was made or last placed.
+pub fn place_of(tab: TabId) -> Option<Place> {
+    PLACES.with_borrow(|p| p.get(&tab).copied())
 }
 
-fn retired(browser: Option<&mut Browser>) -> bool {
-    browser.is_some_and(|b| RETIRED.with_borrow(|r| r.contains(&b.identifier())))
+/// Where `tab`'s page sits now; `None` once it closed.
+pub fn set_place(tab: TabId, place: Option<Place>) {
+    PLACES.with_borrow_mut(|p| match place {
+        Some(place) => p.insert(tab, place),
+        None => p.remove(&tab),
+    });
 }
 
 type Reply = Box<dyn FnOnce(bool, Value)>;
@@ -88,20 +89,8 @@ pub fn take_closed() -> Vec<TabId> {
     CLOSED.with_borrow_mut(std::mem::take)
 }
 
-/// The window settings for an off-screen page.
-pub fn window_info(shared_texture: bool) -> WindowInfo {
-    WindowInfo {
-        windowless_rendering_enabled: 1,
-        shared_texture_enabled: shared_texture as _,
-        // Alloy style: the only one that renders off screen.
-        runtime_style: sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into(),
-        ..Default::default()
-    }
-}
-
 pub fn browser_settings() -> BrowserSettings {
     BrowserSettings {
-        windowless_frame_rate: 60,
         background_color: 0xFFFF_FFFF,
         ..Default::default()
     }
@@ -110,22 +99,23 @@ pub fn browser_settings() -> BrowserSettings {
 pub fn new(ctx: TabCtx) -> Client {
     let f = handlers::features();
     TabClient::new(
-        osr::handler(ctx.view.clone(), ctx.tab, ctx.sink.clone(), ctx.gpu.clone()),
+        keys::handler(ctx.sink.clone()),
         Display::new(ctx.clone()),
         Load::new(ctx.clone()),
         LifeSpan::new(ctx.clone()),
-        Focus::new(),
+        Focus::new(ctx.clone()),
         handlers::download::new(ctx.sink.clone(), f.downloads.clone(), false),
         handlers::permission::new(ctx.sink.clone(), f.sites.clone()),
         handlers::jsdialog::new(ctx.sink.clone()),
         handlers::context_menu::new(ctx.sink.clone()),
         handlers::find::new(ctx.sink.clone()),
+        handlers::languages::new(),
     )
 }
 
 wrap_client! {
     struct TabClient {
-        render: RenderHandler,
+        keyboard: KeyboardHandler,
         display: DisplayHandler,
         load: LoadHandler,
         life_span: LifeSpanHandler,
@@ -135,11 +125,12 @@ wrap_client! {
         jsdialog: JsdialogHandler,
         context_menu: ContextMenuHandler,
         find: FindHandler,
+        request: RequestHandler,
     }
 
     impl Client {
-        fn render_handler(&self) -> Option<RenderHandler> {
-            Some(self.render.clone())
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(self.keyboard.clone())
         }
         fn display_handler(&self) -> Option<DisplayHandler> {
             Some(self.display.clone())
@@ -169,6 +160,9 @@ wrap_client! {
         fn find_handler(&self) -> Option<FindHandler> {
             Some(self.find.clone())
         }
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(self.request.clone())
+        }
     }
 }
 
@@ -182,12 +176,6 @@ wrap_client! {
 
     impl Client {}
 }
-
-/// The platform's cursor handle as CEF's display handler takes it.
-#[cfg(target_os = "macos")]
-type CursorHandle = *mut u8;
-#[cfg(not(target_os = "macos"))]
-type CursorHandle = sys::cef_cursor_handle_t;
 
 fn text(s: Option<&CefString>) -> String {
     s.map(|s| s.to_string()).unwrap_or_default()
@@ -212,28 +200,9 @@ wrap_display_handler! {
         }
 
         fn on_status_message(&self, _browser: Option<&mut Browser>, value: Option<&CefString>) {
+            // The link under the pointer, for the window's status bubble.
             let v = text(value);
-            osr::lock(&self.ctx.view).status = (!v.is_empty()).then_some(v);
-            self.ctx.sink.repaint(self.ctx.tab);
-        }
-
-        fn on_tooltip(&self, _browser: Option<&mut Browser>, value: Option<&mut CefString>) -> ::std::os::raw::c_int {
-            let v = value.map(|s| s.to_string()).unwrap_or_default();
-            osr::lock(&self.ctx.view).tooltip = (!v.is_empty()).then_some(v);
-            self.ctx.sink.repaint(self.ctx.tab);
-            1
-        }
-
-        fn on_cursor_change(
-            &self,
-            _browser: Option<&mut Browser>,
-            _cursor: CursorHandle,
-            type_: CursorType,
-            _custom_cursor_info: Option<&CursorInfo>,
-        ) -> ::std::os::raw::c_int {
-            osr::lock(&self.ctx.view).cursor = osr::cursor_icon(*type_.as_ref());
-            self.ctx.sink.repaint(self.ctx.tab);
-            1
+            self.ctx.sink.send_tab(self.ctx.tab, Event::Status((!v.is_empty()).then_some(v)));
         }
     }
 }
@@ -284,25 +253,17 @@ wrap_life_span_handler! {
             };
             // Every page a page opens is a tab of the window, drawn here.
             let tab = NEXT_POPUP.fetch_add(1, Ordering::SeqCst);
-            let view = SharedView::default();
-            {
-                // The opener's page size until its window says otherwise.
-                let opener = osr::lock(&self.ctx.view);
-                let mut v = osr::lock(&view);
-                v.width = opener.width;
-                v.height = opener.height;
-                v.scale = opener.scale;
-                v.origin = opener.origin;
-            }
-            // GPU frames only while the window can still import them.
-            let shared = window_info.shared_texture_enabled == 1 && !osr::import_failed();
             let ctx = TabCtx {
                 tab,
                 sink: self.ctx.sink.clone(),
-                view,
-                gpu: self.ctx.gpu.clone().filter(|_| shared),
             };
-            *window_info = self::window_info(shared);
+            // A page in the opener's window, hidden until the window shows
+            // its tab.
+            let Some(place) = PLACES.with_borrow(|p| p.get(&self.ctx.tab).copied()) else {
+                return 1;
+            };
+            PLACES.with_borrow_mut(|p| p.insert(tab, place));
+            *window_info = native::child_info(place, false);
             *client = Some(new(ctx));
             if let Some(s) = settings {
                 *s = browser_settings();
@@ -340,38 +301,45 @@ wrap_life_span_handler! {
                     ctx: self.ctx.clone(),
                 })
             });
-            self.ctx.sink.repaint(self.ctx.tab);
         }
 
         fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
             // `window.close()`, or the window closing the tab: let it close
             // and tell the window, which removes the tab if it still shows it.
-            if !retired(browser) {
-                self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
-            }
+            let _ = browser;
+            self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
             0
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser {
-                let id = b.identifier();
-                self.ctx.sink.unbind(id);
-                // A re-hosted tab's old browser: the tab lives on.
-                if RETIRED.with_borrow_mut(|r| r.remove(&id)) {
-                    return;
-                }
+                self.ctx.sink.unbind(b.identifier());
+                super::forget_browser(b.identifier());
             }
+            set_place(self.ctx.tab, None);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
         }
     }
 }
 
 wrap_focus_handler! {
-    struct Focus;
+    struct Focus {
+        ctx: TabCtx,
+    }
 
     impl FocusHandler {
         fn on_set_focus(&self, _browser: Option<&mut Browser>, _source: FocusSource) -> ::std::os::raw::c_int {
             0
+        }
+
+        fn on_got_focus(&self, _browser: Option<&mut Browser>) {
+            // A click in the page, or the window gave it the keyboard.
+            self.ctx.sink.send_tab(self.ctx.tab, Event::Focused);
+        }
+
+        fn on_take_focus(&self, _browser: Option<&mut Browser>, _next: ::std::os::raw::c_int) {
+            // Tab past the page's last field: the toolbar, as in Chrome.
+            self.ctx.sink.send_tab(self.ctx.tab, Event::TakeFocus);
         }
     }
 }

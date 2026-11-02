@@ -106,6 +106,53 @@ pub fn state_of(complete: bool, canceled: bool, interrupted: bool, paused: bool)
     }
 }
 
+/// Addresses the person chose "Save link as..." or "Save image as..." for:
+/// their downloads open the save dialog, as in Chrome.
+fn asked() -> &'static Mutex<Vec<String>> {
+    static ASKED: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    ASKED.get_or_init(Default::default)
+}
+
+/// Download `url` from `browser`'s page and ask where to save it.
+pub fn save_as(browser: &Browser, url: &str) {
+    let Some(host) = browser.host() else {
+        return;
+    };
+    if let Ok(mut a) = asked().lock() {
+        a.push(url.to_string());
+    }
+    host.start_download(Some(&CefString::from(url)));
+}
+
+/// Whether the download of `url` (or the address it started from) was a
+/// "Save as": once only.
+fn take_asked(urls: &[String]) -> bool {
+    let Ok(mut a) = asked().lock() else {
+        return false;
+    };
+    match a.iter().position(|u| urls.contains(u)) {
+        Some(i) => {
+            a.remove(i);
+            true
+        }
+        None => false,
+    }
+}
+
+/// The folder the save dialog opens in: the downloads folder until the
+/// person saved somewhere, then where they last saved, as in Chrome.
+///
+/// CEF hands Chromium's dialog the file name only, and Chromium starts it
+/// in the profile's last selected folder (`selectfile.last_directory`),
+/// the home folder until a dialog was used.
+fn start_in(dir: &Path) {
+    const LAST: &str = "selectfile.last_directory";
+    let last = crate::cef::pref(LAST);
+    if !crate::cef::pref_is_set(LAST) || !Path::new(&last).is_dir() {
+        crate::cef::set_pref(LAST, &dir.to_string_lossy());
+    }
+}
+
 wrap_download_handler! {
     struct Downloads {
         sink: Sink,
@@ -134,15 +181,22 @@ wrap_download_handler! {
                 return 0;
             };
             let mut name = super::arg(suggested_name);
-            if name.is_empty() {
-                if let Some(item) = download_item.as_deref() {
+            let mut urls = Vec::new();
+            if let Some(item) = download_item.as_deref() {
+                if name.is_empty() {
                     name = text(&item.suggested_file_name());
                 }
+                urls.push(text(&item.url()));
+                urls.push(text(&item.original_url()));
+            }
+            let ask = take_asked(&urls) || self.ask;
+            if ask {
+                start_in(&self.dir);
             }
             let _ = std::fs::create_dir_all(&self.dir);
             let path = unique_path(&self.dir, &name);
             let path = CefString::from(path.to_string_lossy().as_ref());
-            callback.cont(Some(&path), self.ask as i32);
+            callback.cont(Some(&path), ask as i32);
             1
         }
 

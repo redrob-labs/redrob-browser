@@ -34,13 +34,15 @@ sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
 open = "5"
-# Paste from the page's context menu reads the system clipboard (cef/handlers/context_menu.rs).
-arboard = { version = "3.7", default-features = false }
-# Chromium in every window tab (docs/CEF.md). The binaries come from CEF_PATH.
-# accelerated_osr: pages arrive as GPU textures (dmabuf, IOSurface, D3D11).
-cef = { version = "=156.3.0", default-features = false, features = ["accelerated_osr", "sandbox"] }
+# Chromium in every window tab (docs/CEF.md), each page a native child
+# window of the browser window. The binaries come from CEF_PATH.
+cef = { version = "=156.3.0", default-features = false, features = ["sandbox"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# The pages are X11 child windows: the window runs on X11 (main.rs) and
+# places them with its own X connection (cef/native.rs).
+winit = { version = "0.30.13", default-features = false, features = ["x11", "rwh_06"] }
+x11rb = "0.13"
 # fcitx5 over D-Bus, so text composes in place on X11 (ime.rs). zbus is
 # already in the build (accesskit); blocking calls only.
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
@@ -49,6 +51,12 @@ serde = "1"
 [target.'cfg(unix)'.dependencies]
 # SIGTERM and SIGINT handlers in place of Chromium's (cef/mod.rs).
 libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Pages are NSViews in the window's content view (cef/native.rs).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString", "NSArray", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation"] }
 
 [target.'cfg(windows)'.dependencies]
 # Start-up on Windows (startup.rs: the log file, the message box) and the
@@ -60,6 +68,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Registry",
+    "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
 
