@@ -147,6 +147,30 @@ pub fn browser_of(target: &str) -> Option<i32> {
     targets().lock().ok()?.get(target).copied()
 }
 
+/// Browsers whose DevTools replies the window hears (`Created::observe`).
+fn observed() -> &'static Mutex<std::collections::HashSet<i32>> {
+    static O: OnceLock<Mutex<std::collections::HashSet<i32>>> = OnceLock::new();
+    O.get_or_init(Default::default)
+}
+
+/// The window listens to browser `id`'s DevTools replies.
+pub(crate) fn note_observed(id: i32) {
+    if let Ok(mut o) = observed().lock() {
+        o.insert(id);
+    }
+}
+
+/// An open browser the window listens to, the oldest: a DevTools session
+/// for questions about the whole profile (its extensions' workers).
+pub(crate) fn any_browser() -> Option<cef::Browser> {
+    let o = observed().lock().ok()?.clone();
+    let b = browsers().lock().ok()?;
+    b.iter()
+        .filter(|(id, _)| o.contains(id))
+        .min_by_key(|(id, _)| **id)
+        .map(|(_, b)| b.clone())
+}
+
 /// Every open browser by its id, so code off CEF's UI thread (the relay)
 /// can reach one through [`with_browser`].
 fn browsers() -> &'static Mutex<HashMap<i32, cef::Browser>> {
@@ -156,6 +180,11 @@ fn browsers() -> &'static Mutex<HashMap<i32, cef::Browser>> {
 
 /// `browser` was created; `None` once the browser `id` closed.
 pub(crate) fn keep_browser(id: i32, browser: Option<&cef::Browser>) {
+    if browser.is_none() {
+        if let Ok(mut o) = observed().lock() {
+            o.remove(&id);
+        }
+    }
     if let Ok(mut b) = browsers().lock() {
         match browser {
             Some(browser) => b.insert(id, browser.clone()),

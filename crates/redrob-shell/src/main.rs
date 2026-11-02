@@ -710,6 +710,9 @@ impl Window {
                 }
                 continue;
             }
+            if let Event::Badges = event {
+                continue;
+            }
             if let Event::PopupClosed = event {
                 if self.ext_popup.as_ref().is_some_and(|(t, _)| *t == tab) {
                     self.ext_popup = None;
@@ -838,7 +841,8 @@ impl Window {
                 | Event::TakeFocus
                 | Event::Status(_)
                 | Event::SiteInfo(_)
-                | Event::PopupClosed => {}
+                | Event::PopupClosed
+                | Event::Badges => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -1281,6 +1285,17 @@ impl Window {
                 egui::Image::new((tex, Vec2::splat(18.0))).paint_at(ui, icon);
             }
             None => Icon::Plug.paint(ui, icon, p.ink_secondary),
+        }
+        let badge = self
+            .active_id()
+            .and_then(|t| cef::handlers::extensions::badge(&e.id, t));
+        if let Some(b) = badge {
+            let behind = if fill == Color32::TRANSPARENT {
+                p.surface_base
+            } else {
+                fill
+            };
+            paint_badge(ui, rect, &b, p.border_subtle, behind);
         }
         popup::tip(r, &e.name)
     }
@@ -3352,5 +3367,90 @@ fn size_label(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// An extension's badge over its toolbar button `button`, laid out as
+/// Chrome's (`IconWithBadgeImageSource`): 14 points high at the bottom of
+/// the 28 point icon area, the text at most 23 points wide with 2 on each
+/// side, at least as wide as high, right-aligned until 20 wide and centered
+/// from there, with a 1 point cutout in `behind` around it. `default` is
+/// the background when the extension set none.
+fn paint_badge(
+    ui: &egui::Ui,
+    button: Rect,
+    badge: &cef::handlers::extensions::Badge,
+    default: Color32,
+    behind: Color32,
+) {
+    const HEIGHT: f32 = 14.0;
+    const MAX_TEXT: f32 = 23.0;
+    const PADDING: f32 = 2.0;
+    let area = Rect::from_center_size(button.center(), Vec2::splat(28.0));
+    let [r, g, b, a] = badge.background;
+    let background = if a == 0 {
+        default
+    } else {
+        Color32::from_rgb(r, g, b)
+    };
+    let [r, g, b, a] = badge.color;
+    let color = if a == 0 {
+        max_contrast(background)
+    } else {
+        Color32::from_rgba_unmultiplied(r, g, b, a)
+    };
+    let font = egui::FontId::proportional(9.0);
+    let galley = ui.painter().layout_no_wrap(badge.text.clone(), font, color);
+    let text_w = galley.size().x.min(MAX_TEXT).ceil();
+    let mut width = text_w + PADDING * 2.0;
+    // Even, as the area is: an odd badge in an even area blurs.
+    if (width as i32) % 2 != (area.width() as i32) % 2 {
+        width += 1.0;
+    }
+    let width = width.max(HEIGHT);
+    let x = if width >= 20.0 {
+        area.left() + ((area.width() - width) / 2.0).floor()
+    } else {
+        area.right() - width
+    };
+    let rect = Rect::from_min_size(
+        egui::pos2(x, area.bottom() - HEIGHT),
+        Vec2::new(width, HEIGHT),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(rect.expand(1.0), CornerRadius::same(3), behind);
+    painter.rect_filled(rect, CornerRadius::same(4), background);
+    let text_rect = Rect::from_center_size(rect.center(), Vec2::new(text_w, HEIGHT));
+    let at = egui::pos2(
+        text_rect.center().x - galley.size().x.min(MAX_TEXT) / 2.0,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter
+        .with_clip_rect(text_rect.intersect(painter.clip_rect()))
+        .galley(at, galley, color);
+}
+
+/// White or near black, whichever contrasts more with `c`
+/// (`color_utils::GetColorWithMaxContrast`).
+fn max_contrast(c: Color32) -> Color32 {
+    fn lum(c: Color32) -> f32 {
+        let ch = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+    let dark = Color32::from_rgb(0x20, 0x21, 0x24);
+    let l = lum(c);
+    let with_white = 1.05 / (l + 0.05);
+    let with_dark = (l + 0.05) / (lum(dark) + 0.05);
+    if with_white >= with_dark {
+        Color32::WHITE
+    } else {
+        dark
     }
 }

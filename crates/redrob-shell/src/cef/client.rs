@@ -52,9 +52,13 @@ pub struct Created {
 impl Created {
     /// Listen to the tab's DevTools session; keep the registration.
     pub fn observe(&self) -> Option<Registration> {
-        self.browser.host().and_then(|host| {
+        let r = self.browser.host().and_then(|host| {
             host.add_dev_tools_message_observer(Some(&mut Observer::new(self.ctx.clone())))
-        })
+        });
+        if r.is_some() {
+            super::note_observed(self.browser.identifier());
+        }
+        r
     }
 }
 
@@ -431,6 +435,7 @@ wrap_life_span_handler! {
                 super::keep_browser(b.identifier(), None);
             }
             set_place(self.ctx.tab, None);
+            handlers::extensions::forget_tab(self.ctx.tab);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
         }
     }
@@ -533,6 +538,33 @@ wrap_dev_tools_message_observer! {
     }
 
     impl DevToolsMessageObserver {
+        fn on_dev_tools_message(
+            &self,
+            _browser: Option<&mut Browser>,
+            message: Option<&[u8]>,
+        ) -> ::std::os::raw::c_int {
+            // CEF leaves the replies of an attached session (an extension's
+            // worker, `devtools_in`) undelivered: take them here.
+            let Some(m) = message else { return 0 };
+            if !m.windows(12).any(|w| w == b"\"sessionId\":") {
+                return 0;
+            }
+            let Ok(v) = serde_json::from_slice::<Value>(m) else {
+                return 0;
+            };
+            let Some(id) = v["id"].as_i64().and_then(|i| i32::try_from(i).ok()) else {
+                return 0;
+            };
+            let Some(reply) = PENDING.with_borrow_mut(|p| p.remove(&id)) else {
+                return 0;
+            };
+            let ok = v.get("error").is_none();
+            let value = if ok { v["result"].clone() } else { v["error"].clone() };
+            READY.with_borrow_mut(|r| r.push((reply, ok, value)));
+            self.ctx.sink.wake_window();
+            1
+        }
+
         fn on_dev_tools_method_result(
             &self,
             _browser: Option<&mut Browser>,
@@ -548,6 +580,9 @@ wrap_dev_tools_message_observer! {
             // the observer list CEF is walking.
             if let Some(reply) = PENDING.with_borrow_mut(|p| p.remove(&message_id)) {
                 READY.with_borrow_mut(|r| r.push((reply, success == 1, value)));
+                // Asked from a CEF task (cef/handlers/extensions.rs), not
+                // the window loop: have that loop run it.
+                self.ctx.sink.wake_window();
             }
         }
 
@@ -571,6 +606,7 @@ wrap_dev_tools_message_observer! {
                             .as_str()
                             .or(frame["url"].as_str())
                             .unwrap_or_default();
+                        crate::cef::handlers::extensions::page_loaded(tab);
                         sink.send_tab(tab, Event::Navigated(url.to_string()));
                     }
                 }
