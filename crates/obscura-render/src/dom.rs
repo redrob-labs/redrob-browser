@@ -4966,6 +4966,18 @@ fn retained_style_plan(
 /// `retained_style_plan`, where `sheet_appended` says the caller already
 /// invalidated for the rules a changed `<style>` added. A style element's
 /// insertion or text then needs no whole-document fallback.
+/// Smallest retained-style damage (fresh nodes added by one mutation) that
+/// `OBSCURA_RENDER_TIMING` reports; `OBSCURA_DAMAGE_REPORT_FLOOR` lowers it.
+fn damage_report_floor() -> usize {
+    static FLOOR: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *FLOOR.get_or_init(|| {
+        std::env::var("OBSCURA_DAMAGE_REPORT_FLOOR")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(200)
+    })
+}
+
 fn retained_style_plan_for_sheet(
     tree: &DomTree,
     sheet: &crate::css::Stylesheet,
@@ -4993,7 +5005,7 @@ fn retained_style_plan_for_sheet(
     let report_damage = std::env::var_os("OBSCURA_RENDER_TIMING").is_some();
     let mut previous_damage: Option<(usize, &RetainedStyleMutation)> = None;
     let describe_damage = |before: usize, after: usize, mutation: &RetainedStyleMutation| {
-        if after.saturating_sub(before) >= 200 {
+        if after.saturating_sub(before) >= damage_report_floor() {
             let node = match mutation {
                 RetainedStyleMutation::Attribute(attribute) => Some(attribute.node),
                 RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. })
@@ -5152,8 +5164,11 @@ fn retained_style_plan_for_sheet(
                         }
                         return RetainedStylePlan::Full;
                     }
+                    // Character data has no style of its own and no selector
+                    // reads it apart from :empty and relational selectors,
+                    // which the scopes here and above cover. The parent and
+                    // its ancestors keep their computed styles.
                     if let Some(parent) = parent {
-                        add_style_context_chain(tree, parent, &mut dirty);
                         add_empty_parent_scope(
                             tree,
                             map,
@@ -8747,6 +8762,7 @@ fn layout_dom_once(
                     TAFFY_MISSES.with(|misses| misses.replace([0; 5]))
                 );
             }
+            phase_marks.push(("seed", std::time::Instant::now()));
             let available = taffy::Size {
                 width: taffy::AvailableSpace::Definite(initial_cb_width),
                 height: taffy::AvailableSpace::Definite(viewport.1),
@@ -21164,8 +21180,9 @@ mod tests {
         assert!(!incremental.custom_properties.contains_key(&removed));
         assert!(!incremental.custom_properties.contains_key(&removed_child));
 
-        // Character-data changes keep selector matching local but must rebuild
-        // text shaping and parent geometry.
+        // Character-data changes keep every computed style (no selector reads
+        // text apart from :empty and relational ones, which are not used
+        // here) but must rebuild text shaping and parent geometry.
         let tree = parse_html(
             r#"<style>#label{display:block;width:120px}.clean{height:17px}</style><div id="label">a</div><aside class="clean"></aside>"#,
         );
@@ -21193,7 +21210,7 @@ mod tests {
                 node: text,
                 parent: Some(label),
             },
-            Incremental,
+            RetainedDifferentialExpectation::ReuseAll,
         );
 
         // Keyed :has() rules do not poison unrelated mutations. A matching

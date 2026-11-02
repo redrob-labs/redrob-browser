@@ -4409,21 +4409,28 @@ impl Stylesheet {
             // then pass those substituted values to descendants. Re-resolving an
             // inherited `--b:var(--a)` after a child overrides `--a` is observably
             // wrong: browsers keep the parent's already-computed `--b`.
-            let resolution_environment = resolved_props.clone();
-            for name in own_names {
-                let Some(value) = resolution_environment.get(&name) else {
-                    continue;
-                };
-                if let Some(computed) = substitute_var_value(value, &resolution_environment, 0) {
-                    resolved_props.insert(name, computed);
-                } else if let Some(initial) = self
-                    .registered_custom_properties
-                    .get(&name)
-                    .and_then(|entry| entry.initial_value.clone())
-                {
-                    resolved_props.insert(name, initial);
-                } else {
-                    resolved_props.remove(&name);
+            // Every substitution reads the environment as it was before any of
+            // them is applied, so compute them all first instead of cloning it.
+            let resolved_own: Vec<(String, Option<String>)> = own_names
+                .into_iter()
+                .filter_map(|name| {
+                    let value = resolved_props.get(&name)?;
+                    let computed = substitute_var_value(value, &resolved_props, 0).or_else(|| {
+                        self.registered_custom_properties
+                            .get(&name)
+                            .and_then(|entry| entry.initial_value.clone())
+                    });
+                    Some((name, computed))
+                })
+                .collect();
+            for (name, computed) in resolved_own {
+                match computed {
+                    Some(computed) => {
+                        resolved_props.insert(name, computed);
+                    }
+                    None => {
+                        resolved_props.remove(&name);
+                    }
                 }
             }
             if has_own || registration_changed_props {

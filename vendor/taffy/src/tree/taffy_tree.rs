@@ -146,6 +146,13 @@ struct NodeData {
     /// made beside floats is only reused beside the same floats at the same position.
     #[cfg(all(feature = "block_layout", feature = "float_layout"))]
     pub(crate) float_key: u64,
+
+    /// `unrounded_layout` changed since `final_layout` was last rounded from it
+    pub(crate) round_stale: bool,
+    /// The node or a descendant needs rounding again (its layout or its children changed)
+    pub(crate) round_subtree_stale: bool,
+    /// The bits of the cumulative offset `final_layout` was rounded at
+    pub(crate) round_origin: (u32, u32),
 }
 
 impl NodeData {
@@ -166,6 +173,9 @@ impl NodeData {
             float_sensitive: false,
             #[cfg(all(feature = "block_layout", feature = "float_layout"))]
             float_key: 0,
+            round_stale: true,
+            round_subtree_stale: true,
+            round_origin: (u32::MAX, u32::MAX),
         }
     }
 
@@ -512,7 +522,7 @@ where
     }
 
     fn set_unrounded_layout(&mut self, node: NodeId, layout: &Layout) {
-        self.taffy.nodes[node.into()].unrounded_layout = *layout;
+        self.taffy.store_unrounded_layout(node, layout);
     }
 
     fn get_unrounded_layout(&self, node: NodeId) -> Layout {
@@ -611,7 +621,7 @@ where
 
     #[inline(always)]
     fn set_unrounded_layout(&mut self, node_id: NodeId, layout: &Layout) {
-        self.taffy.nodes[node_id.into()].unrounded_layout = *layout;
+        self.taffy.store_unrounded_layout(node_id, layout);
     }
 
     #[inline(always)]
@@ -759,6 +769,22 @@ where
     #[inline(always)]
     fn get_unrounded_layout(&self, node: NodeId) -> Layout {
         self.taffy.nodes[node.into()].unrounded_layout
+    }
+
+    #[inline(always)]
+    fn rounding_is_current(&self, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) -> bool {
+        let node = &self.taffy.nodes[node_id.into()];
+        !node.round_stale
+            && !node.round_subtree_stale
+            && node.round_origin == (cumulative_x.to_bits(), cumulative_y.to_bits())
+    }
+
+    #[inline(always)]
+    fn note_rounded(&mut self, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) {
+        let node = &mut self.taffy.nodes[node_id.into()];
+        node.round_stale = false;
+        node.round_subtree_stale = false;
+        node.round_origin = (cumulative_x.to_bits(), cumulative_y.to_bits());
     }
 
     #[inline(always)]
@@ -932,6 +958,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         data.cache = source_data.cache.clone();
         data.unrounded_layout = source_data.unrounded_layout;
         data.final_layout = source_data.final_layout;
+        data.round_stale = true;
         #[cfg(all(feature = "block_layout", feature = "float_layout"))]
         {
             data.float_key = source_data.float_key;
@@ -1137,6 +1164,31 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
     }
 
+    /// Store a node's unrounded layout, noting a change for the next rounding pass
+    #[inline]
+    fn store_unrounded_layout(&mut self, node: NodeId, layout: &Layout) {
+        let data = &mut self.nodes[node.into()];
+        if data.unrounded_layout != *layout || data.round_stale {
+            data.unrounded_layout = *layout;
+            self.note_layout_changed(node);
+        }
+    }
+
+    /// The node's unrounded layout changed: round it and every node on its path from the root
+    /// again (rounding skips a subtree whose layouts and offset are those it rounded last).
+    fn note_layout_changed(&mut self, node: NodeId) {
+        self.nodes[node.into()].round_stale = true;
+        let mut current = self.parents[node.into()];
+        while let Some(parent) = current {
+            let data = &mut self.nodes[parent.into()];
+            if data.round_subtree_stale {
+                break;
+            }
+            data.round_subtree_stale = true;
+            current = self.parents[parent.into()];
+        }
+    }
+
     /// Move a laid-out node by (dx, dy) relative to its parent, after layout
     /// (CSS fragmentation moves a box into a later column). The rounded
     /// layout moves by the rounded offset.
@@ -1146,6 +1198,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         data.unrounded_layout.location.y += dy;
         data.final_layout.location.x += dx.round();
         data.final_layout.location.y += dy.round();
+        self.note_layout_changed(node);
     }
 
     /// Returns this node layout with unrounded values relative to its parent.
@@ -1215,6 +1268,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
             let mut current = Some(node_key);
             while let Some(key) = current {
                 let _ = nodes[key].mark_dirty();
+                // A changed style or child list changes what rounding visits below here.
+                nodes[key].round_subtree_stale = true;
                 current = parents.get(key).copied().flatten().map(Into::into);
             }
         }
@@ -1254,6 +1309,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
         if let Some(location) = parent_location {
             self.nodes[node_id.into()].unrounded_layout.location = location;
+            self.note_layout_changed(node_id);
             let _ = self.mark_dirty(node_id);
         }
         Ok(())
