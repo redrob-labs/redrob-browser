@@ -136,6 +136,59 @@ pub(crate) struct StyleIndex {
     pub(crate) containers: crate::HashSet<NodeId>,
     /// `position: absolute` (or fixed).
     pub(super) absolute: crate::HashSet<NodeId>,
+    /// The candidates of a few post-layout passes, by `IndexKind`.
+    kinds: [crate::HashSet<NodeId>; IndexKind::COUNT],
+}
+
+/// Styles some post-layout passes visit the boxes of (see
+/// `BuildReuse::indexed_boxes`).
+#[derive(Clone, Copy)]
+pub(crate) enum IndexKind {
+    /// `super::is_fit_content_candidate`.
+    FitContent,
+    /// `super::inline_percentage_height`.
+    PercentHeight,
+    /// An `auto` left or right margin.
+    AutoMargin,
+    /// `super::is_auto_height_column_flex`.
+    ColumnFlex,
+    /// `super::may_hold_full_span_column_subgrids`.
+    Subgrid,
+    /// A `::before`/`::after` with `position: absolute` and percentage
+    /// padding.
+    PositionedPseudoPadding,
+}
+
+impl IndexKind {
+    const COUNT: usize = 6;
+    const ALL: [Self; Self::COUNT] = [
+        Self::FitContent,
+        Self::PercentHeight,
+        Self::AutoMargin,
+        Self::ColumnFlex,
+        Self::Subgrid,
+        Self::PositionedPseudoPadding,
+    ];
+
+    pub(crate) fn matches(self, style: &crate::LayoutStyle) -> bool {
+        match self {
+            Self::FitContent => super::is_fit_content_candidate(style),
+            Self::PercentHeight => super::inline_percentage_height(style).is_some(),
+            Self::AutoMargin => style.margin_auto[1] || style.margin_auto[3],
+            Self::ColumnFlex => super::is_auto_height_column_flex(style),
+            Self::Subgrid => super::may_hold_full_span_column_subgrids(style),
+            Self::PositionedPseudoPadding => [
+                style.before_pseudo.as_deref(),
+                style.after_pseudo.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|pseudo| {
+                pseudo.position == Some(taffy::Position::Absolute)
+                    && pseudo.padding_percent.iter().any(Option::is_some)
+            }),
+        }
+    }
 }
 
 impl StyleIndex {
@@ -173,6 +226,12 @@ impl StyleIndex {
             &mut self.absolute,
             style.is_some_and(|style| matches!(style.position, Some(taffy::Position::Absolute))),
         );
+        for kind in IndexKind::ALL {
+            toggle(
+                &mut self.kinds[kind as usize],
+                style.is_some_and(|style| kind.matches(style)),
+            );
+        }
     }
 
     /// Bring the index up to date: the styles of `ids` were written, or,
@@ -261,6 +320,8 @@ pub(super) struct BuildReuse {
     /// Elements an earlier build built that may be gone now.
     gc: Vec<NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
+    /// Every box of each element (`id_map` inverted).
+    boxes: HashMap<NodeId, Vec<taffy::NodeId>>,
     /// The deferred flex percentages the build saw (see `Deferrals`).
     deferrals: Deferrals,
     /// Elements whose style a pass wrote after the previous build, with
@@ -299,6 +360,7 @@ impl BuildReuse {
             visited: vec![false; slots],
             gc: Vec::new(),
             by_dom,
+            boxes: HashMap::default(),
             deferrals: Deferrals::default(),
             pending: Vec::new(),
             pending_before: None,
@@ -394,6 +456,90 @@ impl BuildReuse {
     /// Whether `index` is up to date with this layout's styles.
     pub(super) fn index_valid(&self) -> bool {
         self.index.valid
+    }
+
+    /// Bring the index up to date with the styles written so far.
+    pub(super) fn refresh_index(&mut self, styles: &super::StyleMap) {
+        if !self.index.valid {
+            return;
+        }
+        match styles.changed_nodes() {
+            Some(written) => {
+                let written = written.to_vec();
+                self.index.update(&written, styles);
+            }
+            None => self.index.valid = false,
+        }
+    }
+
+    /// The boxes of the elements whose style is of `kind` (each element's
+    /// every box), when the index is up to date.
+    pub(super) fn indexed_boxes(
+        &self,
+        kind: IndexKind,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+    ) -> Option<Vec<(taffy::NodeId, NodeId)>> {
+        if !self.index.valid {
+            return None;
+        }
+        Some(
+            self.index.kinds[kind as usize]
+                .iter()
+                .filter(|id| styles.get(id).is_some_and(|style| kind.matches(style)))
+                .flat_map(|&id| {
+                    self.boxes
+                        .get(&id)
+                        .into_iter()
+                        .flatten()
+                        .map(move |&node| (node, id))
+                })
+                .collect(),
+        )
+    }
+
+    /// Every box of each of `elements`.
+    pub(super) fn boxes_of(
+        &self,
+        elements: impl IntoIterator<Item = NodeId>,
+    ) -> Vec<(taffy::NodeId, NodeId)> {
+        elements
+            .into_iter()
+            .flat_map(|id| {
+                self.boxes
+                    .get(&id)
+                    .into_iter()
+                    .flatten()
+                    .map(move |&node| (node, id))
+            })
+            .collect()
+    }
+
+    /// The elements whose style is of `kind`, when the index is up to date.
+    pub(super) fn indexed_elements(
+        &self,
+        kind: IndexKind,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+    ) -> Option<Vec<NodeId>> {
+        self.index.valid.then(|| {
+            self.index.kinds[kind as usize]
+                .iter()
+                .copied()
+                .filter(|id| styles.get(id).is_some_and(|style| kind.matches(style)))
+                .collect()
+        })
+    }
+
+    /// Whether some element's style is of `kind`, when known.
+    pub(super) fn any_indexed(
+        &self,
+        kind: IndexKind,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+    ) -> Option<bool> {
+        self.index.valid.then(|| {
+            self.index.kinds[kind as usize]
+                .iter()
+                .any(|id| styles.get(id).is_some_and(|style| kind.matches(style)))
+        })
     }
 
     fn style_dirty(&self, id: NodeId) -> bool {
@@ -546,6 +692,7 @@ impl BuildReuse {
         for &own in &own_nodes {
             if let Some(&dom) = id_map.get(&own) {
                 self.by_dom.insert(dom, own);
+                self.boxes.entry(dom).or_default().push(own);
             }
         }
         let builder_new = self
@@ -591,6 +738,12 @@ impl BuildReuse {
             if let Some(dom) = id_map.remove(&node) {
                 if self.by_dom.get(&dom) == Some(&node) {
                     self.by_dom.remove(&dom);
+                }
+                if let Some(boxes) = self.boxes.get_mut(&dom) {
+                    boxes.retain(|&other| other != node);
+                    if boxes.is_empty() {
+                        self.boxes.remove(&dom);
+                    }
                 }
             }
             items.table_cols.remove(&node);
@@ -699,6 +852,7 @@ pub(crate) struct RetainedLayoutTree {
     pub(super) root_dom: NodeId,
     pub(super) id_map: HashMap<taffy::NodeId, NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
+    boxes: HashMap<NodeId, Vec<taffy::NodeId>>,
     /// The side tables keyed by box (the build-order ones are in `tables`).
     registry: IfcRegistry,
     tables: BuildTables,
@@ -792,6 +946,7 @@ impl RetainedLayoutTree {
         reuse.damage_nodes = damage.nodes.clone();
         reuse.deferral_memo = std::mem::take(&mut self.deferral_memo);
         reuse.index = std::mem::take(&mut self.index);
+        reuse.boxes = std::mem::take(&mut self.boxes);
         if crate::prof::enabled() {
             eprintln!(
                 "[timing] retained-tree damage nodes={} context={} subtrees={} pending={}",
@@ -997,6 +1152,7 @@ pub(super) fn retain(
         root_dom,
         id_map,
         by_dom,
+        boxes: reuse.boxes,
         registry,
         tables,
         records: reuse.records,

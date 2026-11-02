@@ -2896,18 +2896,23 @@ fn resolve_inline_percentage_heights(
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     definite_height_nodes: &HashSet<NodeId>,
     place: &mut dyn FnMut(&mut TaffyTree<usize>, &[taffy::NodeId], bool),
+    // The boxes with a percentage-height style, when indexed.
+    indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> bool {
     // Only a box with a percentage height can change, and only the layouts on
     // the path to it are read: walk those paths alone.
-    let candidates: Vec<taffy::NodeId> = id_map
-        .iter()
-        .filter(|(_, dom)| {
-            styles
-                .get(dom)
-                .is_some_and(|style| inline_percentage_height(style).is_some())
-        })
-        .map(|(&node, _)| node)
-        .collect();
+    let candidates: Vec<taffy::NodeId> = match indexed {
+        Some(indexed) => indexed.iter().map(|&(node, _)| node).collect(),
+        None => id_map
+            .iter()
+            .filter(|(_, dom)| {
+                styles
+                    .get(dom)
+                    .is_some_and(|style| inline_percentage_height(style).is_some())
+            })
+            .map(|(&node, _)| node)
+            .collect(),
+    };
     if candidates.is_empty() {
         return false;
     }
@@ -3026,19 +3031,28 @@ fn inline_percentage_height(style: &crate::LayoutStyle) -> Option<f32> {
     })
 }
 
-fn sync_positioned_pseudo_percentage_padding(rects: &HashMap<NodeId, Rect>, styles: &mut StyleMap) {
-    let has_positioned_percentage_padding = styles.values().any(|style| {
-        [
-            style.before_pseudo.as_deref(),
-            style.after_pseudo.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-        .any(|pseudo| {
-            pseudo.position == Some(taffy::Position::Absolute)
-                && pseudo.padding_percent.iter().any(Option::is_some)
-        })
-    });
+fn sync_positioned_pseudo_percentage_padding(
+    rects: &HashMap<NodeId, Rect>,
+    styles: &mut StyleMap,
+    // The hosts of such pseudo boxes, when indexed.
+    indexed: Option<&[NodeId]>,
+) {
+    if indexed.is_some_and(|hosts| hosts.is_empty()) {
+        return;
+    }
+    let has_positioned_percentage_padding = indexed.is_some()
+        || styles.values().any(|style| {
+            [
+                style.before_pseudo.as_deref(),
+                style.after_pseudo.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|pseudo| {
+                pseudo.position == Some(taffy::Position::Absolute)
+                    && pseudo.padding_percent.iter().any(Option::is_some)
+            })
+        });
     if !has_positioned_percentage_padding {
         return;
     }
@@ -3062,8 +3076,11 @@ fn sync_positioned_pseudo_percentage_padding(rects: &HashMap<NodeId, Rect>, styl
     }
 
     // Only hosts whose pseudo padding changes are written (and so noted).
-    let updates: Vec<(NodeId, Option<crate::Edges>, Option<crate::Edges>)> = styles
-        .iter()
+    let all: Box<dyn Iterator<Item = (&NodeId, &crate::LayoutStyle)>> = match indexed {
+        Some(indexed) => Box::new(indexed.iter().filter_map(|id| styles.get_key_value(id))),
+        None => Box::new(styles.iter()),
+    };
+    let updates: Vec<(NodeId, Option<crate::Edges>, Option<crate::Edges>)> = all
         .filter_map(|(host, style)| {
             let rect = rects.get(host)?;
             let containing_block_width =
@@ -10371,6 +10388,31 @@ fn layout_dom_once(
                 }
             };
             ifc_items.ifc.activate();
+            // The candidates of the passes below, from the style index of a
+            // retained build (every box otherwise).
+            if let Some(reuse) = ifc_items.reuse.as_mut() {
+                reuse.refresh_index(&styles);
+            }
+            let indexed_boxes = |kind: retain::IndexKind| {
+                ifc_items
+                    .reuse
+                    .as_ref()
+                    .and_then(|reuse| reuse.indexed_boxes(kind, &styles))
+            };
+            let fit_content_boxes = indexed_boxes(retain::IndexKind::FitContent);
+            let percent_height_boxes = indexed_boxes(retain::IndexKind::PercentHeight);
+            let column_flex_boxes = indexed_boxes(retain::IndexKind::ColumnFlex);
+            let cell_boxes: Option<Vec<(taffy::NodeId, NodeId)>> = ifc_items
+                .reuse
+                .as_ref()
+                .map(|reuse| reuse.boxes_of(rendered_nodes_of_kind(tree, ElementKind::CELL)));
+            let subgrid_hosts: Option<Vec<NodeId>> =
+                indexed_boxes(retain::IndexKind::Subgrid).map(|boxes| {
+                    let mut hosts: Vec<NodeId> = boxes.into_iter().map(|(_, dom)| dom).collect();
+                    hosts.sort_unstable_by_key(|id| id.index());
+                    hosts.dedup();
+                    hosts
+                });
 
             #[cfg(feature = "paint")]
             {
@@ -10380,10 +10422,10 @@ fn layout_dom_once(
                 // wide cell, e.g. a fixed-width image row in an infobox, makes the
                 // table grow rather than overflow), at most the available width,
                 // preferring the author's specified width when there is one.
-                let mut tables: Vec<(taffy::NodeId, NodeId, usize)> = id_map
-                    .iter()
-                    .filter(|(taffy, _)| ifc_items.table_rows.contains_key(taffy))
-                    .map(|(t, d)| (*t, *d))
+                let mut tables: Vec<(taffy::NodeId, NodeId, usize)> = ifc_items
+                    .table_rows
+                    .keys()
+                    .filter_map(|taffy| id_map.get(taffy).map(|dom| (*taffy, *dom)))
                     .chain(
                         ifc_items
                             .anonymous_tables
@@ -10944,7 +10986,7 @@ fn layout_dom_once(
                 phase_marks.push(("c.first", crate::prof::mark()));
                 if deferred_cyclic_inline_sizes.is_empty() {
                     taffy_tree.place_deferred(
-                        &fit_content_nodes(&id_map, &styles),
+                        &fit_content_nodes(&id_map, &styles, fit_content_boxes.as_deref()),
                         false,
                         &mut measure,
                     );
@@ -10955,6 +10997,7 @@ fn layout_dom_once(
                         &id_map,
                         &styles,
                         initial_cb_width,
+                        fit_content_boxes.as_deref(),
                         |tree, node, width| {
                             tree.compute_layout_with_measure(
                                 node,
@@ -10983,6 +11026,7 @@ fn layout_dom_once(
                     &mut |tree: &mut TaffyTree<usize>, nodes: &[taffy::NodeId], children: bool| {
                         tree.place_deferred(nodes, children, &mut measure)
                     },
+                    percent_height_boxes.as_deref(),
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -10995,6 +11039,7 @@ fn layout_dom_once(
                     &mut |tree: &mut TaffyTree<usize>, nodes: &[taffy::NodeId], children: bool| {
                         tree.place_deferred(nodes, children, &mut measure)
                     },
+                    column_flex_boxes.as_deref(),
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -11022,7 +11067,11 @@ fn layout_dom_once(
                         }
                         DeferredFlexReflowPhase::FitContent => {
                             tree.place_deferred(
-                                &fit_content_nodes(&id_map, resolved_styles),
+                                &fit_content_nodes(
+                                    &id_map,
+                                    resolved_styles,
+                                    fit_content_boxes.as_deref(),
+                                ),
                                 false,
                                 &mut measure,
                             );
@@ -11031,6 +11080,7 @@ fn layout_dom_once(
                                 &id_map,
                                 resolved_styles,
                                 initial_cb_width,
+                                fit_content_boxes.as_deref(),
                                 |tree, node, width| {
                                     tree.compute_layout_with_measure(
                                         node,
@@ -11088,6 +11138,7 @@ fn layout_dom_once(
                     &id_map,
                     &styles,
                     &ifc_items,
+                    cell_boxes.as_deref(),
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -11099,7 +11150,10 @@ fn layout_dom_once(
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
                 phase_marks.push(("c.rowgeo", crate::prof::mark()));
-                if styles.values().any(may_hold_full_span_column_subgrids) {
+                if match &subgrid_hosts {
+                    Some(hosts) => !hosts.is_empty(),
+                    None => styles.values().any(may_hold_full_span_column_subgrids),
+                } {
                     taffy_tree.place_all_deferred(taffy_root, &mut measure);
                 }
                 if apply_full_span_column_subgrids(
@@ -11107,6 +11161,7 @@ fn layout_dom_once(
                     &mut taffy_tree,
                     &taffy_by_dom,
                     &styles,
+                    subgrid_hosts.as_deref(),
                     |tree, node| {
                         tree.compute_layout_with_measure(
                             node,
@@ -11125,7 +11180,13 @@ fn layout_dom_once(
                 }
                 phase_marks.push(("c.subgrid", crate::prof::mark()));
                 taffy_tree.place_all_deferred_under(&table_roots, &mut measure);
-                if apply_table_cell_block_alignment(tree, &mut taffy_tree, &id_map, &styles) {
+                if apply_table_cell_block_alignment(
+                    tree,
+                    &mut taffy_tree,
+                    &id_map,
+                    &styles,
+                    cell_boxes.as_deref(),
+                ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
@@ -11168,6 +11229,7 @@ fn layout_dom_once(
                         &id_map,
                         &styles,
                         initial_cb_width,
+                        fit_content_boxes.as_deref(),
                         |tree, node, width| {
                             tree.compute_layout_with_measure(
                                 node,
@@ -11232,7 +11294,11 @@ fn layout_dom_once(
                         }
                         DeferredFlexReflowPhase::FitContent => {
                             tree.place_deferred(
-                                &fit_content_nodes(&id_map, resolved_styles),
+                                &fit_content_nodes(
+                                    &id_map,
+                                    resolved_styles,
+                                    fit_content_boxes.as_deref(),
+                                ),
                                 false,
                                 &mut measure,
                             );
@@ -11241,6 +11307,7 @@ fn layout_dom_once(
                                 &id_map,
                                 resolved_styles,
                                 initial_cb_width,
+                                fit_content_boxes.as_deref(),
                                 |tree, node, width| {
                                     tree.compute_layout_with_measure(
                                         node,
@@ -11285,6 +11352,7 @@ fn layout_dom_once(
                     &id_map,
                     &styles,
                     &ifc_items,
+                    cell_boxes.as_deref(),
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -11298,6 +11366,7 @@ fn layout_dom_once(
                     &mut taffy_tree,
                     &taffy_by_dom,
                     &styles,
+                    subgrid_hosts.as_deref(),
                     |tree, node| {
                         tree.compute_layout_with_measure(
                             node,
@@ -11314,7 +11383,13 @@ fn layout_dom_once(
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
-                if apply_table_cell_block_alignment(tree, &mut taffy_tree, &id_map, &styles) {
+                if apply_table_cell_block_alignment(
+                    tree,
+                    &mut taffy_tree,
+                    &id_map,
+                    &styles,
+                    cell_boxes.as_deref(),
+                ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
                 }
@@ -11384,7 +11459,16 @@ fn layout_dom_once(
             );
             phase_marks.push(("x.abs", crate::prof::mark()));
             grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
-            used_auto_margins = collect_used_auto_margins(&taffy_tree, &id_map, &styles);
+            used_auto_margins = collect_used_auto_margins(
+                &taffy_tree,
+                &id_map,
+                &styles,
+                ifc_items
+                    .reuse
+                    .as_ref()
+                    .and_then(|reuse| reuse.indexed_boxes(retain::IndexKind::AutoMargin, &styles))
+                    .as_deref(),
+            );
             fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
             phase_marks.push(("x.collect", crate::prof::mark()));
             fractional_rects = collect_fractional_rects(
@@ -11546,8 +11630,21 @@ fn layout_dom_once(
             // fractional rects.
             if element_kinds_present(tree) & (ElementKind::ROW_OR_SECTION | ElementKind::CELL) != 0
             {
-                let mut fractional_cells = rects.clone();
-                fractional_cells.extend(fractional_rects.iter().map(|(&id, &rect)| (id, rect)));
+                // Only table parts take part: their own rects and the
+                // cells' fractional ones.
+                let parts = rendered_nodes_of_kind(
+                    tree,
+                    ElementKind::ROW_OR_SECTION | ElementKind::CELL | ElementKind::TABLE,
+                );
+                let mut fractional_cells: HashMap<NodeId, Rect> = parts
+                    .iter()
+                    .filter_map(|id| {
+                        fractional_rects
+                            .get(id)
+                            .or_else(|| rects.get(id))
+                            .map(|rect| (*id, *rect))
+                    })
+                    .collect();
                 let unsynthesized: HashSet<NodeId> = fractional_cells.keys().copied().collect();
                 synthesize_row_rects(tree, &styles, &mut fractional_cells);
                 synthesize_row_rects(tree, &styles, &mut rects);
@@ -11637,7 +11734,14 @@ fn layout_dom_once(
             }
         }
     }
-    sync_positioned_pseudo_percentage_padding(&rects, &mut styles);
+    let positioned_pseudo_hosts = ifc_items.reuse.as_ref().and_then(|reuse| {
+        reuse.indexed_elements(retain::IndexKind::PositionedPseudoPadding, &styles)
+    });
+    sync_positioned_pseudo_percentage_padding(
+        &rects,
+        &mut styles,
+        positioned_pseudo_hosts.as_deref(),
+    );
 
     phase_marks.push(("rects", crate::prof::mark()));
     let mut clip_rects = HashMap::default();
@@ -11880,19 +11984,38 @@ fn layout_dom_once(
 /// into the enclosing block formatting context, so Taffy must not serve it
 /// from the cache when it is laid out inside one.
 fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) -> bool {
-    let children = taffy_tree.children(root).unwrap_or_default();
-    let mut has_float = false;
-    for child in children {
-        has_float |= mark_float_sensitive(taffy_tree, child);
-        let floated = taffy_tree
-            .style(child)
-            .is_ok_and(|style| style.float != taffy::style::Float::None);
-        has_float |= floated;
+    // Children first, without recursion or child-list copies: (node, whether
+    // its children are done, whether one of them holds or is a float).
+    let mut marked = Vec::new();
+    let mut stack: Vec<(taffy::NodeId, usize)> = vec![(root, 0)];
+    let mut holds: Vec<bool> = vec![false];
+    while let Some(&mut (node, ref mut next)) = stack.last_mut() {
+        let children = taffy_tree.child_slice(node);
+        if let Some(&child) = children.get(*next) {
+            *next += 1;
+            stack.push((child, 0));
+            holds.push(false);
+            continue;
+        }
+        stack.pop();
+        let has_float = holds.pop().unwrap_or(false);
+        if has_float {
+            marked.push(node);
+        }
+        if let Some(parent) = holds.last_mut() {
+            let floated = taffy_tree
+                .style(node)
+                .is_ok_and(|style| style.float != taffy::style::Float::None);
+            *parent |= has_float || floated;
+        }
+        if stack.is_empty() {
+            for node in marked {
+                taffy_tree.set_float_sensitive(node, true);
+            }
+            return has_float;
+        }
     }
-    if has_float {
-        taffy_tree.set_float_sensitive(root, true);
-    }
-    has_float
+    false
 }
 
 /// Place every inline formatting context at its final document position and
@@ -12693,6 +12816,8 @@ fn apply_full_span_column_subgrids<F>(
     taffy_tree: &mut TaffyTree<usize>,
     taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
+    // The elements that may hold such subgrids, when indexed.
+    indexed: Option<&[NodeId]>,
     mut measure_max_content: F,
 ) -> bool
 where
@@ -12700,7 +12825,11 @@ where
 {
     let mut plans = Vec::new();
 
-    for (&dom, style) in styles {
+    let all: Box<dyn Iterator<Item = (&NodeId, &crate::LayoutStyle)>> = match indexed {
+        Some(indexed) => Box::new(indexed.iter().filter_map(|id| styles.get_key_value(id))),
+        None => Box::new(styles.iter()),
+    };
+    for (&dom, style) in all {
         if !may_hold_full_span_column_subgrids(style) {
             continue;
         }
@@ -12978,7 +13107,7 @@ fn collect_fractional_rects(
                 }
             }
         }
-        for child in taffy_tree.children(node).unwrap_or_default() {
+        for &child in taffy_tree.child_slice(node) {
             stack.push((child, x, y));
         }
     }
@@ -13009,19 +13138,23 @@ fn collect_used_auto_margins(
     taffy_tree: &TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
+    // The boxes with an auto inline margin, when indexed.
+    indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> HashMap<NodeId, (f32, f32)> {
-    id_map
-        .iter()
-        .filter(|(_, dom_id)| {
-            styles
-                .get(dom_id)
-                .is_some_and(|style| style.margin_auto[1] || style.margin_auto[3])
-        })
-        .filter_map(|(&taffy_id, &dom_id)| {
-            let layout = taffy_tree.layout(taffy_id).ok()?;
-            Some((dom_id, (layout.margin.left, layout.margin.right)))
-        })
-        .collect()
+    let all: Box<dyn Iterator<Item = (taffy::NodeId, NodeId)>> = match indexed {
+        Some(indexed) => Box::new(indexed.iter().copied()),
+        None => Box::new(id_map.iter().map(|(&node, &dom)| (node, dom))),
+    };
+    all.filter(|(_, dom_id)| {
+        styles
+            .get(dom_id)
+            .is_some_and(|style| style.margin_auto[1] || style.margin_auto[3])
+    })
+    .filter_map(|(taffy_id, dom_id)| {
+        let layout = taffy_tree.layout(taffy_id).ok()?;
+        Some((dom_id, (layout.margin.left, layout.margin.right)))
+    })
+    .collect()
 }
 
 /// The average character width text controls use, in px: the OS/2 value
@@ -13139,8 +13272,8 @@ fn compute_absolute_rects(
             generated_rects[*index] = Some(rect);
         }
 
-        if let Ok(children) = taffy_tree.children(taffy_id) {
-            for child_id in children {
+        {
+            for &child_id in taffy_tree.child_slice(taffy_id) {
                 compute_absolute_rects(
                     taffy_tree,
                     child_id,
@@ -14331,41 +14464,43 @@ fn apply_table_cell_baseline_alignment(
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     ifc_items: &IfcRegistry,
+    // The boxes of the table cells, when known.
+    cells: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> bool {
-    // First-line baseline of an IFC, relative to its Taffy node's border box.
-    // The IFCs are lent to the active layout while it runs.
-    let mut ifc_baseline: HashMap<taffy::NodeId, f32> = HashMap::default();
-    for &index in &ifc_items.ifc_nodes {
-        let found = crate::ifc::with_active_ifc(index, |ifc| {
-            let node = ifc.node?;
-            if !ifc.has_content {
+    if cells.is_some_and(|cells| cells.is_empty()) {
+        return false;
+    }
+    // First-line baseline of the IFC whose Taffy node is `node`, relative to
+    // its border box: content-box relative; the node's current top border
+    // and padding are added at lookup. The IFCs are lent to the active
+    // layout while it runs.
+    let baseline_of = |taffy_tree: &TaffyTree<usize>, node: taffy::NodeId| -> Option<f32> {
+        let &ctx = taffy_tree.get_node_context(node)?;
+        if ctx & crate::ifc::IFC_CONTEXT_BIT == 0 || ctx & crate::inline::REPLACED_CONTEXT_BIT != 0
+        {
+            return None;
+        }
+        let index = ctx & !crate::ifc::IFC_CONTEXT_BIT;
+        let read = |ifc: &crate::ifc::Ifc| {
+            if ifc.node != Some(node) || !ifc.has_content {
                 return None;
             }
-            // Content-box relative; the node's current top border and
-            // padding are added at lookup.
             let line = ifc.final_layout().lines().next()?;
-            Some((node, line.metrics().baseline))
-        })
-        .flatten()
-        .or_else(|| {
-            let ifc = ifc_items.ifc.get(index)?;
-            let node = ifc.node?;
-            let line = ifc.final_layout().lines().next()?;
-            ifc.has_content.then(|| (node, line.metrics().baseline))
-        });
-        if let Some((node, baseline)) = found {
-            ifc_baseline.entry(node).or_insert(baseline);
-        }
-    }
+            Some(line.metrics().baseline)
+        };
+        crate::ifc::with_active_ifc(index, |ifc| read(ifc))
+            .flatten()
+            .or_else(|| ifc_items.ifc.get(index).and_then(read))
+    };
     // The first baseline inside `node`: its own IFC, else the first in-flow
     // child that has one (depth-first).
     fn first_baseline(
         taffy_tree: &TaffyTree<usize>,
         node: taffy::NodeId,
-        ifc_baseline: &HashMap<taffy::NodeId, f32>,
+        ifc_baseline: &dyn Fn(&TaffyTree<usize>, taffy::NodeId) -> Option<f32>,
         depth: usize,
     ) -> Option<f32> {
-        if let Some(&baseline) = ifc_baseline.get(&node) {
+        if let Some(baseline) = ifc_baseline(taffy_tree, node) {
             let layout = taffy_tree.unrounded_layout(node);
             return Some(layout.border.top + layout.padding.top + baseline);
         }
@@ -14388,7 +14523,11 @@ fn apply_table_cell_baseline_alignment(
         None
     }
     let mut rows: HashMap<(taffy::NodeId, i16), Vec<(taffy::NodeId, f32)>> = HashMap::default();
-    for (&node, &dom_id) in id_map {
+    let all: Box<dyn Iterator<Item = (taffy::NodeId, NodeId)>> = match cells {
+        Some(cells) => Box::new(cells.iter().copied()),
+        None => Box::new(id_map.iter().map(|(&node, &dom)| (node, dom))),
+    };
+    for (node, dom_id) in all {
         let Some(style) = styles.get(&dom_id) else {
             continue;
         };
@@ -14417,7 +14556,7 @@ fn apply_table_cell_baseline_alignment(
             _ => continue,
         };
         let layout = taffy_tree.unrounded_layout(node);
-        let baseline = first_baseline(taffy_tree, node, &ifc_baseline, 0)
+        let baseline = first_baseline(taffy_tree, node, &baseline_of, 0)
             .unwrap_or(layout.size.height - layout.padding.bottom - layout.border.bottom);
         rows.entry((table, row)).or_default().push((node, baseline));
     }
@@ -14459,9 +14598,15 @@ fn apply_table_cell_block_alignment(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
+    // The boxes of the table cells, when known.
+    cells: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> bool {
     let mut changed = false;
-    for (&node, &dom_id) in id_map {
+    let all: Vec<(taffy::NodeId, NodeId)> = match cells {
+        Some(cells) => cells.to_vec(),
+        None => id_map.iter().map(|(&node, &dom)| (node, dom)).collect(),
+    };
+    for (node, dom_id) in all {
         let Some(style) = styles.get(&dom_id) else {
             continue;
         };
@@ -14581,27 +14726,37 @@ fn apply_table_cell_block_alignment(
 /// the already-resolved final item margins and border-box sizes to freeze that
 /// intrinsic content height, then let the caller run Taffy again so ordinary
 /// min/max sizing and ancestor layout consume the corrected contribution.
+/// A genuine column flex container with an auto height (the containers
+/// `repair_intrinsic_column_flex_negative_margins` repairs).
+fn is_auto_height_column_flex(style: &crate::LayoutStyle) -> bool {
+    style.display == crate::Display::Flex
+        && !style.internal_flex_container
+        && style.height == crate::Dimension::Auto
+        && effective_size_containment(style) != crate::ContainerType::Size
+        && matches!(
+            style.flex_direction,
+            Some(taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse)
+        )
+}
+
 fn repair_intrinsic_column_flex_negative_margins(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     place: &mut dyn FnMut(&mut TaffyTree<usize>, &[taffy::NodeId], bool),
+    // The boxes of auto-height column flex containers, when indexed.
+    indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> bool {
     let mut repairs = Vec::new();
 
-    let containers: Vec<(taffy::NodeId, &crate::LayoutStyle)> = id_map
-        .iter()
-        .filter_map(|(&node, dom_id)| {
-            let style = styles.get(dom_id)?;
-            (style.display == crate::Display::Flex
-                && !style.internal_flex_container
-                && style.height == crate::Dimension::Auto
-                && effective_size_containment(style) != crate::ContainerType::Size
-                && matches!(
-                    style.flex_direction,
-                    Some(taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse)
-                ))
-            .then_some((node, style))
+    let all: Box<dyn Iterator<Item = (taffy::NodeId, NodeId)>> = match indexed {
+        Some(indexed) => Box::new(indexed.iter().copied()),
+        None => Box::new(id_map.iter().map(|(&node, &dom)| (node, dom))),
+    };
+    let containers: Vec<(taffy::NodeId, &crate::LayoutStyle)> = all
+        .filter_map(|(node, dom_id)| {
+            let style = styles.get(&dom_id)?;
+            is_auto_height_column_flex(style).then_some((node, style))
         })
         .collect();
     // Only a negative block margin can need the repair: a child whose style
@@ -16011,7 +16166,7 @@ fn synthesize_row_rects(
         Cell,
         Other,
     }
-    for id in rendered_descendants(tree, tree.document()) {
+    for id in rendered_nodes_of_kind(tree, ElementKind::ROW_OR_SECTION | ElementKind::CELL) {
         let Some(part) = with_local_name(tree, id, |local| match local {
             "tr" => Part::Row,
             "tbody" | "thead" | "tfoot" => Part::Section,
@@ -16541,7 +16696,16 @@ fn is_fit_content_candidate(style: &crate::LayoutStyle) -> bool {
 fn fit_content_nodes(
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
+    // The fit-content candidates' boxes, when indexed.
+    indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> Vec<taffy::NodeId> {
+    if let Some(indexed) = indexed {
+        return indexed
+            .iter()
+            .filter(|(_, dom)| styles.get(dom).is_some_and(is_fit_content_candidate))
+            .map(|&(node, _)| node)
+            .collect();
+    }
     id_map
         .iter()
         .filter(|(_, dom)| styles.get(dom).is_some_and(is_fit_content_candidate))
@@ -16554,6 +16718,8 @@ fn apply_fit_content_widths<F>(
     id_map: &HashMap<taffy::NodeId, NodeId>,
     styles: &HashMap<NodeId, crate::LayoutStyle>,
     initial_cb_width: f32,
+    // The fit-content candidates' boxes, when indexed.
+    indexed: Option<&[(taffy::NodeId, NodeId)]>,
     mut intrinsic_width: F,
 ) -> bool
 where
@@ -16570,9 +16736,12 @@ where
 
     // Snapshot every containing-space input before intrinsic subtree
     // measurements overwrite cached node layouts.
-    let candidates: Vec<Candidate> = id_map
-        .iter()
-        .filter_map(|(&node, &dom)| {
+    let all: Box<dyn Iterator<Item = (taffy::NodeId, NodeId)>> = match indexed {
+        Some(indexed) => Box::new(indexed.iter().copied()),
+        None => Box::new(id_map.iter().map(|(&node, &dom)| (node, dom))),
+    };
+    let candidates: Vec<Candidate> = all
+        .filter_map(|(node, dom)| {
             let style = styles.get(&dom)?;
             if !is_fit_content_candidate(style) {
                 return None;
