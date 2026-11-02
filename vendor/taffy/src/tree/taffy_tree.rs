@@ -9,7 +9,7 @@ use slotmap::{DefaultKey, SlotMap};
 use crate::block::BlockContext;
 #[cfg(all(feature = "block_layout", feature = "float_layout"))]
 use crate::compute::FloatBand;
-use crate::geometry::Size;
+use crate::geometry::{Point, Size};
 use crate::style::{AvailableSpace, Display, Style};
 use crate::sys::DefaultCheapStr;
 use crate::tree::{
@@ -200,6 +200,9 @@ struct NodeData {
     pub(crate) subtree_layout_changed_at: u64,
     /// The bits of the unrounded location and size `final_layout` was rounded from
     pub(crate) rounded_from: [u32; 4],
+    /// The node an absolutely positioned node takes its static position from (see
+    /// [`TaffyTree::set_static_probe`])
+    pub(crate) static_probe: Option<NodeId>,
 }
 
 impl NodeData {
@@ -236,6 +239,7 @@ impl NodeData {
             layout_changed_at: 0,
             subtree_layout_changed_at: 0,
             rounded_from: [u32::MAX; 4],
+            static_probe: None,
         }
     }
 
@@ -850,6 +854,47 @@ where
             #[cfg(feature = "block_layout")]
             None,
         )
+    }
+
+    fn static_probe_offset(&mut self, child: NodeId, container: NodeId) -> Option<Point<f32>> {
+        let probe = self.taffy.nodes[child.into()].static_probe?;
+        if !self.taffy.nodes.contains_key(probe.into()) {
+            return None;
+        }
+        // The probe's ancestors below the container, nearest first.
+        let mut chain = Vec::new();
+        let mut current = self.taffy.parents[probe.into()];
+        loop {
+            let id = current?;
+            if id == container {
+                break;
+            }
+            chain.push(id);
+            current = self.taffy.parents[id.into()];
+        }
+        // Each was laid out by this layout before the container places its absolute children,
+        // but one served from an earlier result has not placed its children yet.
+        // Placing lays out through another view of the tree: erase the measure function's type
+        // so that view's type is not one level deeper than this one's.
+        let mut measure: &mut dyn FnMut(
+            Size<Option<f32>>,
+            Size<AvailableSpace>,
+            NodeId,
+            Option<&mut NodeContext>,
+            &Style,
+        ) -> Size<f32> = &mut self.measure_function;
+        for &id in chain.iter().rev() {
+            if self.taffy.nodes[id.into()].deferred {
+                self.taffy.place_one(id, &mut measure);
+            }
+        }
+        let mut offset = self.taffy.nodes[probe.into()].unrounded_layout.location;
+        for &id in &chain {
+            let location = self.taffy.nodes[id.into()].unrounded_layout.location;
+            offset.x += location.x;
+            offset.y += location.y;
+        }
+        Some(offset)
     }
 }
 
@@ -1556,6 +1601,21 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.nodes.contains_key(node.into())
     }
 
+    /// Let the absolutely positioned `node` take the static position of each axis whose insets
+    /// are both auto from `probe`: a zero-sized absolutely positioned box with no margins left
+    /// where `node` was in its original parent, which keeps its static position for it. The
+    /// containing block `node` is then a child of reads where its layout placed the probe while
+    /// it places `node` (left-to-right only; the probe must be in the containing block's
+    /// subtree), so one layout pass places both.
+    pub fn set_static_probe(&mut self, node: NodeId, probe: Option<NodeId>) {
+        let data = &mut self.nodes[node.into()];
+        if data.static_probe != probe {
+            data.static_probe = probe;
+            self.note_changed(node);
+            self.mark_layout_changed(node);
+        }
+    }
+
     /// Returns a list of children that belong to the parent node
     pub fn children(&self, parent: NodeId) -> TaffyResult<Vec<NodeId>> {
         Ok(self.children[parent.into()].clone())
@@ -1854,7 +1914,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
             };
             hash.write(style_key);
             hash.write(data.content_key);
-            hash.write(u64::from(data.has_context) | u64::from(data.is_inline_root) << 1);
+            hash.write(
+                u64::from(data.has_context)
+                    | u64::from(data.is_inline_root) << 1
+                    | u64::from(data.static_probe.is_some()) << 2,
+            );
             let children = &self.children[node.into()];
             hash.write(children.len() as u64);
             for &child in children.iter() {

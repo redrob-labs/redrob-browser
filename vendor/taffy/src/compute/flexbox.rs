@@ -2600,10 +2600,20 @@ fn perform_absolute_layout_on_absolute_children(
             }
         };
 
-        let location = match constants.is_row {
+        let mut location = match constants.is_row {
             true => Point { x: offset_main, y: offset_cross },
             false => Point { x: offset_cross, y: offset_main },
         };
+        if left.is_none() && right.is_none() || top.is_none() && bottom.is_none() {
+            if let Some(probe) = tree.static_probe_offset(child, node) {
+                if left.is_none() && right.is_none() {
+                    location.x = probe.x + resolved_margin.left;
+                }
+                if top.is_none() && bottom.is_none() {
+                    location.y = probe.y + resolved_margin.top;
+                }
+            }
+        }
         let scrollbar_size = Size {
             width: if overflow.y == Overflow::Scroll { scrollbar_width } else { 0.0 },
             height: if overflow.x == Overflow::Scroll { scrollbar_width } else { 0.0 },

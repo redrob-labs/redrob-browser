@@ -655,6 +655,7 @@ fn compute_inner(
     let absolute_position_offset = Point { x: absolute_position_inset.left, y: absolute_position_inset.top };
     let absolute_content_size = perform_absolute_layout_on_absolute_children(
         tree,
+        node_id,
         &items,
         absolute_position_area,
         absolute_position_offset,
@@ -1318,6 +1319,7 @@ fn perform_final_layout_on_in_flow_children(
 #[inline]
 fn perform_absolute_layout_on_absolute_children(
     tree: &mut impl LayoutBlockContainer,
+    container: NodeId,
     items: &[BlockItem],
     area_size: Size<f32>,
     area_offset: Point<f32>,
@@ -1520,7 +1522,7 @@ fn perform_absolute_layout_on_absolute_children(
                 }
             }
         };
-        let location = Point {
+        let mut location = Point {
             x: x_offset + area_offset.x,
             y: top
                 .map(|top| top + resolved_margin.top)
@@ -1528,6 +1530,16 @@ fn perform_absolute_layout_on_absolute_children(
                 .maybe_add(area_offset.y)
                 .unwrap_or(item.static_position.y + resolved_margin.top),
         };
+        if left.is_none() && right.is_none() || top.is_none() && bottom.is_none() {
+            if let Some(probe) = tree.static_probe_offset(item.node_id, container) {
+                if left.is_none() && right.is_none() {
+                    location.x = probe.x + resolved_margin.left;
+                }
+                if top.is_none() && bottom.is_none() {
+                    location.y = probe.y + resolved_margin.top;
+                }
+            }
+        }
         // Note: axis intentionally switched here as scrollbars take up space in the opposite axis
         // to the axis in which scrolling is enabled.
         let scrollbar_size = Size {

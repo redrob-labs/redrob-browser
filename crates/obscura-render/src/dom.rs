@@ -10486,6 +10486,39 @@ fn layout_dom_once(
             &taffy_by_dom,
             &deferred_cyclic_inline_sizes,
         );
+        let mut static_probes = ifc_items
+            .reuse
+            .as_mut()
+            .map(|reuse| std::mem::take(&mut reuse.static_probes))
+            .unwrap_or_default();
+        {
+            let indexed = ifc_items
+                .reuse
+                .as_ref()
+                .filter(|reuse| reuse.index_valid())
+                .map(|reuse| reuse.index.absolute.iter().copied().collect::<Vec<_>>());
+            let mut positioned: Box<dyn Iterator<Item = NodeId>> = match indexed {
+                Some(list) => Box::new(list.into_iter()),
+                None => Box::new(
+                    styles
+                        .iter()
+                        .filter(|(_, style)| {
+                            matches!(style.position, Some(taffy::Position::Absolute))
+                        })
+                        .map(|(&id, _)| id)
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                ),
+            };
+            ensure_static_probes(
+                &mut taffy_tree,
+                &id_map,
+                &taffy_by_dom,
+                &styles,
+                &mut positioned,
+                &mut static_probes,
+            );
+        }
         if retain_tree {
             taffy_tree.begin_journal();
         }
@@ -10579,13 +10612,16 @@ fn layout_dom_once(
                 initial_containing_block,
                 &taffy_by_dom,
                 &styles,
-                &ifc_items.static_positions,
+                &static_probes,
                 ifc_items
                     .reuse
                     .as_ref()
                     .filter(|reuse| reuse.index_valid())
                     .map(|reuse| &reuse.index.absolute),
             );
+            if let Some(reuse) = ifc_items.reuse.as_mut() {
+                reuse.static_probes = static_probes;
+            }
             phase_marks.push(("s.reparent", crate::prof::mark()));
             if retain_tree {
                 // A kept box keeps its key: only new boxes need one.
@@ -13390,6 +13426,7 @@ fn reparent_inset_positioned_nodes(
     let mut nearest_fixed_cb_for_children: Vec<Option<taffy::NodeId>> =
         vec![None; tree.node_slot_count()];
     let mut static_candidates = Vec::new();
+    let mut two_pass = HashSet::default();
 
     for dom_id in rendered_descendants(tree, tree.document()) {
         let Some(style) = styles.get(&dom_id) else {
@@ -13453,17 +13490,22 @@ fn reparent_inset_positioned_nodes(
             continue;
         };
         let placeholder = static_positions.get(&dom_id).copied();
-        if current == target && placeholder.is_none() {
+        if current == target {
+            taffy_tree.set_static_probe(child, None);
             continue;
         }
         if !has_block_inset || !has_inline_inset {
-            static_candidates.push(StaticPositionCandidate {
+            let candidate = StaticPositionCandidate {
                 child,
                 target,
                 placeholder,
                 inline_axis: !has_inline_inset,
                 block_axis: !has_block_inset,
-            });
+            };
+            if !fold_static_position(taffy_tree, &candidate, current, &two_pass) {
+                two_pass.insert(child);
+                static_candidates.push(candidate);
+            }
             continue;
         }
         if taffy_tree.remove_child(current, child).is_ok() {
@@ -13471,6 +13513,150 @@ fn reparent_inset_positioned_nodes(
         }
     }
     static_candidates
+}
+
+/// Move a positioned box with an auto axis to its containing block at once,
+/// leaving its probe (`ensure_static_probes`) where it was: the containing
+/// block takes the box's static position from where the same layout placed
+/// the probe (`TaffyTree::set_static_probe`), as Blink carries an
+/// out-of-flow box's static position up to its containing block, so no
+/// second layout is needed. Only for a block or flex containing block (left
+/// to right, not an inline formatting context) whose subtree holds the
+/// probe for good (no box on the way is moved later, by
+/// `resolve_static_positions_and_reparent`). Returns false, leaving the box
+/// where it is, otherwise.
+fn fold_static_position(
+    taffy_tree: &mut TaffyTree<usize>,
+    candidate: &StaticPositionCandidate,
+    parent: taffy::NodeId,
+    two_pass: &HashSet<taffy::NodeId>,
+) -> bool {
+    let target_ok = !taffy_tree.is_inline_root(candidate.target)
+        && taffy_tree.style(candidate.target).is_ok_and(|style| {
+            style.direction == taffy::Direction::Ltr
+                && matches!(
+                    style.display,
+                    taffy::style::Display::Block | taffy::style::Display::Flex
+                )
+        });
+    let eligible = target_ok
+        && candidate
+            .placeholder
+            .is_some_and(|probe| taffy_tree.parent(probe) == Some(parent))
+        && {
+            let mut current = Some(parent);
+            loop {
+                match current {
+                    None => break false,
+                    Some(id) if id == candidate.target => break true,
+                    Some(id) if two_pass.contains(&id) => break false,
+                    Some(id) => current = taffy_tree.parent(id),
+                }
+            }
+        };
+    if !eligible
+        || taffy_tree.remove_child(parent, candidate.child).is_err()
+        || taffy_tree
+            .add_child(candidate.target, candidate.child)
+            .is_err()
+    {
+        taffy_tree.set_static_probe(candidate.child, None);
+        return false;
+    }
+    taffy_tree.set_static_probe(candidate.child, candidate.placeholder);
+    true
+}
+
+/// Give every absolutely positioned box with an auto axis in a left-to-right
+/// block parent (not an inline formatting context) a probe: a zero-sized
+/// absolutely positioned box without margins right before it, which the
+/// parent's layout places at the box's static position. Made before the
+/// journal begins, the probes stay with their parents from layout to layout
+/// (`probes`, by element, keeps them; one whose box no longer needs it is
+/// removed). Returns the probes by element.
+fn ensure_static_probes(
+    taffy_tree: &mut TaffyTree<usize>,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    positioned: &mut dyn Iterator<Item = NodeId>,
+    probes: &mut HashMap<NodeId, taffy::NodeId>,
+) {
+    let mut previous = std::mem::take(probes);
+    for dom in positioned {
+        let Some(style) = styles.get(&dom) else {
+            continue;
+        };
+        if !matches!(style.position, Some(taffy::Position::Absolute)) {
+            continue;
+        }
+        let has_block_inset = style.inset[0].is_some() || style.inset[2].is_some();
+        let has_inline_inset = style.inset[1].is_some() || style.inset[3].is_some();
+        if has_block_inset && has_inline_inset {
+            continue;
+        }
+        let Some(&child) = taffy_by_dom.get(&dom) else {
+            continue;
+        };
+        let Some(parent) = taffy_tree.parent(child) else {
+            continue;
+        };
+        // A multicol container moves its children between columns after
+        // layout; the probe must stay where the layout put it.
+        let parent_ok = !taffy_tree.is_inline_root(parent)
+            && taffy_tree.style(parent).is_ok_and(|style| {
+                style.direction == taffy::Direction::Ltr
+                    && style.display == taffy::style::Display::Block
+            })
+            && id_map.get(&parent).is_some_and(|parent_dom| {
+                styles
+                    .get(parent_dom)
+                    .is_some_and(|style| style.column_count.is_none_or(|count| count <= 1))
+            });
+        if !parent_ok {
+            continue;
+        }
+        let kids = taffy_tree.child_slice(parent);
+        let Some(index) = kids.iter().position(|&node| node == child) else {
+            continue;
+        };
+        if let Some(probe) = previous.remove(&dom) {
+            if index > 0 && kids[index - 1] == probe {
+                probes.insert(dom, probe);
+                continue;
+            }
+            if taffy_tree.contains(probe) {
+                let _ = taffy_tree.remove(probe);
+            }
+        }
+        let probe_style = taffy::Style {
+            position: taffy::Position::Absolute,
+            size: taffy::Size {
+                width: taffy::Dimension::length(0.0),
+                height: taffy::Dimension::length(0.0),
+            },
+            ..Default::default()
+        };
+        let Ok(probe) = taffy_tree.new_leaf(probe_style) else {
+            continue;
+        };
+        let index = taffy_tree
+            .child_slice(parent)
+            .iter()
+            .position(|&node| node == child)
+            .unwrap_or(0);
+        if taffy_tree
+            .insert_child_at_index(parent, index, probe)
+            .is_ok()
+        {
+            probes.insert(dom, probe);
+        }
+    }
+    for probe in previous.into_values() {
+        if taffy_tree.contains(probe) {
+            let _ = taffy_tree.remove(probe);
+        }
+    }
 }
 
 /// The rendered nodes among `nodes`, in preorder.
@@ -13544,6 +13730,7 @@ fn reparent_indexed_positioned_nodes(
         found
     };
     let mut static_candidates = Vec::new();
+    let mut two_pass = HashSet::default();
     for dom_id in in_rendered_preorder(tree, positioned) {
         let Some(style) = styles.get(&dom_id) else {
             continue;
@@ -13561,17 +13748,22 @@ fn reparent_indexed_positioned_nodes(
             continue;
         };
         let placeholder = static_positions.get(&dom_id).copied();
-        if current == target && placeholder.is_none() {
+        if current == target {
+            taffy_tree.set_static_probe(child, None);
             continue;
         }
         if !has_block_inset || !has_inline_inset {
-            static_candidates.push(StaticPositionCandidate {
+            let candidate = StaticPositionCandidate {
                 child,
                 target,
                 placeholder,
                 inline_axis: !has_inline_inset,
                 block_axis: !has_block_inset,
-            });
+            };
+            if !fold_static_position(taffy_tree, &candidate, current, &two_pass) {
+                two_pass.insert(child);
+                static_candidates.push(candidate);
+            }
             continue;
         }
         if taffy_tree.remove_child(current, child).is_ok() {
