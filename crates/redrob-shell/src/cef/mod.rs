@@ -344,7 +344,11 @@ pub fn start(config: Config) -> anyhow::Result<()> {
         log_severity: cef::sys::cef_log_severity_t::LOGSEVERITY_ERROR.into(),
         log_file: CefString::from(config.root.join("chromium.log").to_string_lossy().as_ref()),
         locale: CefString::from(locale().0),
-        accept_language_list: CefString::from(locale().1),
+        // No `accept_language_list`: CEF prefers it over the profile's
+        // `intl.accept_languages` for every page it creates, so a language
+        // the window switches to later would be lost on the next
+        // navigation. The preference is written once Chromium is up
+        // (cef/app.rs) and on every change (`apply_languages`).
         background_color: 0xFFFF_FFFF,
         ..Default::default()
     };
@@ -441,12 +445,51 @@ pub fn request_context() -> Option<cef::RequestContext> {
     })
 }
 
+/// Ask pages for the window's languages (`Accept-Language`,
+/// `navigator.languages`) from now on, as Chrome does when its languages
+/// change: open pages pick them up at once. Call on the window thread after
+/// the window's language changed.
+pub fn apply_languages() {
+    if STARTED.load(Ordering::SeqCst) {
+        handlers::on_ui(write_languages);
+    }
+}
+
+/// [`apply_languages`] on CEF's UI thread. Also run once Chromium's context
+/// is ready (cef/app.rs): the profile keeps the preferences, and the
+/// window's language may have changed since they were written.
+///
+/// Chromium derives `intl.accept_languages` from `intl.selected_languages`
+/// (LanguagePrefs), so both are written, the selected ones first.
+pub(crate) fn write_languages() {
+    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    let langs = locale().1;
+    let contexts = [request_context(), cef::request_context_get_global_context()];
+    for c in contexts.iter().flatten() {
+        for pref in ["intl.selected_languages", "intl.accept_languages"] {
+            let Some(mut v) = cef::value_create() else {
+                continue;
+            };
+            v.set_string(Some(&CefString::from(langs)));
+            // Not empty: CEF refuses a null error string, and an empty
+            // CefString has no buffer.
+            let mut error = CefString::from(" ");
+            let name = CefString::from(pref);
+            if c.set_preference(Some(&name), Some(&mut v), Some(&mut error)) != 1 {
+                eprintln!("redrob-browser: {pref} not set: {error}");
+            }
+        }
+    }
+}
+
 /// Chromium's UI locale and the languages pages are asked for.
 fn locale() -> (&'static str, &'static str) {
-    match crate::i18n::current() {
-        crate::i18n::Lang::Ko => ("ko", "ko-KR,ko,en-US,en"),
-        crate::i18n::Lang::En => ("en-US", "en-US,en"),
-    }
+    let lang = crate::i18n::current();
+    let ui = match lang {
+        crate::i18n::Lang::Ko => "ko",
+        crate::i18n::Lang::En => "en-US",
+    };
+    (ui, handlers::languages::list(lang))
 }
 
 /// When CEF last asked to be pumped, and for when.

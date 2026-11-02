@@ -13,8 +13,8 @@ use cef::{
     DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource, Frame, ImplBrowser,
     ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler,
     ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, JsdialogHandler, KeyboardHandler,
-    LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration, WindowInfo,
-    WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
+    LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration, RequestHandler,
+    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
     WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
 };
 use serde_json::{json, Value};
@@ -109,6 +109,7 @@ pub fn new(ctx: TabCtx) -> Client {
         handlers::jsdialog::new(ctx.sink.clone()),
         handlers::context_menu::new(ctx.sink.clone()),
         handlers::find::new(ctx.sink.clone()),
+        handlers::languages::new(),
     )
 }
 
@@ -124,6 +125,7 @@ wrap_client! {
         jsdialog: JsdialogHandler,
         context_menu: ContextMenuHandler,
         find: FindHandler,
+        request: RequestHandler,
     }
 
     impl Client {
@@ -157,6 +159,9 @@ wrap_client! {
         }
         fn find_handler(&self) -> Option<FindHandler> {
             Some(self.find.clone())
+        }
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(self.request.clone())
         }
     }
 }

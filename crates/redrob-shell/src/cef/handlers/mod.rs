@@ -10,6 +10,7 @@ pub mod cookies;
 pub mod download;
 pub mod find;
 pub mod jsdialog;
+pub mod languages;
 pub mod permission;
 pub mod print;
 pub mod ui;
