@@ -1101,6 +1101,7 @@ pub enum SelectorKey {
 }
 
 /// A parsed selector plus its cached specificity and subject key.
+#[derive(Clone)]
 pub struct CompiledSelector {
     sel: parser::Selector<ObscuraSelector>,
     specificity: u32,
@@ -1157,6 +1158,7 @@ impl CompiledSelector {
     }
 }
 
+#[derive(Clone)]
 enum SubjectKeys {
     One(SelectorKey),
     Many(Box<[SelectorKey]>),

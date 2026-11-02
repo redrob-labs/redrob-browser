@@ -118,7 +118,7 @@ impl Prompts {
                     old.choose(None);
                 }
             }
-            Event::FindResult { count, active, .. } => {
+            Event::FindResult { count, active } => {
                 if let Some(f) = self.find.as_mut().filter(|f| f.tab == tab) {
                     f.count = count;
                     if active > 0 || count == 0 {

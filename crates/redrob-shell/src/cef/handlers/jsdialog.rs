@@ -41,9 +41,9 @@ impl Dialog {
         if !self.open.swap(false, Ordering::Relaxed) {
             return;
         }
-        let text = CefString::from(text);
+        let text = text.to_string();
         let callback = self.callback;
-        super::on_ui(move || callback.cont(ok as i32, Some(&text)));
+        super::on_ui(move || callback.cont(ok as i32, Some(&CefString::from(text.as_str()))));
     }
 }
 

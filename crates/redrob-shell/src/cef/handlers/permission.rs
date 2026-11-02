@@ -378,13 +378,6 @@ pub fn new(sink: Sink, sites: SiteSettings) -> PermissionHandler {
     Permissions::new(sink, sites)
 }
 
-/// Forget every permission choice for `origin` (the site settings page).
-pub fn reset(sites: &SiteSettings, origin: &str, kinds: &[Kind]) {
-    for k in kinds {
-        sites.set(origin, &k.key(), None);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,7 +422,9 @@ mod tests {
         assert!(k.undecided.is_empty());
         // Another site starts fresh.
         assert_eq!(known(&sites, "https://b.example", &kinds).undecided.len(), 2);
-        reset(&sites, "https://a.example", &kinds);
+        for k in kinds {
+            sites.set("https://a.example", &k.key(), None);
+        }
         assert_eq!(known(&sites, "https://a.example", &kinds).undecided.len(), 2);
     }
 }

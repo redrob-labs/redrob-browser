@@ -2,44 +2,51 @@
 //!
 //! Each file exposes a constructor that takes a `super::Sink` and returns the
 //! CEF handler; `cef/client.rs` returns them from the matching `get_*_handler`.
-//!
-//! What the client wires, per handler:
-//!
-//! | client method | returns |
-//! |---|---|
-//! | `download_handler` | `download::new(sink, dir, ask)` |
-//! | `permission_handler` | `permission::new(sink, sites)` |
-//! | `jsdialog_handler` | `jsdialog::new(sink)` |
-//! | `context_menu_handler` | `context_menu::new(sink)` |
-//! | `find_handler` | `find::new(sink)` |
-//! | `life_span_handler` | calls `life_span::on_before_popup` / `on_after_created` |
-//! | `on_process_message_received` | calls `login::on_browser_message` |
-//!
-//! The app's render process handler calls `login::on_context_created` and
-//! `login::on_renderer_message` (or returns `login::render_process_handler()`).
-//! The app's `on_context_initialized` calls `widevine::install()`. Ops the
-//! engine does not handle itself go to `run_op`; a navigation calls
-//! `zoom::restore`. The window draws what these report with `ui::Prompts`.
+//! The window draws what they report with `ui::Prompts`; ops the engine does
+//! not handle itself go to [`run_op`].
 
 pub mod context_menu;
+pub mod cookies;
 pub mod download;
 pub mod find;
 pub mod jsdialog;
-pub mod life_span;
-pub mod login;
 pub mod permission;
 pub mod print;
 pub mod ui;
 pub mod widevine;
 pub mod zoom;
 
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use cef::*;
 
 use super::Sink;
 use crate::cdp::{Event, Op};
 use crate::profile::SiteSettings;
+
+/// What the handlers need from the window's profile, set once at start.
+pub struct Features {
+    /// Permission and zoom choices per site.
+    pub sites: SiteSettings,
+    /// Where downloads go.
+    pub downloads: PathBuf,
+}
+
+static FEATURES: OnceLock<Features> = OnceLock::new();
+
+/// Set the profile's feature settings. Call before the first tab opens.
+pub fn configure(f: Features) {
+    let _ = FEATURES.set(f);
+}
+
+/// The profile's feature settings; memory-only ones when none were set.
+pub fn features() -> &'static Features {
+    FEATURES.get_or_init(|| Features {
+        sites: SiteSettings::memory(),
+        downloads: crate::profile::downloads_dir(),
+    })
+}
 
 /// A CEF string as a Rust string.
 pub(crate) fn text(s: &CefStringUserfree) -> String {
@@ -66,8 +73,8 @@ wrap_task! {
 }
 
 /// Run `job` on CEF's UI thread: right away when already there, else posted.
-/// Answers from the window (a permission, a dialog, a menu choice) arrive on
-/// the window's thread and go through here.
+/// Answers from the window (a permission, a dialog, a menu choice) go
+/// through here.
 pub(crate) fn on_ui(job: impl FnOnce() + Send + 'static) {
     if currently_on(ThreadId::UI) != 0 {
         job();
@@ -77,54 +84,52 @@ pub(crate) fn on_ui(job: impl FnOnce() + Send + 'static) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-/// A `Browser` the window may hold on to and act on later from its thread.
-#[derive(Clone)]
-pub struct BrowserRef(Browser);
-
-impl BrowserRef {
-    pub fn new(browser: &Browser) -> Self {
-        BrowserRef(browser.clone())
-    }
-
-    /// Run `f` with the browser on CEF's UI thread, if it is still open.
-    pub fn with(&self, f: impl FnOnce(&Browser) + Send + 'static) {
-        let b = self.0.clone();
-        on_ui(move || {
-            if b.is_valid() != 0 {
-                f(&b);
-            }
-        });
-    }
+/// Whether `op` is a feature op [`run_op`] answers.
+pub fn is_feature(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Find { .. } | Op::StopFind | Op::Zoom(_) | Op::Print
+    )
 }
 
-/// Handle the feature ops (find, zoom, print, inspect, fill a login) for
-/// `browser`. Returns false for ops that are not features.
-pub fn run_op(sink: &Sink, browser: &Browser, op: &Op, sites: &SiteSettings) -> bool {
+/// Handle a feature op (find, zoom, print) for `browser`.
+pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
     match op {
         Op::Find {
             text,
             forward,
             match_case,
             next,
-        } => find::find(browser, text, *forward, *match_case, *next),
+        } => find::find(browser, &text, forward, match_case, next),
         Op::StopFind => find::stop(browser),
         Op::Zoom(step) => {
-            let percent = zoom::step(browser, *step, sites);
+            let percent = zoom::step(browser, step, &features().sites);
             sink.send(browser.identifier(), Event::Zoom(percent));
         }
         Op::Print => print::print(sink, browser),
-        Op::Inspect { at } => context_menu::inspect(browser, *at),
-        Op::FillLogin { username, password } => login::fill(browser, username, password),
-        _ => return false,
+        _ => {}
     }
-    true
+}
+
+/// The main frame of `browser` moved to `url`: give it its site's zoom.
+pub fn on_address_change(sink: &Sink, browser: &Browser, url: &str) {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return;
+    }
+    let before = browser
+        .host()
+        .map(|h| zoom::percent_of(h.zoom_level()))
+        .unwrap_or(100);
+    let p = zoom::restore(browser, url, &features().sites);
+    if p != before {
+        sink.send(browser.identifier(), Event::Zoom(p));
+    }
 }
 
 /// `scheme://host[:port]` of a page, the key per-site choices are saved by.
 pub(crate) fn site_of(url: &str) -> Option<String> {
     crate::vault::origin_of(url)
 }
-
 
 /// An empty folder for a test, under the build's target folder.
 #[cfg(test)]

@@ -10,11 +10,6 @@ description = "The Redrob Browser window: draws pages from the engine and sends 
 name = "redrob-browser-window"
 path = "src/main.rs"
 
-# A page in the system web view, for DRM video (docs/DRM.md).
-[[bin]]
-name = "redrob-browser-protected"
-path = "src/bin/protected.rs"
-
 [dependencies]
 eframe = "0.36"
 egui = "0.36"
@@ -38,23 +33,14 @@ aes = "0.8"
 sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
-gstreamer = { version = "0.25", optional = true }
-vello = "0.11"
-# Validates engine fonts before vello draws them (vello panics on a bad face).
-skrifa = "0.44"
-redrob-scene = { workspace = true }
-# The spatial mapping agent screenshots use; the window maps with the same code.
-redrob-scene-raster = { path = "../redrob-scene-raster" }
-gstreamer-app = { version = "0.25", optional = true }
-gstreamer-video = { version = "0.25", optional = true }
 open = "5"
-# Chromium in the window tabs (docs/CEF.md). Binaries come from CEF_PATH.
-cef = { version = "=156.3.0+156.0.15", default-features = false }
+# Chromium in every window tab (docs/CEF.md). The binaries come from CEF_PATH.
+# accelerated_osr: pages arrive as GPU textures (dmabuf, IOSurface, D3D11).
+cef = { version = "=156.3.0", default-features = false, features = ["accelerated_osr", "sandbox"] }
 
-# The protected tab: WebView2 on Windows, WKWebView on macOS. Linux does not offer it.
-[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-wry = "0.57"
-tao = "0.37"
+[target.'cfg(unix)'.dependencies]
+# SIGTERM and SIGINT handlers in place of Chromium's (cef/mod.rs).
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # Start-up on Windows (startup.rs: the log file, the message box) and the
@@ -69,9 +55,3 @@ windows-sys = { version = "0.61", features = [
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
-
-[features]
-default = []
-# Video and audio playback through GStreamer (docs/MEDIA.md). Needs the
-# GStreamer development files at build time and its runtime when running.
-media = ["dep:gstreamer", "dep:gstreamer-app", "dep:gstreamer-video"]

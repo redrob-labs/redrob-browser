@@ -47,7 +47,7 @@ const __obscuraCore = globalThis.Deno.core;
     '_elemHrefURL', '_setElemHrefPart', '_pad', '_daysInMonth',
     '_isoWeek1Monday', '_inputParseNumber', '_inputFormatNumber',
     '_htmlAttrName', '_convertNodes', '_fragmentContextPayload', '_parseHTMLFragment', '_xmlWellFormed', '_elementClassFor', '_wrap', '_wrapEl',
-    '_resolveUrl', '_registerIframe', '_base64ToUint8Array',
+    '_resolveUrl', '_registerIframe', '_reflectedUnsigned', '_iframeContentWindow', '_base64ToUint8Array',
     '_bodyToUint8Array', '_arrayBufferFromBytes',
     '_installWasmStreamingFallback', '_urlParseOp', '_urlSetOp',
     '_urlResolveOp', '_decodeBodyWithCharset', '_utf8DecodeBytes',
@@ -75,7 +75,7 @@ const __obscuraCore = globalThis.Deno.core;
     'MessageChannel', 'MessagePort', 'BroadcastChannel', 'CustomElementRegistry',
     'Scheduler',
     'XMLHttpRequestEventTarget', 'HTMLMediaElement', 'HTMLVideoElement',
-    'HTMLAudioElement', 'WebGL2RenderingContext',
+    'HTMLAudioElement', 'WebGL2RenderingContext', 'DOMStringList', 'VideoPlaybackQuality',
     'MediaKeys', 'MediaKeySession', 'MediaKeySystemAccess', 'MediaKeyStatusMap',
     'MediaKeyMessageEvent', 'MediaEncryptedEvent',
     'SVGElement', 'SVGGraphicsElement', 'SVGGeometryElement', 'SVGPathElement',
@@ -150,6 +150,10 @@ globalThis.dispatchEvent = function(event) {
 
 let _domMutationEpoch = 0;
 let _treeMutationEpoch = 0;
+// Bumped by every DOM command that can change which elements are where
+// (attribute writes excepted). Live HTMLCollections keyed on tag names or
+// children revalidate against it; class collections use _domMutationEpoch.
+let _elementTreeEpoch = 0;
 const _DOM_MUTATION_COMMANDS = new Set([
   "append_child", "insert_before", "remove_child",
   "set_attribute", "remove_attribute",
@@ -188,6 +192,7 @@ const _dom = (cmd, a1, a2) => {
   }
   if (_DOM_MUTATION_COMMANDS.has(cmd)) {
     _domMutationEpoch++;
+    if (cmd !== "set_attribute" && cmd !== "remove_attribute") _elementTreeEpoch++;
     // Resize observation is tied to rendering-invalidating DOM work. The
     // hook is installed later in bootstrap, before page script can run.
     if (typeof globalThis.__obscura_recompute_resizes === "function") {
@@ -443,6 +448,12 @@ function __startDynClassicFetch(task) {
     error => ({ error }),
   );
 }
+// Classic script execution with the script URL as its origin, like a
+// parser-inserted script (see op_run_classic_script). Falls back to indirect
+// eval where the op is absent.
+function __runClassicScript(source, url) {
+  _runClassicScript(source, url);
+}
 async function __runDynScriptTask(task) {
   try {
     if (task.isModule) {
@@ -464,8 +475,10 @@ async function __runDynScriptTask(task) {
         await new Promise(resolve => {
           const execute = () => {
             globalThis.__currentScriptNid = task.nid;
-            try { _runClassicScript(body, task.url); }
-            catch(e) { console.error('Dynamic script error (' + task.url + '):', e.message); }
+            try { __runClassicScript(body, task.url); }
+            catch(e) {
+              if (_reportScriptException(e, task.url)) console.error('Dynamic script error (' + task.url + '):', e && e.stack || e);
+            }
             finally { globalThis.__currentScriptNid = task.prevNid || 0; }
             resolve();
           };
@@ -478,7 +491,7 @@ async function __runDynScriptTask(task) {
     // off the element. Calling onload separately would double-fire it.
     try { task.dispatchEvent(new Event('load')); } catch(e) {}
   } catch(e) {
-    console.error('Dynamic script fetch error:', e.message);
+    console.error('Dynamic script fetch error (' + task.url + '):', e.message);
     try { task.dispatchEvent(new Event('error')); } catch(ex) {}
   } finally {
     if (task.delaysLoad) {
@@ -1779,7 +1792,70 @@ class MessageChannel {
 globalThis.MessageChannel = MessageChannel;
 globalThis.MessagePort = MessagePort;
 
-const _cssCamelToKebab = (s) => s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+// `cssFloat` is the IDL name of the `float` property (`float` is reserved in
+// old JS). jQuery 1.x reads `style.cssFloat` to pick its float hook.
+const _cssCamelToKebab = (s) => s === "cssFloat" ? "float" : s.replace(/[A-Z]/g, (m) => "-" + m.toLowerCase());
+
+// CSSOM serializes a declared value's numbers canonically: `.55` reads back
+// as `0.55`, `10.50px` as `10.5px`, `03` as `3`. jQuery 1.x detects opacity
+// support with /^0.55$/.test(a.style.opacity) and, when it fails, routes every
+// fade through the IE `filter` hook, which calls style.removeAttribute and
+// throws. Strings, url() and custom properties keep their exact text.
+function _cssNormalizeNumbers(value) {
+  const text = String(value);
+  if (!/[.\d]/.test(text)) return text;
+  let out = "", i = 0;
+  const n = text.length;
+  const identStart = (c) => /[A-Za-z_#\\]/.test(c) || c > "\x7f";
+  const identChar = (c) => /[A-Za-z0-9_#\\+-]/.test(c) || c > "\x7f";
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < n && text[j] !== c) j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (identStart(c)) {
+      // A whole identifier (`h1`, `#0a0`, `U+0025`, `translate3d`) is copied
+      // verbatim; url(...) keeps its argument untouched.
+      let j = i + 1;
+      while (j < n && identChar(text[j])) j++;
+      if (text[j] === "(" && /^url$/i.test(text.slice(i, j))) {
+        const close = text.indexOf(")", j);
+        j = close < 0 ? n : close + 1;
+      }
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    {
+      const m = /^[+-]?(\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(text.slice(i, i + 40));
+      if (m) {
+        const tok = m[0];
+        const num = Number(tok);
+        let canon = tok;
+        if (Number.isFinite(num) && Math.abs(num) < 1e6) {
+          canon = String(Number(num.toPrecision(6)));
+          if (canon === "-0") canon = "0";
+          if (canon.includes("e")) canon = tok;
+        }
+        out += canon;
+        i += tok.length;
+        // Copy the unit or the rest of an identifier glued to the number.
+        while (i < n && /[A-Za-z%]/.test(text[i])) out += text[i++];
+        continue;
+      }
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+function _cssNormalizeValue(key, value) {
+  return key.startsWith("--") ? value : _cssNormalizeNumbers(value);
+}
 const _cssKebabToCamel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
 // Standard CSS property names (camelCase). Real CSSStyleDeclaration exposes every
@@ -1847,7 +1923,7 @@ function _parseCssInto(props, text) {
   for (const k in props) delete props[k];
   if (text) _splitCssDeclarations(text).forEach((p) => {
     const i = p.indexOf(":");
-    if (i > 0) { const k = p.slice(0, i).trim(); const v = p.slice(i + 1).trim(); if (k && v) props[_cssCamelToKebab(k)] = v; }
+    if (i > 0) { const k = p.slice(0, i).trim(); const v = p.slice(i + 1).trim(); if (k && v) { const key = _cssCamelToKebab(k); props[key] = _cssNormalizeValue(key, v); } }
   });
 }
 // Declaration values routinely contain semicolons in quoted `content`, data
@@ -1949,7 +2025,7 @@ class CSSStyleDeclaration {
       if (old === undefined) return;
       delete this._props[k];
     } else {
-      value = String(value);
+      value = _cssNormalizeValue(k, String(value));
       if (old === value) return;
       this._props[k] = value;
     }
@@ -2490,7 +2566,7 @@ function __prepareInsertedScript(script) {
     __processParserBlockingScriptQueue();
   } else {
     globalThis.__currentScriptNid = script._nid;
-    try { _runClassicScript(code, ''); }
+    try { __runClassicScript(code, globalThis.location?.href || ''); }
     catch(e) { console.error('Dynamic inline script error:', e.message); }
     finally { globalThis.__currentScriptNid = prevNid || 0; }
   }
@@ -4304,7 +4380,13 @@ const _innerTextBlockDisplays = new Set([
   'block', 'flow-root', 'flex', 'grid', 'list-item', 'table', 'table-caption',
 ]);
 
-const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track', 'option', 'optgroup']);
+// <option> and <optgroup> are not here: Chrome lays options out as blocks
+// (in or out of a <select>) and innerText lists each on its own line.
+const _innerTextUnrenderedTags = new Set(['noscript', 'source', 'track']);
+const _innerTextUnrenderedSvgTags = new Set([
+  'title', 'desc', 'metadata', 'defs', 'symbol', 'clipPath', 'mask', 'pattern',
+  'marker', 'linearGradient', 'radialGradient', 'filter', 'script', 'style',
+]);
 // Forced line feeds (<br>, table rows) and tabs (table cells) are emitted as
 // these tokens so they stay distinct from a text node whose data happens to
 // be a lone "\n" or "\t": such whitespace collapses like any other.
@@ -4322,17 +4404,20 @@ function _collectInnerText(node, items, inheritedVisibility = 'visible') {
   const display = style.display;
   if (display === 'none') return;
   // Elements the UA hides without display:none generate no box, so they
-  // are not being rendered (noscript with scripting on, media sources,
-  // options outside the select popup).
+  // are not being rendered (noscript with scripting on, media sources).
   if (node.namespaceURI === 'http://www.w3.org/1999/xhtml'
       && _innerTextUnrenderedTags.has(node.localName)) return;
+  // SVG descriptive and resource elements (an icon's <title>, <defs>,
+  // gradients) are never rendered in place, whatever their display value.
+  if (node.namespaceURI === 'http://www.w3.org/2000/svg'
+      && _innerTextUnrenderedSvgTags.has(node.localName)) return;
   const visibility = style.visibility || inheritedVisibility;
   if (visibility === 'visible' && node.tagName === 'BR') {
     items.push(_innerTextLF);
     return;
   }
   const breaks = visibility === 'visible'
-    ? (node.tagName === 'P' ? 2 : (_innerTextBlockDisplays.has(display) ? 1 : 0))
+    ? (node.tagName === 'P' ? 2 : (_innerTextBlockDisplays.has(display) || node.tagName === 'OPTION' || node.tagName === 'OPTGROUP' ? 1 : 0))
     : 0;
   if (breaks) items.push(breaks);
   for (const child of node.childNodes) {
@@ -4496,8 +4581,8 @@ class Element extends Node {
   }
   set innerText(v) { this.textContent = v; }
   get children() {
-    const ids = _domParse("element_children", this._nid) || [];
-    return HTMLCollection._from(ids.map(_wrapEl).filter(Boolean));
+    const nid = this._nid;
+    return HTMLCollection._live(() => (_domParse("element_children", nid) || []).map(_wrapEl), false);
   }
   get content() {
     // <template>.content is a DocumentFragment; <meta>.content reflects
@@ -4725,8 +4810,8 @@ class Element extends Node {
     const ids = _domParse("query_selector_all_scoped", this._nid, s) || [];
     return _relevantNodeList(this, _nodeList(ids.map(_wrapEl).filter(Boolean)));
   }
-  getElementsByTagName(t) { return HTMLCollection._from(this.querySelectorAll(t)); }
-  getElementsByClassName(c) { return _getElementsByClassName(this, c); }
+  getElementsByTagName(t) { return HTMLCollection._live(() => this.querySelectorAll(t), false); }
+  getElementsByClassName(c) { return HTMLCollection._live(() => _getElementsByClassName(this, c), true); }
   matches(s) {
     if (arguments.length === 0) {
       const view = _frameViewOf(this);
@@ -5561,7 +5646,7 @@ class Element extends Node {
     }
     if (!this._iframeWin) {
       if (this.parentNode === null) return null;
-      this.contentDocument;
+      _contentDocumentGetter.call(this);
     }
     return this._iframeWin;
   }
@@ -6848,8 +6933,8 @@ class Document extends Node {
       : _domParse("query_selector_all", s)) || [];
     return _nodeList(ids.map(_wrapEl).filter(Boolean));
   }
-  getElementsByTagName(t) { return HTMLCollection._from(this.querySelectorAll(t)); }
-  getElementsByClassName(c) { return _getElementsByClassName(this, c); }
+  getElementsByTagName(t) { return HTMLCollection._live(() => this.querySelectorAll(t), false); }
+  getElementsByClassName(c) { return HTMLCollection._live(() => _getElementsByClassName(this, c), true); }
   getElementsByName(name) { return this.querySelectorAll('[name="' + String(name).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]'); }
   evaluate(expression, contextNode, namespaceResolver, type, result) {
     return _makeXPathResult(type, _xpathFindNodes(expression, contextNode || this));
@@ -7282,6 +7367,11 @@ class Document extends Node {
   get images() { return this.querySelectorAll("img"); }
   get links() { return this.querySelectorAll("a[href], area[href]"); }
   get scripts() { return this.querySelectorAll("script"); }
+  get embeds() { return HTMLCollection._live(() => this.querySelectorAll("embed"), false); }
+  get plugins() { return this.embeds; }
+  get anchors() { return HTMLCollection._live(() => this.querySelectorAll("a[name]"), true); }
+  // Applets are gone from HTML; the collection is always empty.
+  get applets() { return HTMLCollection._from([]); }
   get cookie() {
     // A document without a browsing context is cookie-averse.
     if (this._detached) return "";
@@ -7398,7 +7488,7 @@ function _runWrittenParserScript(nid) {
   if (!script) return;
   var prev = globalThis.__currentScriptNid;
   globalThis.__currentScriptNid = nid;
-  try { _runClassicScript(script.textContent, String(globalThis.location && globalThis.location.href || '')); }
+  try { __runClassicScript(script.textContent, globalThis.location?.href || ''); }
   catch (e) { console.error('Inline script error:', e && e.message); }
   finally { globalThis.__currentScriptNid = prev || 0; }
 }
@@ -7411,6 +7501,7 @@ function _parserInsertedNodes() {
   if (!flat.length) return;
   _treeMutationEpoch++;
   _domMutationEpoch++;
+  _elementTreeEpoch++;
   var observers = globalThis.__mutationObservers;
   var wantRecords = observers && observers.length;
   var nodes = [];
@@ -7530,8 +7621,8 @@ class DocumentFragment extends Node {
     return _relevantNodeList(this, _nodeList(ids.map(_wrapEl).filter(Boolean)));
   }
   get children() {
-    const ids = _domParse("element_children", this._nid) || [];
-    return HTMLCollection._from(ids.map(_wrapEl).filter(Boolean));
+    const nid = this._nid;
+    return HTMLCollection._live(() => (_domParse("element_children", nid) || []).map(_wrapEl), false);
   }
   get firstElementChild() { return this.children[0] || null; }
   get lastElementChild() { const ch = this.children; return ch[ch.length - 1] || null; }
@@ -8216,6 +8307,77 @@ class HTMLMediaElement extends HTMLElement {
   addTextTrack(kind, label = "", language = "") {
     return new TextTrack(null, String(kind), String(label), String(language));
   }
+  // Content attributes reflected as IDL attributes (HTML media elements).
+  get autoplay() { return this.hasAttribute("autoplay"); }
+  set autoplay(v) { this.toggleAttribute("autoplay", !!v); }
+  get loop() { return this.hasAttribute("loop"); }
+  set loop(v) { this.toggleAttribute("loop", !!v); }
+  get controls() { return this.hasAttribute("controls"); }
+  set controls(v) { this.toggleAttribute("controls", !!v); }
+  get defaultMuted() { return this.hasAttribute("muted"); }
+  set defaultMuted(v) { this.toggleAttribute("muted", !!v); }
+  get preload() {
+    const v = (this.getAttribute("preload") ?? "").toLowerCase();
+    if (v === "none" || v === "metadata" || v === "auto") return v;
+    return this.hasAttribute("preload") ? "auto" : "metadata";
+  }
+  set preload(v) { this.setAttribute("preload", v); }
+  get crossOrigin() {
+    if (!this.hasAttribute("crossorigin")) return null;
+    return (this.getAttribute("crossorigin") || "").toLowerCase() === "use-credentials"
+      ? "use-credentials" : "anonymous";
+  }
+  set crossOrigin(v) {
+    if (v === null) this.removeAttribute("crossorigin");
+    else this.setAttribute("crossorigin", v);
+  }
+  get controlsList() {
+    if (!this._controlsList) {
+      this._controlsList = new DOMTokenList(this, "controlslist",
+        ["nodownload", "nofullscreen", "noplaybackrate", "noremoteplayback"]);
+    }
+    return this._controlsList;
+  }
+  get disableRemotePlayback() { return this.hasAttribute("disableremoteplayback"); }
+  set disableRemotePlayback(v) { this.toggleAttribute("disableremoteplayback", !!v); }
+  get defaultPlaybackRate() { return this.__media.defaultPlaybackRate ?? 1; }
+  set defaultPlaybackRate(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new TypeError("Failed to set the 'defaultPlaybackRate' property on 'HTMLMediaElement': The provided double value is non-finite.");
+    if (n === this.defaultPlaybackRate) return;
+    this.__media.defaultPlaybackRate = n;
+    this.__fire("ratechange");
+  }
+  get playbackRate() { return this.__media.playbackRate ?? 1; }
+  set playbackRate(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) throw new TypeError("Failed to set the 'playbackRate' property on 'HTMLMediaElement': The provided double value is non-finite.");
+    if (n !== 0 && (Math.abs(n) < 0.0625 || Math.abs(n) > 16)) {
+      throw new DOMException(`Failed to set the 'playbackRate' property on 'HTMLMediaElement': The provided playback rate (${n}) is not in the supported playback range.`, "NotSupportedError");
+    }
+    if (n === this.playbackRate) return;
+    this.__media.playbackRate = n;
+    this.__fire("ratechange");
+  }
+  get preservesPitch() { return this.__media.preservesPitch ?? true; }
+  set preservesPitch(v) { this.__media.preservesPitch = !!v; }
+  // Ranges the user agent has played. Nothing plays headless; the window
+  // reports positions, so the played range runs from 0 to the furthest one.
+  get played() {
+    const end = this.__media.playedEnd || 0;
+    return new TimeRanges(end > 0 ? [[0, end]] : []);
+  }
+  get sinkId() { return this.__media.sinkId ?? ""; }
+  setSinkId(id) {
+    const sink = String(id);
+    if (sink !== "" && sink !== "default") {
+      return Promise.reject(new DOMException("Requested device not found", "NotFoundError"));
+    }
+    this.__media.sinkId = sink;
+    return Promise.resolve();
+  }
+  get webkitAudioDecodedByteCount() { return 0; }
+  get webkitVideoDecodedByteCount() { return 0; }
 }
 _markNative(HTMLMediaElement.prototype.canPlayType);
 _markNative(HTMLMediaElement.prototype.play);
@@ -8246,6 +8408,7 @@ globalThis.__redrobMediaUpdate = function (id, s) {
   if (before.readyState < 2 && m.readyState >= 2) { el.__fire('loadeddata'); el.__fire('canplay'); }
   if (before.readyState < 4 && m.readyState >= 4) el.__fire('canplaythrough');
   if (m.seeking) { m.seeking = false; el.__fire('seeked'); }
+  if (!s.paused && s.currentTime > (m.playedEnd || 0)) m.playedEnd = s.currentTime;
   if (before.paused && !s.paused) { m.paused = false; el.__fire('playing'); }
   if (!before.paused && s.paused && !s.ended) { m.paused = true; el.__fire('pause'); }
   if (s.currentTime !== before.currentTime) el.__fire('timeupdate');
@@ -8261,7 +8424,66 @@ class HTMLVideoElement extends HTMLMediaElement {
   set poster(value) { this.setAttribute("poster", value); }
   get videoWidth() { return this.__media.videoWidth; }
   get videoHeight() { return this.__media.videoHeight; }
+  get width() { return _reflectedUnsigned(this, "width"); }
+  set width(v) { this.setAttribute("width", String(Number(v) >>> 0)); }
+  get height() { return _reflectedUnsigned(this, "height"); }
+  set height(v) { this.setAttribute("height", String(Number(v) >>> 0)); }
+  get playsInline() { return this.hasAttribute("playsinline"); }
+  set playsInline(v) { this.toggleAttribute("playsinline", !!v); }
+  get disablePictureInPicture() { return this.hasAttribute("disablepictureinpicture"); }
+  set disablePictureInPicture(v) { this.toggleAttribute("disablepictureinpicture", !!v); }
+  get onenterpictureinpicture() { return this._onenterpip || null; }
+  set onenterpictureinpicture(v) { this._setPipHandler("enterpictureinpicture", "_onenterpip", v); }
+  get onleavepictureinpicture() { return this._onleavepip || null; }
+  set onleavepictureinpicture(v) { this._setPipHandler("leavepictureinpicture", "_onleavepip", v); }
+  _setPipHandler(type, slot, v) {
+    if (this[slot]) this.removeEventListener(type, this[slot]);
+    this[slot] = typeof v === "function" ? v : null;
+    if (this[slot]) this.addEventListener(type, this[slot]);
+  }
+  requestPictureInPicture() {
+    return Promise.reject(new DOMException(
+      "Failed to execute 'requestPictureInPicture' on 'HTMLVideoElement': Must be handling a user gesture if there isn't already an element in Picture-in-Picture.",
+      "NotAllowedError",
+    ));
+  }
+  // Frames presented so far; none are presented without a playing window.
+  get webkitDecodedFrameCount() { return 0; }
+  get webkitDroppedFrameCount() { return 0; }
+  getVideoPlaybackQuality() {
+    return new VideoPlaybackQuality(performance.now(), 0, 0);
+  }
+  // The callback runs when a new frame is presented for compositing.
+  requestVideoFrameCallback(callback) {
+    if (typeof callback !== "function") {
+      throw new TypeError("Failed to execute 'requestVideoFrameCallback' on 'HTMLVideoElement': parameter 1 is not of type 'Function'.");
+    }
+    const id = (this.__videoFrameCallbackId = (this.__videoFrameCallbackId || 0) + 1);
+    (this.__videoFrameCallbacks ||= new Map()).set(id, callback);
+    return id;
+  }
+  cancelVideoFrameCallback(id) {
+    this.__videoFrameCallbacks?.delete(Number(id));
+  }
 }
+function _reflectedUnsigned(el, name) {
+  const raw = el.getAttribute(name);
+  if (raw === null) return 0;
+  const m = /^[\t\n\f\r ]*\+?(\d+)/.exec(raw);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return n <= 2147483647 ? n : 0;
+}
+class VideoPlaybackQuality {
+  constructor(creationTime, totalVideoFrames, droppedVideoFrames) {
+    Object.defineProperty(this, "_q", { value: [creationTime, totalVideoFrames, droppedVideoFrames] });
+  }
+  get creationTime() { return this._q[0]; }
+  get totalVideoFrames() { return this._q[1]; }
+  get droppedVideoFrames() { return this._q[2]; }
+  get corruptedVideoFrames() { return 0; }
+}
+globalThis.VideoPlaybackQuality = VideoPlaybackQuality;
 class HTMLAudioElement extends HTMLMediaElement {}
 class HTMLTrackElement extends HTMLElement {
   static NONE = 0;
@@ -8679,7 +8901,7 @@ for (let i = 0; i < 50; i++) {
     get() {
       const iframes = document.querySelectorAll('iframe');
       if (i < iframes.length) {
-        return iframes[i].contentWindow;
+        return _iframeContentWindow(iframes[i]);
       }
       return undefined;
     },
@@ -8874,7 +9096,71 @@ globalThis.navigator = {
     },
     toJSON() { return {brands:this.brands,mobile:this.mobile,platform:this.platform}; },
   },
-  serviceWorker: { ready: Promise.resolve(), register(){return Promise.resolve();}, getRegistrations(){return Promise.resolve([]);}, controller: null, oncontrollerchange: null, onmessage: null, addEventListener(){}, removeEventListener(){}, dispatchEvent(){return true;} },
+  // ServiceWorkerContainer. Scripts are not run, so a registration behaves
+  // like a worker that activated with no fetch handler: the page is not
+  // controlled and network goes through as before. Like Chrome, `ready`
+  // stays pending until something registers, and register() resolves a
+  // registration object, so `ready.then(r => r.unregister())` (Instagram)
+  // and `register(...).then(r => r.update())` do not throw on undefined.
+  serviceWorker: (() => {
+    const registrations = new Map();
+    let resolveReady;
+    const ready = new Promise((resolve) => { resolveReady = resolve; });
+    const noopTarget = { addEventListener() {}, removeEventListener() {}, dispatchEvent() { return true; } };
+    const makeRegistration = (scriptURL, scope) => {
+      const active = Object.assign(Object.create(noopTarget), {
+        scriptURL, state: "activated", onstatechange: null, onerror: null, postMessage() {},
+      });
+      const registration = Object.assign(Object.create(noopTarget), {
+        scope, installing: null, waiting: null, active, updateViaCache: "imports", onupdatefound: null,
+        navigationPreload: {
+          enable() { return Promise.resolve(); }, disable() { return Promise.resolve(); },
+          setHeaderValue() { return Promise.resolve(); },
+          getState() { return Promise.resolve({ enabled: false, headerValue: "true" }); },
+        },
+        pushManager: {
+          getSubscription() { return Promise.resolve(null); },
+          permissionState() { return Promise.resolve("prompt"); },
+          subscribe() { return Promise.reject(new DOMException("Registration failed - permission denied", "NotAllowedError")); },
+        },
+        update() { return Promise.resolve(registration); },
+        unregister() { return Promise.resolve(registrations.delete(scope)); },
+        getNotifications() { return Promise.resolve([]); },
+        showNotification() { return Promise.reject(new TypeError("No notification permission has been granted for this origin.")); },
+      });
+      return registration;
+    };
+    return Object.assign(Object.create(noopTarget), {
+      ready, controller: null, oncontrollerchange: null, onmessage: null, onmessageerror: null,
+      register(url, options) {
+        let scriptURL, scope;
+        try {
+          scriptURL = new URL(String(url), location.href).href;
+          scope = new URL(options && options.scope != null ? String(options.scope) : "./", scriptURL).href;
+        } catch (e) {
+          return Promise.reject(new TypeError("Failed to register a ServiceWorker: The URL protocol of the script ('" + url + "') is not supported."));
+        }
+        let registration = registrations.get(scope);
+        if (!registration) {
+          registration = makeRegistration(scriptURL, scope);
+          registrations.set(scope, registration);
+        }
+        resolveReady(registration);
+        return Promise.resolve(registration);
+      },
+      getRegistration(clientURL) {
+        let url = location.href;
+        try { if (clientURL != null) url = new URL(String(clientURL), location.href).href; } catch (e) {}
+        let best;
+        for (const [scope, registration] of registrations) {
+          if (url.startsWith(scope) && (!best || scope.length > best.scope.length)) best = registration;
+        }
+        return Promise.resolve(best);
+      },
+      getRegistrations() { return Promise.resolve([...registrations.values()]); },
+      startMessages() {},
+    });
+  })(),
   mediaDevices: {
     enumerateDevices() {
       return Promise.resolve([
@@ -12993,6 +13279,23 @@ globalThis.FocusEvent = class FocusEvent extends Event { constructor(t,o={}) { s
 globalThis.InputEvent = class InputEvent extends Event { constructor(t,o={}) { super(t,o);this.data=o.data||null;this.inputType=o.inputType||""; } };
 globalThis.ErrorEvent = class ErrorEvent extends Event { constructor(t,o={}) { super(t,o);this.message=o.message||"";this.error=o.error||null; } };
 const _browserErrorEvent = globalThis.ErrorEvent;
+// An uncaught exception from a script element's top level: like Chrome, the
+// window gets an ErrorEvent (pages hook onerror for telemetry and recovery)
+// and CDP sees Runtime.exceptionThrown. Returns false when a listener
+// cancelled the event, so the caller skips its console report.
+function _reportScriptException(error, filename) {
+  let message;
+  try { message = 'Uncaught ' + String(error && error.name ? error.name + ': ' + error.message : error); }
+  catch (_) { message = 'Uncaught exception'; }
+  const event = new _browserErrorEvent('error', { message, error, cancelable: true });
+  try { Object.defineProperty(event, 'filename', { value: String(filename || ''), configurable: true }); } catch (_) {}
+  let reported = true;
+  try { reported = _eventTargetDispatch(globalThis, event); } catch (_) {}
+  if (reported) {
+    try { __obscuraCore.ops.op_report_browser_exception(error, globalThis.__obscura_frameId || 0); } catch (_) {}
+  }
+  return reported;
+}
 __obscuraCore.setReportExceptionCallback(error => {
   // deno_core's default reporter terminates execution, discarding the rest of
   // the microtask checkpoint. Browser callback errors must leave queued work live.
@@ -16237,6 +16540,15 @@ globalThis.DocumentFragment = DocumentFragment;
 globalThis.DocumentType = DocumentType;
 globalThis.Node = Node;
 globalThis.Element = Element;
+// The engine's own iframe -> window lookup. Pages (ad verification scripts)
+// replace HTMLIFrameElement.prototype.contentWindow with getters that read
+// contentDocument.defaultView; a native path that went through the public
+// property re-entered such a getter forever, building a frame per level.
+const _contentWindowGetter = Object.getOwnPropertyDescriptor(Element.prototype, "contentWindow").get;
+const _contentDocumentGetter = Object.getOwnPropertyDescriptor(Element.prototype, "contentDocument").get;
+function _iframeContentWindow(element) {
+  return element ? _contentWindowGetter.call(element) : undefined;
+}
 globalThis.Document = Document;
 // document.all. In browsers it is an HTMLAllCollection that V8 marks
 // "undetectable": falsy, typeof "undefined", == null, yet !== undefined.
@@ -16319,7 +16631,27 @@ globalThis.HTMLCollection = class HTMLCollection extends Array {
     if (arr) for (let i = 0; i < arr.length; i++) { if (arr[i]) c[c.length] = arr[i]; }
     return new Proxy(c, _htmlCollectionProxy);
   }
+  // A live collection (getElementsByTagName/ClassName, children): it
+  // re-queries when the DOM changed since it was last read, so a loop that
+  // moves `collection[0]` out of its parent walks every element as in
+  // Chrome. Amazon moves its homepage cards that way; a snapshot moved one
+  // card and dropped the rest with their hidden container.
+  static _live(compute, attributeSensitive) {
+    const c = new HTMLCollection();
+    Object.defineProperty(c, "_liveCompute", { value: compute });
+    Object.defineProperty(c, "_liveAttrs", { value: !!attributeSensitive });
+    Object.defineProperty(c, "_liveEpoch", { value: -1, writable: true });
+    return new Proxy(c, _liveHtmlCollectionProxy);
+  }
 };
+function _liveCollectionRefresh(t) {
+  const epoch = t._liveAttrs ? _domMutationEpoch : _elementTreeEpoch;
+  if (t._liveEpoch === epoch) return;
+  t._liveEpoch = epoch;
+  const items = t._liveCompute() || [];
+  t.length = 0;
+  for (let i = 0; i < items.length; i++) { if (items[i]) t[t.length] = items[i]; }
+}
 _markNative(HTMLCollection.prototype.item);
 _markNative(HTMLCollection.prototype.namedItem);
 // Shared (allocated once) Proxy traps for HTMLCollection named access. Indices,
@@ -16336,6 +16668,15 @@ const _htmlCollectionProxy = {
     if (Reflect.has(t, k)) return true;
     return typeof k === "string" && !!(t.namedItem && t.namedItem(k));
   },
+};
+const _liveHtmlCollectionProxy = {
+  get(t, k, r) {
+    if (k !== "_liveCompute" && k !== "_liveAttrs" && k !== "_liveEpoch") _liveCollectionRefresh(t);
+    return _htmlCollectionProxy.get(t, k, r);
+  },
+  has(t, k) { _liveCollectionRefresh(t); return _htmlCollectionProxy.has(t, k); },
+  ownKeys(t) { _liveCollectionRefresh(t); return Reflect.ownKeys(t); },
+  getOwnPropertyDescriptor(t, k) { _liveCollectionRefresh(t); return Reflect.getOwnPropertyDescriptor(t, k); },
 };
 // True for elements in the HTML namespace (the only ones whose name attribute
 // contributes to an HTMLCollection's supported property names).
@@ -16403,7 +16744,7 @@ function _windowNamedValue(name) {
   for (const element of matches) {
     if (element.localName === "iframe" && _windowNameEligibleElement(element)
         && element.getAttribute("name") === name) {
-      const window = element.contentWindow;
+      const window = _iframeContentWindow(element);
       if (window) return window;
     }
   }
@@ -17049,8 +17390,8 @@ class _IframeDocument {
   set title(v) { this._title = v; }
   get URL() { return this._url; }
   get documentURI() { return this._url; }
-  get location() { return this._iframeEl?.contentWindow?.location; }
-  get defaultView() { return this._iframeEl?.contentWindow; }
+  get location() { return _iframeContentWindow(this._iframeEl)?.location; }
+  get defaultView() { return _iframeContentWindow(this._iframeEl); }
   get ownerDocument() { return null; }
   get compatMode() { return 'CSS1Compat'; }
   get activeElement() { return this._body; }
@@ -17286,8 +17627,28 @@ function _targetOriginAllows(targetOrigin, receiverOrigin, senderOrigin) {
   return receiverOrigin === expected;
 }
 
-function _sendRealmMessage(targetFrameId, data, targetOrigin) {
+// postMessage(message, targetOrigin, transfer) and the options form
+// postMessage(message, { targetOrigin, transfer }). Only MessagePorts are
+// carried across; they arrive as event.ports, which ad and consent frames use
+// to set up a private channel (GPT replies on `event.ports[0]`).
+function _postMessageArgs(targetOrigin, transfer) {
+  if (targetOrigin && typeof targetOrigin === 'object') {
+    transfer = targetOrigin.transfer;
+    targetOrigin = targetOrigin.targetOrigin === undefined ? '/' : targetOrigin.targetOrigin;
+  }
+  const ports = [];
+  if (transfer != null) {
+    for (const item of transfer) {
+      if (item instanceof MessagePort || (item && item.constructor && item.constructor.name === 'MessagePort')) ports.push(item);
+    }
+  }
+  return { targetOrigin, ports };
+}
+function _sendRealmMessage(targetFrameId, data, targetOrigin, transfer) {
   let json;
+  const args = _postMessageArgs(targetOrigin, transfer);
+  targetOrigin = args.targetOrigin;
+  const ports = args.ports;
   // Structured clone cannot cross realms here. JSON carries what postMessage is
   // actually used for; anything else throws the same DataCloneError a browser
   // throws for an unclonable value, rather than arriving silently as null.
@@ -17297,6 +17658,9 @@ function _sendRealmMessage(targetFrameId, data, targetOrigin) {
     throw new DOMException('The object could not be cloned.', 'DataCloneError');
   }
   if (json === undefined) json = '{"v":null}';
+  if (ports.length && typeof __obscuraCore.ops.op_transfer_stash === 'function') {
+    json = json.slice(0, -1) + ',"t":' + __obscuraCore.ops.op_transfer_stash(ports) + '}';
+  }
   // An unspecified targetOrigin stays permissive (empty string); the receiver
   // enforces a specified one against its own origin in __obscura_deliverMessage.
   const to = (targetOrigin === undefined || targetOrigin === null) ? '' : String(targetOrigin);
@@ -17305,11 +17669,13 @@ function _sendRealmMessage(targetFrameId, data, targetOrigin) {
   // drain cross-realm messages. Serialize only once, before scheduling.
   const origin = _realmOrigin();
   if (!_targetOriginAllows(targetOrigin, origin, origin)) return;
-  const clone = JSON.parse(json).v;
+  const parsed = JSON.parse(json);
+  const clone = parsed.v;
+  const localPorts = parsed.t ? _takeTransferredPorts(parsed.t) : [];
   setTimeout(() => {
     try {
       globalThis.dispatchEvent(globalThis.__obscura_markTrusted(
-        new MessageEvent('message', { data: clone, origin, source: globalThis })));
+        new MessageEvent('message', { data: clone, origin, source: globalThis, ports: localPorts })));
     } catch (error) {
       console.error('message listener failed:', error && error.message || error);
     }
@@ -17338,7 +17704,19 @@ function _connectSrcdocFrames(root, html) {
 }
 
 function _ensureInitialFrameRealm(element, srcdoc) {
-  if (element._frameId || !element.isConnected) return;
+  // Script run while the realm is being built (its init, a listener it
+  // wakes) can ask for the frame again before its id is recorded; building a
+  // second realm then recursed without bound.
+  if (element._frameId || !element.isConnected || element._initialFrameRealmBusy) return;
+  element._initialFrameRealmBusy = true;
+  try {
+    return _buildInitialFrameRealm(element, srcdoc);
+  } finally {
+    element._initialFrameRealmBusy = false;
+  }
+}
+
+function _buildInitialFrameRealm(element, srcdoc) {
   // An opaque sandbox must never receive the creator's security token.
   let opaque = element.hasAttribute('sandbox') &&
       !element.getAttribute('sandbox').toLowerCase().split(/\s+/).includes('allow-same-origin');
@@ -17428,13 +17806,24 @@ function _frameWindowFor(frameId) {
 }
 
 // The host calls this inside the target realm.
+function _takeTransferredPorts(id) {
+  const take = __obscuraCore.ops.op_transfer_take;
+  const ports = typeof take === 'function' ? take(id >>> 0) : undefined;
+  return Array.isArray(ports) ? ports : [];
+}
 globalThis.__obscura_deliverMessage = function(dataJson, origin, sourceFrameId, targetOrigin) {
+  let data = null;
+  let ports = [];
+  try {
+    const parsed = JSON.parse(dataJson);
+    data = parsed.v;
+    // Claimed before the origin check so a dropped message frees its slot.
+    if (parsed.t) ports = _takeTransferredPorts(parsed.t);
+  } catch (_) {}
   // Enforce postMessage's targetOrigin against THIS (the receiving) realm's
   // origin, the same check a real browser does at delivery time. A mismatch
   // drops the message silently.
   if (!_targetOriginAllows(targetOrigin, _realmOrigin(), origin)) return;
-  let data = null;
-  try { data = JSON.parse(dataJson).v; } catch (_) {}
   // Who to reply to: the frame above, or one of the frames below.
   const source = (globalThis.__obscura_frameId !== 0
                   && sourceFrameId === globalThis.__obscura_parentFrameId)
@@ -17446,7 +17835,7 @@ globalThis.__obscura_deliverMessage = function(dataJson, origin, sourceFrameId, 
     // drop anything untrusted, so an untrusted event is not merely suspicious,
     // it is silently discarded and the widget waits forever.
     globalThis.dispatchEvent(globalThis.__obscura_markTrusted(
-      new MessageEvent('message', { data, origin, source })));
+      new MessageEvent('message', { data, origin, source, ports })));
   } catch (error) {
     console.error('message listener failed:', error && error.message || error);
   }
@@ -17462,9 +17851,9 @@ class _RemoteWindow {
   constructor(frameId) {
     Object.defineProperty(this, '_frameId', { value: frameId, enumerable: false });
   }
-  postMessage(data, targetOrigin, _transfer) {
+  postMessage(data, targetOrigin, transfer) {
     _checkWindowPostMessage(arguments.length, targetOrigin);
-    _sendRealmMessage(this._frameId, data, targetOrigin);
+    _sendRealmMessage(this._frameId, data, targetOrigin, transfer);
   }
   get self() { return this; }
   get window() { return this; }
@@ -17560,14 +17949,14 @@ class _IframeWindow {
     return proxy;
   }
 
-  postMessage(data, targetOrigin, _transfer) {
+  postMessage(data, targetOrigin, transfer) {
     _checkWindowPostMessage(arguments.length, targetOrigin);
     // Into the frame's own realm, through the host. This used to dispatch the
     // event on the *parent's* window, so a page could never actually talk to
     // the document inside its iframe. A frame that has not loaded yet has no
     // browsing context to receive anything.
     if (!this._frameId) return;
-    _sendRealmMessage(this._frameId, data, targetOrigin);
+    _sendRealmMessage(this._frameId, data, targetOrigin, transfer);
   }
 
   setTimeout(fn, ms) { return globalThis.setTimeout(fn, ms); }
@@ -19250,9 +19639,9 @@ function _checkWindowPostMessage(count, targetOrigin) {
       + targetOrigin + "' in a call to 'postMessage'.", 'SyntaxError');
   }
 }
-globalThis.postMessage = function postMessage(data, targetOrigin, _transfer) {
+globalThis.postMessage = function postMessage(data, targetOrigin, transfer) {
   _checkWindowPostMessage(arguments.length, targetOrigin);
-  _sendRealmMessage(_realmFrameId, data, targetOrigin);
+  _sendRealmMessage(_realmFrameId, data, targetOrigin, transfer);
 };
 _markNative(globalThis.postMessage);
 globalThis.requestIdleCallback = globalThis.requestIdleCallback || function(cb) { return setTimeout(cb, 0); };

@@ -164,10 +164,7 @@ impl Menu {
 
 fn run(sink: &Sink, browser: &Browser, frame: Option<&Frame>, t: &Target, at: (i32, i32), c: Command) {
     let id = browser.identifier();
-    let opened = |url: &str| Event::Opened {
-        url: url.to_string(),
-        opener: sink.tab_of(id),
-    };
+    let opened = |url: &str| Event::OpenTab(url.to_string());
     let download = |url: &str| {
         if let Some(h) = browser.host() {
             h.start_download(Some(&CefString::from(url)));
@@ -212,18 +209,21 @@ pub fn inspect(browser: &Browser, at: Option<(i32, i32)>) {
         return;
     };
     let info = WindowInfo {
-        window_name: CefString::from("DevTools"),
+        window_name: CefString::from("Redrob Browser DevTools"),
         bounds: Rect {
             x: 0,
             y: 0,
             width: 1100,
             height: 760,
         },
+        // Chrome style: CEF refuses Alloy for DevTools windows.
+        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME.into(),
         ..Default::default()
     };
     let settings = BrowserSettings::default();
     let point = at.map(|(x, y)| Point { x, y });
-    host.show_dev_tools(Some(&info), None, Some(&settings), point.as_ref());
+    let mut client = crate::cef::client::devtools_client();
+    host.show_dev_tools(Some(&info), Some(&mut client), Some(&settings), point.as_ref());
 }
 
 fn flag(bits: u32, f: u32) -> bool {

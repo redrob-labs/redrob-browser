@@ -44,7 +44,7 @@ wrap_find_handler! {
             count: ::std::os::raw::c_int,
             _selection_rect: Option<&Rect>,
             active_match_ordinal: ::std::os::raw::c_int,
-            final_update: ::std::os::raw::c_int,
+            _final_update: ::std::os::raw::c_int,
         ) {
             if let Some(b) = browser {
                 self.sink.send(
@@ -52,7 +52,6 @@ wrap_find_handler! {
                     Event::FindResult {
                         count,
                         active: active_match_ordinal,
-                        done: final_update != 0,
                     },
                 );
             }

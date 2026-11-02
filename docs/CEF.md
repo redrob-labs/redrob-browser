@@ -31,8 +31,8 @@ redrob-browser-window (one process per profile, CEF browser process)
   │   │  -> drawn as the page layer by the compositor
   │   ├ input: egui mouse / wheel / key / IME -> BrowserHost::send_*_event
   │   └ events: display / load / life-span / download / ... handlers -> cdp::Update
-  ├ remote debugging on 127.0.0.1:<random port> -> Chrome DevTools Protocol
-  │   used by agents (relay.rs, `redrob-browser tab`, MCP) and by cdp.rs
+  ├ DevTools protocol on a pipe (fds 3/4, `--remote-debugging-pipe`), no port
+  │   held by the relay only; agents (`redrob-browser tab`, MCP) reach it there
   └ CEF subprocesses: renderer, GPU, utility = the same executable
      (macOS: "Redrob Browser Helper*.app" bundles)
 
@@ -47,6 +47,23 @@ go away: Chromium scrolls, plays media and has its own DevTools.
 
 `crates/redrob-shell/src/cef/mod.rs` defines `Sink`: CEF callbacks report
 `cdp::Event`s for a CEF browser id; the sink maps it to the window `TabId`.
+
+## Agents
+
+The relay (`relay.rs`) holds the only connection to Chromium's DevTools protocol:
+`cef::reserve_devtools_pipe` puts a pipe pair on fds 3 and 4 before anything else opens a
+file, Chromium runs with `--remote-debugging-pipe` and no port, and `relay::start` gives each
+client its own browser session on that pipe (`Target.attachToBrowserTarget`). Nothing on the
+machine can reach Chromium except through the relay, which checks the peer, `Host`, `Origin`
+and a secret in its address (written owner-only to `ws-endpoint`). On Windows, Chromium's
+own copy of the C runtime only sees pipes handed over when the process starts, so the window
+keeps a random loopback port there.
+
+The window answers `Target.createTarget`, `activateTarget` and `closeTarget` for its tabs
+(`relay::TabRequest`; CEF's own `createTarget` would open a Chrome-style window outside ours):
+an agent tab opens in the focused window, behind the person's tab when `background` is set,
+and the reply carries its target id once Chromium has one. The window fills `relay::Places`
+by target id so `Target.getTargets` shows `redrobWindow`, `redrobAgent` and `redrobActive`.
 
 ## Profiles
 

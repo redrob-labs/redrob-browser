@@ -228,7 +228,21 @@ pub struct RenderResourceCache {
     lazy_viewport_bottom: f32,
     /// The top of the nearest still-deferred lazy image, if any.
     lazy_deferred_top: Option<f32>,
+    /// Decoded web fonts by `(src, base URL)`, with the compressed bytes they
+    /// came from. Every layout collects the page's fonts; decoding a WOFF2
+    /// file again each time cost more than the layout of most pages.
+    decoded_fonts: HashMap<(String, Option<String>), DecodedFont>,
+    /// `@font-face` rules parsed from the author sheets they came from.
+    font_face_rules: Option<(Vec<(String, Option<String>)>, Vec<FontRule>)>,
 }
+
+struct DecodedFont {
+    compressed: Arc<[u8]>,
+    decoded: Option<std::sync::Arc<Vec<u8>>>,
+}
+
+/// Bound on [`RenderResourceCache::decoded_fonts`]; past it the map restarts.
+const MAX_DECODED_FONTS: usize = 256;
 
 /// Chromium's lazy-load distance from the viewport when the effective
 /// connection type is unknown (headless): 3000px (measured: with an 800px
@@ -284,6 +298,8 @@ impl RenderResourceCache {
             lazy_loaded: HashSet::new(),
             lazy_viewport_bottom: 0.0,
             lazy_deferred_top: None,
+            decoded_fonts: HashMap::new(),
+            font_face_rules: None,
         }
     }
 
@@ -2553,6 +2569,19 @@ impl PreparedRender {
             .to_string(),
         );
 
+        // Each row of named areas serializes as one double-quoted string,
+        // whether it came from the longhand or the grid-template shorthand.
+        out.insert(
+            "grid-template-areas",
+            match style.grid_areas.as_deref() {
+                Some(rows) if !rows.is_empty() => rows
+                    .iter()
+                    .map(|row| format!("\"{}\"", row.join(" ")))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                _ => "none".to_string(),
+            },
+        );
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
         if let Some((columns, rows)) =
@@ -3900,6 +3929,15 @@ fn verify_against_scratch(
         }
     }
     if let Some(difference) = difference {
+        // `OBSCURA_LAYOUT_VERIFY=warn` reports every difference of a long
+        // session instead of stopping at the first one.
+        if std::env::var_os("OBSCURA_LAYOUT_VERIFY").is_some_and(|value| value == "warn") {
+            eprintln!(
+                "[timing] layout-verify path={path} DIFFERS {}",
+                difference.chars().take(400).collect::<String>()
+            );
+            return;
+        }
         panic!(
             "OBSCURA_LAYOUT_VERIFY ({path}): incremental layout differs from scratch: {difference}"
         );
@@ -4273,7 +4311,9 @@ fn prepare_dom_internal_unverified(
         }
     }
     resources.lazy_viewport_bottom = resources.lazy_viewport_bottom.max(viewport.1);
+    let images_done = std::time::Instant::now();
     let fonts = collect_web_fonts(tree, base_url, resources, dynamic_fonts);
+    let fonts_done = std::time::Instant::now();
     // Most framework pages use web fonts and many decorative SVG icons, but
     // only SVG text needs the page font faces. Avoid cloning/loading the page
     // font database for ordinary icons and HTML-only text.
@@ -4382,6 +4422,12 @@ fn prepare_dom_internal_unverified(
     let layout_done = std::time::Instant::now();
     let derived = laid.derived_layout_state(tree, viewport);
     if std::env::var_os("OBSCURA_RENDER_TIMING").is_some() {
+        eprintln!(
+            "[timing] prepare images={:?} fonts={:?} svg={:?}",
+            images_done.duration_since(prepare_started),
+            fonts_done.duration_since(images_done),
+            resources_done.duration_since(fonts_done),
+        );
         eprintln!(
             "[timing] prepare resources={:?} layout={:?} derived={:?}",
             resources_done.duration_since(prepare_started),
@@ -10042,16 +10088,8 @@ fn collect_web_fonts(
     cache: &mut RenderResourceCache,
     dynamic_fonts: &[DynamicFontFace],
 ) -> Vec<crate::inline::WebFont> {
-    struct FontRule {
-        sources: Vec<(String, String)>,
-        family: Option<String>,
-        weight: Option<(u16, u16)>,
-        italic: Option<bool>,
-    }
-
     let mut seen = std::collections::HashSet::new();
     let mut fonts = Vec::new();
-    let mut rules = Vec::new();
 
     // Author style sheets in document order: `<style>` text, and linked
     // sheets the host fetched (their URLs resolve against the sheet's own
@@ -10082,31 +10120,21 @@ fn collect_web_fonts(
             None => {}
         }
     }
-    for (css, sheet_base) in &sheets {
-        let sheet_base = sheet_base.as_deref();
-        for face in font_face_blocks(css) {
-            if !font_face_covers_ascii(face) {
-                continue;
-            }
-            let sources: Vec<_> = font_face_urls(face)
-                .into_iter()
-                .filter(|src| font_source_may_be_supported(src))
-                .map(|src| {
-                    let key = font_resource_key(&src, sheet_base);
-                    (key.clone(), key)
-                })
-                .collect();
-            if sources.is_empty() {
-                continue;
-            }
-            rules.push(FontRule {
-                sources,
-                family: font_face_family(face),
-                weight: font_face_weight(face),
-                italic: font_face_italic(face),
-            });
+    // Scanning every sheet for `@font-face` lowercases the whole CSS text;
+    // reuse the rules while the sheets are unchanged.
+    let cached_rules = cache
+        .font_face_rules
+        .as_ref()
+        .filter(|(cached_sheets, _)| *cached_sheets == sheets)
+        .map(|(_, rules)| rules.clone());
+    let mut rules = match cached_rules {
+        Some(rules) => rules,
+        None => {
+            let rules = sheet_font_rules(&sheets);
+            cache.font_face_rules = Some((sheets, rules.clone()));
+            rules
         }
-    }
+    };
     for face in dynamic_fonts {
         let descriptor_block = format!(
             "src:{};font-weight:{};font-style:{};unicode-range:{}",
@@ -10237,20 +10265,87 @@ fn font_resource_key(src: &str, base_url: Option<&str>) -> String {
         .unwrap_or_else(|| src.to_string())
 }
 
+#[derive(Clone)]
+pub(crate) struct FontRule {
+    sources: Vec<(String, String)>,
+    family: Option<String>,
+    weight: Option<(u16, u16)>,
+    italic: Option<bool>,
+}
+
+/// The ASCII-covering `@font-face` rules of the author sheets, in order.
+fn sheet_font_rules(sheets: &[(String, Option<String>)]) -> Vec<FontRule> {
+    let mut rules = Vec::new();
+    for (css, sheet_base) in sheets {
+        let sheet_base = sheet_base.as_deref();
+        for face in font_face_blocks(css) {
+            if !font_face_covers_ascii(face) {
+                continue;
+            }
+            let sources: Vec<_> = font_face_urls(face)
+                .into_iter()
+                .filter(|src| font_source_may_be_supported(src))
+                .map(|src| {
+                    let key = font_resource_key(&src, sheet_base);
+                    (key.clone(), key)
+                })
+                .collect();
+            if sources.is_empty() {
+                continue;
+            }
+            rules.push(FontRule {
+                sources,
+                family: font_face_family(face),
+                weight: font_face_weight(face),
+                italic: font_face_italic(face),
+            });
+        }
+    }
+    rules
+}
+
 fn fetch_and_decode_font(
     src: &str,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
 ) -> Option<std::sync::Arc<Vec<u8>>> {
+    let key = (src.to_string(), base_url.map(str::to_string));
+    // A data: URL is its own bytes; a fetched font is reused while the cache
+    // still returns the same bytes.
+    if src.starts_with("data:") {
+        if let Some(entry) = cache.decoded_fonts.get(&key) {
+            return entry.decoded.clone();
+        }
+    }
     let compressed = fetch_font_bytes(src, base_url, cache)?;
+    if let Some(entry) = cache.decoded_fonts.get(&key) {
+        if Arc::ptr_eq(&entry.compressed, &compressed) {
+            return entry.decoded.clone();
+        }
+    }
+    let decoded = decode_font_bytes(&compressed);
+    if cache.decoded_fonts.len() >= MAX_DECODED_FONTS {
+        cache.decoded_fonts.clear();
+    }
+    cache.decoded_fonts.insert(
+        key,
+        DecodedFont {
+            compressed,
+            decoded: decoded.clone(),
+        },
+    );
+    decoded
+}
+
+fn decode_font_bytes(compressed: &Arc<[u8]>) -> Option<std::sync::Arc<Vec<u8>>> {
     if compressed.len() > 8 * 1024 * 1024 {
         return None;
     }
     let decoded = match compressed.get(..4) {
-        Some(b"wOF2") => wuff::decompress_woff2(&compressed)
+        Some(b"wOF2") => wuff::decompress_woff2(compressed)
             .ok()
             .map(std::sync::Arc::new),
-        Some(b"wOFF") => wuff::decompress_woff1(&compressed)
+        Some(b"wOFF") => wuff::decompress_woff1(compressed)
             .ok()
             .map(std::sync::Arc::new),
         // TrueType/OpenType collections and raw sfnt fonts already have the

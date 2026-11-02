@@ -47,30 +47,3 @@ pub fn install() {
     updater.update(Some(&id), ComponentUpdatePriority::FOREGROUND, Some(&mut done));
 }
 
-/// Whether the CDM is installed now (for the settings page).
-pub fn installed() -> Option<String> {
-    let updater = component_updater_get()?;
-    let c = updater.component_by_id(Some(&CefString::from(COMPONENT_ID)))?;
-    let version = super::text(&c.version());
-    (!version.is_empty()).then_some(version)
-}
-
-/// Command-line switches that would keep Widevine from working.
-pub fn blocking_switch(args: &[String]) -> Option<&str> {
-    args.iter()
-        .map(String::as_str)
-        .find(|a| *a == "--disable-component-update" || a.starts_with("--disable-features=") && a.contains("Widevine"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn component_update_must_stay_on() {
-        let ok = vec!["--remote-debugging-port=0".to_string()];
-        assert_eq!(blocking_switch(&ok), None);
-        let off = vec!["--disable-component-update".to_string()];
-        assert_eq!(blocking_switch(&off), Some("--disable-component-update"));
-    }
-}
