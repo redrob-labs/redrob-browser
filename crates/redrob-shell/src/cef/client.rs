@@ -11,11 +11,10 @@ use cef::{
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
     CefString, Client, CursorInfo, CursorType, DevToolsMessageObserver, DictionaryValue,
     DisplayHandler, FocusHandler, FocusSource, Frame, ImplBrowser, ImplBrowserHost, ImplClient,
-    ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler,
-    ImplLifeSpanHandler, ImplLoadHandler, LifeSpanHandler, LoadHandler, LogSeverity,
-    PopupFeatures, Registration, RenderHandler, WindowInfo, WindowOpenDisposition,
-    WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler, WrapFocusHandler,
-    WrapLifeSpanHandler, WrapLoadHandler,
+    ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler, ImplLifeSpanHandler,
+    ImplLoadHandler, LifeSpanHandler, LoadHandler, PopupFeatures, Registration, RenderHandler,
+    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
+    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
 };
 use serde_json::{json, Value};
 
@@ -42,16 +41,14 @@ pub struct Created {
     pub tab: TabId,
     pub browser: Browser,
     pub ctx: TabCtx,
-    /// Set for a page another page opened.
-    pub popup: bool,
 }
 
 impl Created {
     /// Listen to the tab's DevTools session; keep the registration.
     pub fn observe(&self) -> Option<Registration> {
-        self.browser
-            .host()
-            .and_then(|host| host.add_dev_tools_message_observer(Some(&mut Observer::new(self.ctx.clone()))))
+        self.browser.host().and_then(|host| {
+            host.add_dev_tools_message_observer(Some(&mut Observer::new(self.ctx.clone())))
+        })
     }
 }
 
@@ -134,6 +131,17 @@ wrap_client! {
     }
 }
 
+/// The client of a DevTools window: CEF draws it itself, in its own window.
+pub fn devtools_client() -> Client {
+    DevToolsClient::new()
+}
+
+wrap_client! {
+    struct DevToolsClient;
+
+    impl Client {}
+}
+
 fn text(s: Option<&CefString>) -> String {
     s.map(|s| s.to_string()).unwrap_or_default()
 }
@@ -158,33 +166,6 @@ wrap_display_handler! {
             let v = value.map(|s| s.to_string()).unwrap_or_default();
             osr::lock(&self.ctx.view).tooltip = (!v.is_empty()).then_some(v);
             self.ctx.sink.repaint(self.ctx.tab);
-            1
-        }
-
-        fn on_console_message(
-            &self,
-            _browser: Option<&mut Browser>,
-            level: LogSeverity,
-            message: Option<&CefString>,
-            _source: Option<&CefString>,
-            _line: ::std::os::raw::c_int,
-        ) -> ::std::os::raw::c_int {
-            use sys::cef_log_severity_t as L;
-            let level = match *level.as_ref() {
-                L::LOGSEVERITY_ERROR | L::LOGSEVERITY_FATAL => "error",
-                L::LOGSEVERITY_WARNING => "warning",
-                L::LOGSEVERITY_INFO => "info",
-                L::LOGSEVERITY_VERBOSE => "debug",
-                _ => "log",
-            };
-            self.ctx.sink.send_tab(
-                self.ctx.tab,
-                Event::Console {
-                    level: level.to_string(),
-                    text: text(message),
-                },
-            );
-            // Not on the window's own standard error.
             1
         }
 
@@ -293,7 +274,6 @@ wrap_life_span_handler! {
             let Some(browser) = browser else { return };
             let id = browser.identifier();
             self.ctx.sink.bind(id, self.ctx.tab);
-            let popup = self.ctx.tab >= 1 << 40;
             let tab = self.ctx.tab;
             POPUPS.with_borrow_mut(|p| p.retain(|_, t| *t != tab));
             CREATED.with_borrow_mut(|c| {
@@ -301,7 +281,6 @@ wrap_life_span_handler! {
                     tab: self.ctx.tab,
                     browser: browser.clone(),
                     ctx: self.ctx.clone(),
-                    popup,
                 })
             });
             self.ctx.sink.repaint(self.ctx.tab);
@@ -338,7 +317,12 @@ static NEXT_MESSAGE: AtomicI32 = AtomicI32::new(1);
 
 /// Call a DevTools protocol method on `browser`'s page; `reply` gets
 /// (success, result) on the window thread.
-pub fn devtools(browser: &Browser, method: &str, params: Value, reply: impl FnOnce(bool, Value) + 'static) {
+pub fn devtools(
+    browser: &Browser,
+    method: &str,
+    params: Value,
+    reply: impl FnOnce(bool, Value) + 'static,
+) {
     let Some(host) = browser.host() else {
         reply(false, Value::Null);
         return;

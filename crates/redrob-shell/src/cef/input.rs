@@ -156,7 +156,14 @@ pub fn to_ops(
                 } else {
                     MouseKind::Up
                 };
-                ops.push(mouse(kind, x, y, b, clicks, mods(*modifiers) | state.buttons));
+                ops.push(mouse(
+                    kind,
+                    x,
+                    y,
+                    b,
+                    clicks,
+                    mods(*modifiers) | state.buttons,
+                ));
             }
             egui::Event::MouseWheel {
                 delta,
@@ -200,13 +207,19 @@ pub fn to_ops(
                 egui::ImeEvent::Preedit { text, .. } if text.is_empty() => {
                     ops.push(Op::Ime(Ime::Cancel))
                 }
-                egui::ImeEvent::Preedit { text, .. } => ops.push(Op::Ime(Ime::Preedit(text.clone()))),
+                egui::ImeEvent::Preedit { text, .. } => {
+                    ops.push(Op::Ime(Ime::Preedit(text.clone())))
+                }
                 egui::ImeEvent::Commit(text) => ops.push(Op::Ime(Ime::Commit(text.clone()))),
                 _ => {}
             },
             // macOS edits through the menu commands, not key events.
-            egui::Event::Copy if focused && cfg!(target_os = "macos") => ops.push(Op::Edit(Edit::Copy)),
-            egui::Event::Cut if focused && cfg!(target_os = "macos") => ops.push(Op::Edit(Edit::Cut)),
+            egui::Event::Copy if focused && cfg!(target_os = "macos") => {
+                ops.push(Op::Edit(Edit::Copy))
+            }
+            egui::Event::Cut if focused && cfg!(target_os = "macos") => {
+                ops.push(Op::Edit(Edit::Cut))
+            }
             egui::Event::Paste(_) if focused && cfg!(target_os = "macos") => {
                 ops.push(Op::Edit(Edit::Paste))
             }
@@ -363,7 +376,6 @@ pub fn mods(m: Modifiers) -> u32 {
 /// inside the page area until the button comes up.
 struct Drag {
     browser: i32,
-    data: DragData,
     ops: DragOperationsMask,
 }
 
@@ -372,7 +384,12 @@ thread_local! {
 }
 
 /// The page began dragging at view point `at` (osr.rs `start_dragging`).
-pub fn start_drag(browser: &mut Browser, data: &mut DragData, ops: DragOperationsMask, at: (i32, i32)) {
+pub fn start_drag(
+    browser: &mut Browser,
+    data: &mut DragData,
+    ops: DragOperationsMask,
+    at: (i32, i32),
+) {
     let Some(host) = browser.host() else { return };
     let mut data = ImplDragData::clone(data).unwrap_or_else(|| Clone::clone(data));
     let event = MouseEvent {
@@ -380,11 +397,10 @@ pub fn start_drag(browser: &mut Browser, data: &mut DragData, ops: DragOperation
         y: at.1,
         modifiers: LEFT_BUTTON,
     };
-    host.drag_target_drag_enter(Some(&mut data), Some(&event), ops.clone());
+    host.drag_target_drag_enter(Some(&mut data), Some(&event), ops);
     DRAG.with_borrow_mut(|d| {
         *d = Some(Drag {
             browser: browser.identifier(),
-            data,
             ops,
         })
     });
@@ -407,7 +423,7 @@ pub fn apply(browser: &Browser, op: Op) {
                 y: y.round() as i32,
                 modifiers,
             };
-            let dragging = DRAG.with_borrow(|d| d.as_ref().map(|d| (d.browser, d.ops.clone())));
+            let dragging = DRAG.with_borrow(|d| d.as_ref().map(|d| (d.browser, d.ops)));
             if let Some((id, ops)) = dragging.filter(|d| d.0 == browser.identifier()) {
                 match kind {
                     MouseKind::Move => host.drag_target_drag_over(Some(&event), ops),
@@ -419,7 +435,11 @@ pub fn apply(browser: &Browser, op: Op) {
                             host.drag_target_drag_leave();
                         }
                         let none = sys::cef_drag_operations_mask_t::DRAG_OPERATION_NONE;
-                        let op = if kind == MouseKind::Up { ops } else { none.into() };
+                        let op = if kind == MouseKind::Up {
+                            ops
+                        } else {
+                            none.into()
+                        };
                         host.drag_source_ended_at(event.x, event.y, op);
                         host.drag_source_system_drag_ended();
                         DRAG.with_borrow_mut(|d| *d = None);
@@ -549,13 +569,19 @@ pub fn apply(browser: &Browser, op: Op) {
                 modifiers: 0,
             };
             let all = sys::cef_drag_operations_mask_t::DRAG_OPERATION_EVERY;
-            let entered = DRAG.with_borrow(|d| d.as_ref().is_some_and(|d| d.browser == browser.identifier()));
+            let entered = DRAG.with_borrow(|d| {
+                d.as_ref()
+                    .is_some_and(|d| d.browser == browser.identifier())
+            });
             if !entered {
                 let Some(mut data) = cef::drag_data_create() else {
                     return;
                 };
                 for f in &files {
-                    let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    let name = f
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
                     data.add_file(
                         Some(&CefString::from(f.to_string_lossy().as_ref())),
                         Some(&CefString::from(name.as_str())),
@@ -565,7 +591,6 @@ pub fn apply(browser: &Browser, op: Op) {
                 DRAG.with_borrow_mut(|d| {
                     *d = Some(Drag {
                         browser: browser.identifier(),
-                        data,
                         ops: all.into(),
                     })
                 });

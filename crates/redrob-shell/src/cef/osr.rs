@@ -9,8 +9,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cef::{
-    rc::Rc as _, sys, wrap_render_handler, AcceleratedPaintInfo, Browser, ImplRenderHandler, PaintElementType, Range, Rect, RenderHandler, ScreenInfo, TextInputMode,
-    WrapRenderHandler,
+    rc::Rc as _, sys, wrap_render_handler, AcceleratedPaintInfo, Browser, ImplRenderHandler,
+    PaintElementType, Range, Rect, RenderHandler, ScreenInfo, TextInputMode, WrapRenderHandler,
 };
 use eframe::wgpu;
 

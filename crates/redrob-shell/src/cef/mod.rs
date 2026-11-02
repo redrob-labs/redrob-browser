@@ -60,12 +60,16 @@ impl Sink {
         self.tabs.lock().unwrap().remove(&browser_id)
     }
 
+    // tab_of, send and send_global serve the feature handlers
+    // (cef/handlers/), which know a page by its browser id.
+    #[allow(dead_code)]
     pub fn tab_of(&self, browser_id: i32) -> Option<TabId> {
         self.tabs.lock().unwrap().get(&browser_id).copied()
     }
 
     /// Report `event` for the tab behind `browser_id`. Events for a browser
     /// the window does not know (closing, or not yet bound) are dropped.
+    #[allow(dead_code)]
     pub fn send(&self, browser_id: i32, event: Event) {
         if let Some(tab) = self.tab_of(browser_id) {
             self.send_tab(tab, event);
@@ -79,6 +83,7 @@ impl Sink {
     }
 
     /// Report an event that belongs to no tab (downloads use tab 0).
+    #[allow(dead_code)]
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
@@ -197,6 +202,35 @@ pub fn start(config: Config) -> anyhow::Result<()> {
     }
     STARTED.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+static TERMINATE: AtomicBool = AtomicBool::new(false);
+
+/// Run `quit` (on a thread of its own) when the process gets SIGTERM or
+/// SIGINT. Replaces Chromium's handlers, which end the process at once,
+/// before the window closed its pages and Chromium wrote its cookies.
+pub fn on_terminate(quit: impl Fn() + Send + 'static) {
+    #[cfg(unix)]
+    {
+        extern "C" fn handler(_: libc::c_int) {
+            TERMINATE.store(true, Ordering::SeqCst);
+        }
+        // SAFETY: the handler only stores to an atomic, which is
+        // async-signal-safe.
+        unsafe {
+            let h = handler as extern "C" fn(libc::c_int) as libc::sighandler_t;
+            libc::signal(libc::SIGTERM, h);
+            libc::signal(libc::SIGINT, h);
+        }
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(100));
+            if TERMINATE.swap(false, Ordering::SeqCst) {
+                quit();
+            }
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = quit;
 }
 
 /// Chromium's DevTools port on 127.0.0.1, once Chromium runs.
@@ -334,7 +368,11 @@ fn setuid_root(_: &Path) -> bool {
 }
 
 fn userns_allowed() -> bool {
-    let read = |p: &str| std::fs::read_to_string(p).ok().map(|s| s.trim().to_string());
+    let read = |p: &str| {
+        std::fs::read_to_string(p)
+            .ok()
+            .map(|s| s.trim().to_string())
+    };
     if read("/proc/sys/kernel/unprivileged_userns_clone").as_deref() == Some("0") {
         return false;
     }

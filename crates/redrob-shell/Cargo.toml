@@ -38,6 +38,10 @@ open = "5"
 # accelerated_osr: pages arrive as GPU textures (dmabuf, IOSurface, D3D11).
 cef = { version = "=156.3.0", default-features = false, features = ["accelerated_osr", "sandbox"] }
 
+[target.'cfg(unix)'.dependencies]
+# SIGTERM and SIGINT handlers in place of Chromium's (cef/mod.rs).
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # Start-up on Windows (startup.rs: the log file, the message box) and the
 # setup's language (i18n.rs).

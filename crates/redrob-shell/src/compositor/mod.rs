@@ -56,18 +56,25 @@ impl Gpu {
         let mut v = osr::lock(view);
         let page = self.layer(tab, false, &mut v.page);
         let popup = match v.popup_rect {
-            Some([x, y, w, h]) if w > 0 && h > 0 => self.layer(tab, true, &mut v.popup).map(|(id, _)| {
-                (
-                    id,
-                    Rect::from_min_size(pos2(x as f32, y as f32), vec2(w as f32, h as f32)),
-                )
-            }),
+            Some([x, y, w, h]) if w > 0 && h > 0 => {
+                self.layer(tab, true, &mut v.popup).map(|(id, _)| {
+                    (
+                        id,
+                        Rect::from_min_size(pos2(x as f32, y as f32), vec2(w as f32, h as f32)),
+                    )
+                })
+            }
             _ => None,
         };
         Frame { page, popup }
     }
 
-    fn layer(&mut self, tab: TabId, popup: bool, layer: &mut Layer) -> Option<(egui::TextureId, (u32, u32))> {
+    fn layer(
+        &mut self,
+        tab: TabId,
+        popup: bool,
+        layer: &mut Layer,
+    ) -> Option<(egui::TextureId, (u32, u32))> {
         if layer.width == 0 || layer.height == 0 {
             return None;
         }
@@ -79,14 +86,20 @@ impl Gpu {
             let mut renderer = self.state.renderer.write();
             match self.pages.get_mut(&key) {
                 Some(t) => {
-                    renderer.update_egui_texture_from_wgpu_texture(device, &view, wgpu::FilterMode::Nearest, t.id);
+                    renderer.update_egui_texture_from_wgpu_texture(
+                        device,
+                        &view,
+                        wgpu::FilterMode::Nearest,
+                        t.id,
+                    );
                     t.texture = Some(texture);
                     t.width = layer.width;
                     t.height = layer.height;
                     t.serial = layer.serial;
                 }
                 None => {
-                    let id = renderer.register_native_texture(device, &view, wgpu::FilterMode::Nearest);
+                    let id =
+                        renderer.register_native_texture(device, &view, wgpu::FilterMode::Nearest);
                     self.pages.insert(
                         key,
                         Texture {
@@ -106,7 +119,9 @@ impl Gpu {
         }
         let fits = self.pages.get(&key).is_some_and(|t| {
             t.texture.as_ref().is_some_and(|x| {
-                x.width() == layer.width && x.height() == layer.height && x.format() == wgpu::TextureFormat::Bgra8Unorm
+                x.width() == layer.width
+                    && x.height() == layer.height
+                    && x.format() == wgpu::TextureFormat::Bgra8Unorm
             })
         });
         if !fits {
@@ -128,7 +143,12 @@ impl Gpu {
             let mut renderer = self.state.renderer.write();
             let id = match self.pages.get(&key) {
                 Some(t) => {
-                    renderer.update_egui_texture_from_wgpu_texture(device, &view, wgpu::FilterMode::Nearest, t.id);
+                    renderer.update_egui_texture_from_wgpu_texture(
+                        device,
+                        &view,
+                        wgpu::FilterMode::Nearest,
+                        t.id,
+                    );
                     t.id
                 }
                 // Drawn 1:1 in physical pixels, so nearest keeps text sharp.

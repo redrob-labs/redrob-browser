@@ -10,9 +10,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use cef::{
-    Browser, CefString, ImplBrowser, ImplBrowserHost, ImplFrame, Registration,
-};
+use cef::{Browser, CefString, ImplBrowser, ImplBrowserHost, ImplFrame, Registration};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -122,8 +120,6 @@ pub enum Op {
     },
     /// Files dragged over the page left it.
     DragLeave,
-    /// Run JavaScript; the result comes back as `Event::Console`.
-    Evaluate(String),
     /// Chromium's developer tools for this tab, in their own window.
     DevTools,
     /// Type a saved login into the page's sign-in form.
@@ -187,10 +183,6 @@ pub enum Event {
     },
     /// The tab's DevTools target id, once it is known.
     Target(String),
-    Console {
-        level: String,
-        text: String,
-    },
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
     /// A file download began or changed state. Sent with tab 0.
@@ -425,7 +417,9 @@ impl Engine {
     /// Give the tab its window's page size.
     fn fit(&mut self, tab: TabId) {
         let (w, h, scale, origin) = self.size_of(tab);
-        let Some(view) = self.views.get(&tab) else { return };
+        let Some(view) = self.views.get(&tab) else {
+            return;
+        };
         let (resized, rescaled) = {
             let mut v = osr::lock(view);
             let resized = (v.width, v.height) != (w, h);
@@ -481,8 +475,10 @@ impl Engine {
         if created != 1 {
             self.opening.remove(&tab);
             self.views.remove(&tab);
-            self.sink
-                .send_tab(tab, Event::Error("Chromium could not open the tab".to_string()));
+            self.sink.send_tab(
+                tab,
+                Event::Error("Chromium could not open the tab".to_string()),
+            );
         }
     }
 
@@ -555,40 +551,19 @@ impl Engine {
                             height: 760,
                         },
                         window_name: CefString::from("Redrob Browser DevTools"),
-                        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into(),
+                        // Chrome style: CEF refuses Alloy for DevTools windows.
+                        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME
+                            .into(),
                         ..Default::default()
                     };
-                    h.show_dev_tools(Some(&info), None, Some(&cef::BrowserSettings::default()), None);
+                    let mut client = client::devtools_client();
+                    h.show_dev_tools(
+                        Some(&info),
+                        Some(&mut client),
+                        Some(&cef::BrowserSettings::default()),
+                        None,
+                    );
                 }
-            }
-            Op::Evaluate(expr) => {
-                let sink = self.sink.clone();
-                client::devtools(
-                    &browser,
-                    "Runtime.evaluate",
-                    json!({ "expression": expr, "returnByValue": true, "awaitPromise": true, "replMode": true }),
-                    move |_, r| {
-                        let (level, text) = if let Some(ex) = r.get("exceptionDetails") {
-                            (
-                                "error",
-                                ex["exception"]["description"]
-                                    .as_str()
-                                    .or(ex["text"].as_str())
-                                    .unwrap_or("Error")
-                                    .to_string(),
-                            )
-                        } else {
-                            ("result", remote_object_text(&r["result"]))
-                        };
-                        sink.send_tab(
-                            tab,
-                            Event::Console {
-                                level: level.to_string(),
-                                text,
-                            },
-                        );
-                    },
-                );
             }
             Op::FillLogin { username, password } => {
                 let sink = self.sink.clone();
@@ -609,7 +584,10 @@ impl Engine {
                             "Runtime.callFunctionOn",
                             json!({ "objectId": object_id, "functionDeclaration": FILL_LOGIN_JS, "arguments": args, "returnByValue": true }),
                             move |_, r| {
-                                let outcome = r["result"]["value"].as_str().unwrap_or("no-form").to_string();
+                                let outcome = r["result"]["value"]
+                                    .as_str()
+                                    .unwrap_or("no-form")
+                                    .to_string();
                                 sink2.send_tab(tab, Event::Filled(outcome));
                             },
                         );
@@ -643,26 +621,12 @@ fn run(window: WindowId, cmd: Command) {
     });
 }
 
-/// A Runtime.RemoteObject as console text.
-fn remote_object_text(o: &Value) -> String {
-    if let Some(v) = o.get("value") {
-        return match v {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        };
-    }
-    if let Some(u) = o.get("unserializableValue").and_then(Value::as_str) {
-        return u.to_string();
-    }
-    o["description"]
-        .as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| o["type"].as_str().unwrap_or("undefined").to_string())
-}
-
 /// The agents' door: the window's relay in front of Chromium's DevTools
 /// server. Writes the relay address to `endpoint_file` once it listens.
-pub async fn relay(endpoint_file: std::path::PathBuf, window: crate::relay::Window) -> anyhow::Result<()> {
+pub async fn relay(
+    endpoint_file: std::path::PathBuf,
+    window: crate::relay::Window,
+) -> anyhow::Result<()> {
     let port = loop {
         if let Some(p) = crate::cef::devtools_port() {
             break p;
@@ -682,7 +646,8 @@ pub async fn relay(endpoint_file: std::path::PathBuf, window: crate::relay::Wind
             }
         }
     });
-    let relay_url = crate::relay::start(out_tx, pending.clone(), broadcast_tx.clone(), window).await?;
+    let relay_url =
+        crate::relay::start(out_tx, pending.clone(), broadcast_tx.clone(), window).await?;
     crate::write_private(&endpoint_file, &relay_url);
     while let Some(Ok(msg)) = stream.next().await {
         let Message::Text(text) = msg else { continue };
@@ -705,7 +670,9 @@ async fn browser_ws_url(port: u16) -> anyhow::Result<String> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     for _ in 0..200 {
         if let Ok(mut s) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            let req = format!("GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+            let req = format!(
+                "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            );
             s.write_all(req.as_bytes()).await?;
             let mut body = String::new();
             s.read_to_string(&mut body).await?;

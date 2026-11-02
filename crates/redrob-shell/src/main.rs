@@ -138,7 +138,8 @@ fn run() -> anyhow::Result<()> {
         Box::new(move |cc| Ok(Box::new(browser::App::start(cc, start)))),
     );
     let _ = std::fs::remove_file(&endpoint_file);
-    // Every page closes before Chromium stops.
+    // Every page closes before Chromium stops (already done in on_exit,
+    // unless eframe failed to start).
     cdp::close_all(std::time::Duration::from_secs(3));
     cef::shutdown();
     if let Some(dir) = incognito_dir {
@@ -459,8 +460,6 @@ impl Window {
                 continue;
             };
             match event {
-                // Chromium's own developer tools show the console.
-                Event::Console { .. } => {}
                 // Our own pages keep their redrob:// address while the
                 // Chromium tab underneath sits on about:blank.
                 Event::Navigated(url) | Event::UrlChanged(url)
@@ -2386,7 +2385,10 @@ impl Window {
             let v = cef::osr::lock(&view);
             (v.status.clone(), v.cursor == egui::CursorIcon::Text)
         };
-        if let Some(url) = self.autoscroll.filter(&mut events, rect, link.as_deref(), text) {
+        if let Some(url) = self
+            .autoscroll
+            .filter(&mut events, rect, link.as_deref(), text)
+        {
             self.open_tab(&url, false);
         }
         let mut ops = cef::input::to_ops(
@@ -2396,7 +2398,12 @@ impl Window {
             rect,
             focused,
         );
-        ops.extend(cef::input::file_drops(&mut self.page_input, &ctx, pointer, rect));
+        ops.extend(cef::input::file_drops(
+            &mut self.page_input,
+            &ctx,
+            pointer,
+            rect,
+        ));
         if self.autoscroll.active() {
             let step = self.autoscroll.tick(pointer, rect);
             if let Some((x, y)) = step.wheel_at {
@@ -2445,7 +2452,11 @@ impl Window {
         let in_page = pointer.is_some_and(|p| rect.contains(p)) && response.hovered();
         if self.autoscroll.active() {
             let p = *theme::palette(ui);
-            self.autoscroll.paint(ui.painter(), p.ink_primary, p.surface_base.gamma_multiply(0.9));
+            self.autoscroll.paint(
+                ui.painter(),
+                p.ink_primary,
+                p.surface_base.gamma_multiply(0.9),
+            );
             ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
         } else if in_page || response.is_pointer_button_down_on() {
             ctx.set_cursor_icon(v.cursor);
@@ -2480,4 +2491,3 @@ impl Window {
         }
     }
 }
-

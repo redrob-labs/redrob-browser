@@ -87,6 +87,9 @@ impl Shared {
     }
 }
 
+/// The process was asked to stop (SIGTERM, Ctrl+C).
+static QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Engine updates for a tab the browser has not placed yet (a popup whose
 /// `Opened` is still on its way) wait here, at most this many.
 const MAX_ORPHANS: usize = 64;
@@ -150,7 +153,10 @@ fn shared_texture(state: &eframe::egui_wgpu::RenderState) -> bool {
         _ => {}
     }
     let info = state.adapter.get_info();
-    if matches!(info.device_type, wgpu::DeviceType::Cpu | wgpu::DeviceType::Other) {
+    if matches!(
+        info.device_type,
+        wgpu::DeviceType::Cpu | wgpu::DeviceType::Other
+    ) {
         return false;
     }
     let features = state.device.features();
@@ -248,7 +254,16 @@ impl Browser {
         );
         // Chromium's work runs in window passes (cef::pump).
         let pump_ctx = ctx.clone();
-        crate::cef::set_waker(move |delay| pump_ctx.request_repaint_after_for(delay, ViewportId::ROOT));
+        crate::cef::set_waker(move |delay| {
+            pump_ctx.request_repaint_after_for(delay, ViewportId::ROOT)
+        });
+        // SIGTERM or Ctrl+C: quit as the menu does, so Chromium writes its
+        // cookies and the session is saved.
+        let quit_ctx = ctx.clone();
+        crate::cef::on_terminate(move || {
+            QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+            quit_ctx.request_repaint_of(ViewportId::ROOT);
+        });
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -737,6 +752,10 @@ fn lock(b: &Mutex<Browser>) -> MutexGuard<'_, Browser> {
 impl eframe::App for App {
     fn on_exit(&mut self) {
         lock(&self.0).save_session();
+        // While the windows still exist: Chromium ends the process from its
+        // X11 error handler once they are gone, before `main` could stop it.
+        cdp::close_all(Duration::from_secs(3));
+        crate::cef::shutdown();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -785,6 +804,11 @@ impl Browser {
 
     fn root_pass(&mut self, ui: &mut egui::Ui, me: &Arc<Mutex<Browser>>) {
         let ctx = ui.ctx().clone();
+        if QUIT.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if let Some(w) = self.windows.first_mut() {
+                w.requests.push(Request::Quit);
+            }
+        }
         self.route(&ctx);
 
         if let Some(i) = self

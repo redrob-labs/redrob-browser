@@ -120,11 +120,6 @@ impl Profile {
         })
     }
 
-    /// Where the engine keeps cookies and localStorage for this profile.
-    pub fn engine_dir(&self) -> PathBuf {
-        self.dir.join("engine")
-    }
-
     /// Bookmarks and the most recent history, into the model.
     pub fn load(&self, model: &mut Model) -> anyhow::Result<()> {
         let mut q = self
