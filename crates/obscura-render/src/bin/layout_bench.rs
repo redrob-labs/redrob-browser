@@ -50,9 +50,18 @@ mod sampler {
     }
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
+    static PAUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     static mut SAMPLES: Option<Box<[[usize; DEPTH]]>> = None;
 
+    /// Skip samples while `paused` (e.g. the untimed removal layouts).
+    pub fn set_paused(paused: bool) {
+        PAUSED.store(paused, Ordering::Relaxed);
+    }
+
     extern "C" fn on_sample(_: i32) {
+        if PAUSED.load(Ordering::Relaxed) {
+            return;
+        }
         let index = NEXT.fetch_add(1, Ordering::Relaxed);
         if index >= MAX_SAMPLES {
             return;
@@ -385,7 +394,9 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
                 old_parent: parent,
                 old_next_sibling,
             };
+            sampler::set_paused(true);
             prepared = ctx.retained(&tree, prepared, &[removal.into()]);
+            sampler::set_paused(false);
             match moved_next {
                 Some(next) => tree.insert_before(next, p),
                 None => tree.append_child(parent, p),
