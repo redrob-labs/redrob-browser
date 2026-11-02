@@ -2064,9 +2064,81 @@ struct PseudoRule {
     layer: Option<LayerOrder>,
 }
 
+/// The rule buckets by subject key, of the contextual rules alone (see
+/// `MatchPart::Contextual`): a tenth of the rules on large sites, so an
+/// element whose context-free matches are cached looks up and walks only
+/// these.
+#[derive(Clone, Default)]
+struct ContextualBuckets {
+    by_root: Vec<usize>,
+    by_id: HashMap<String, Vec<usize>>,
+    by_class: HashMap<String, Vec<usize>>,
+    by_attribute: HashMap<String, Vec<usize>>,
+    by_local: HashMap<String, Vec<usize>>,
+    universal: Vec<usize>,
+    /// A bit per hash of each class and attribute key (`KeyFilter`): most
+    /// of an element's classes and attributes key no contextual rule, and
+    /// the filter rejects them without a map lookup.
+    class_filter: KeyFilter,
+    attribute_filter: KeyFilter,
+}
+
+/// A one-hash Bloom filter over bucket keys.
+#[derive(Clone)]
+struct KeyFilter([u64; 64]);
+
+impl Default for KeyFilter {
+    fn default() -> Self {
+        Self([0; 64])
+    }
+}
+
+impl KeyFilter {
+    fn bit(key: &str) -> usize {
+        use std::hash::BuildHasher;
+        (foldhash::fast::FixedState::default().hash_one(key) & 4095) as usize
+    }
+
+    fn insert(&mut self, key: &str) {
+        let bit = Self::bit(key);
+        self.0[bit / 64] |= 1 << (bit % 64);
+    }
+
+    fn may_contain(&self, key: &str) -> bool {
+        let bit = Self::bit(key);
+        self.0[bit / 64] & (1 << (bit % 64)) != 0
+    }
+}
+
+impl ContextualBuckets {
+    fn add(&mut self, key: &SelectorKey, index: usize) {
+        match key {
+            SelectorKey::Root => self.by_root.push(index),
+            SelectorKey::Id(value) => self.by_id.entry(value.clone()).or_default().push(index),
+            SelectorKey::Class(value) => {
+                self.class_filter.insert(value);
+                self.by_class.entry(value.clone()).or_default().push(index)
+            }
+            SelectorKey::Attribute(value) => {
+                self.attribute_filter.insert(value);
+                self.by_attribute
+                    .entry(value.clone())
+                    .or_default()
+                    .push(index)
+            }
+            SelectorKey::Local(value) => {
+                self.by_local.entry(value.clone()).or_default().push(index)
+            }
+            SelectorKey::Universal => self.universal.push(index),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct PseudoRuleMap {
     rules: Vec<PseudoRule>,
+    /// The contextual rules' buckets (the buckets below hold every rule).
+    contextual: ContextualBuckets,
     by_root: Vec<usize>,
     by_id: HashMap<String, Vec<usize>>,
     by_class: HashMap<String, Vec<usize>>,
@@ -2084,10 +2156,14 @@ impl PseudoRuleMap {
     fn push(&mut self, mut rule: PseudoRule) {
         let index = self.rules.len();
         let mut attributes = Vec::new();
-        self.context_free.push(
-            rule.sel.context_free(&mut attributes)
-                && rule.container_condition_id == ContainerConditionId::NONE,
-        );
+        let context_free = rule.sel.context_free(&mut attributes)
+            && rule.container_condition_id == ContainerConditionId::NONE;
+        self.context_free.push(context_free);
+        if !context_free {
+            for key in rule.sel.candidate_keys() {
+                self.contextual.add(key, index);
+            }
+        }
         self.match_attributes.extend(attributes);
         if rule.sel.candidate_keys().len() > 1 {
             rule.candidate_slot = u32::try_from(self.candidate_slot_count)
@@ -2808,6 +2884,8 @@ pub struct Stylesheet {
     /// By rule index: the selector is context-free (see
     /// `CompiledSelector::context_free`) and has no container condition.
     rule_context_free: Vec<bool>,
+    /// The contextual rules' buckets (`by_id` and the rest hold every rule).
+    contextual: ContextualBuckets,
     /// The attributes context-free selectors read (lowercase).
     match_attributes: crate::HashSet<String>,
 }
@@ -3441,6 +3519,7 @@ impl Stylesheet {
             placeholder_rules: PseudoRuleMap::default(),
             epoch: next_sheet_epoch(),
             rule_context_free: Vec::new(),
+            contextual: ContextualBuckets::default(),
             match_attributes: crate::HashSet::default(),
         }
     }
@@ -3689,10 +3768,14 @@ impl Stylesheet {
                     }
                 }
                 let mut attributes = Vec::new();
-                sheet.rule_context_free.push(
-                    sel.context_free(&mut attributes)
-                        && container_condition_id == ContainerConditionId::NONE,
-                );
+                let context_free = sel.context_free(&mut attributes)
+                    && container_condition_id == ContainerConditionId::NONE;
+                sheet.rule_context_free.push(context_free);
+                if !context_free {
+                    for key in sel.candidate_keys() {
+                        sheet.contextual.add(key, idx);
+                    }
+                }
                 sheet.match_attributes.extend(attributes);
                 sheet.rules.push(Rule {
                     sel,
@@ -3905,35 +3988,63 @@ impl Stylesheet {
                 }
             };
 
+        // The contextual part walks the contextual rules' buckets alone.
+        let filters = matches!(part, MatchPart::Contextual).then(|| {
+            (
+                &rules.contextual.class_filter,
+                &rules.contextual.attribute_filter,
+            )
+        });
+        let (by_root, by_id, by_class, by_attribute, by_local, universal) = match part {
+            MatchPart::Contextual => (
+                &rules.contextual.by_root,
+                &rules.contextual.by_id,
+                &rules.contextual.by_class,
+                &rules.contextual.by_attribute,
+                &rules.contextual.by_local,
+                &rules.contextual.universal,
+            ),
+            MatchPart::All | MatchPart::ContextFree => (
+                &rules.by_root,
+                &rules.by_id,
+                &rules.by_class,
+                &rules.by_attribute,
+                &rules.by_local,
+                &rules.universal,
+            ),
+        };
         if let Some(node) = tree.borrow_node(nid) {
-            if let Some(element) = node.as_element() {
+            if let Some(element) = node.as_element().filter(|_| !by_local.is_empty()) {
                 consider(
-                    rules.by_local.get(element.local.as_ref()),
+                    by_local.get(element.local.as_ref()),
                     &mut normal_matched,
                     &mut important_matched,
                 );
             }
-            if let Some(id) = node.get_attribute("id") {
-                consider(
-                    rules.by_id.get(id),
-                    &mut normal_matched,
-                    &mut important_matched,
-                );
+            if let Some(id) = node.get_attribute("id").filter(|_| !by_id.is_empty()) {
+                consider(by_id.get(id), &mut normal_matched, &mut important_matched);
             }
-            if let Some(classes) = node.get_attribute("class") {
+            if let Some(classes) = node.get_attribute("class").filter(|_| !by_class.is_empty()) {
                 for class in classes.split_whitespace() {
+                    if filters.is_some_and(|(classes, _)| !classes.may_contain(class)) {
+                        continue;
+                    }
                     consider(
-                        rules.by_class.get(class),
+                        by_class.get(class),
                         &mut normal_matched,
                         &mut important_matched,
                     );
                 }
             }
-            if !rules.by_attribute.is_empty() {
+            if !by_attribute.is_empty() {
                 if let Some(attributes) = node.attrs() {
                     for attribute in attributes {
+                        let name = attribute.name.local.as_ref();
+                        if filters.is_some_and(|(_, attributes)| !attributes.may_contain(name)) {
+                            continue;
+                        }
                         consider(
-                            rules.by_attribute.get(attribute.name.local.as_ref()),
+                            by_attribute.get(name),
                             &mut normal_matched,
                             &mut important_matched,
                         );
@@ -3941,18 +4052,12 @@ impl Stylesheet {
                 }
             }
         }
-        if is_root_element(tree, nid) {
-            consider(
-                (!rules.by_root.is_empty()).then_some(&rules.by_root),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !by_root.is_empty() && is_root_element(tree, nid) {
+            consider(Some(by_root), &mut normal_matched, &mut important_matched);
         }
-        consider(
-            (!rules.universal.is_empty()).then_some(&rules.universal),
-            &mut normal_matched,
-            &mut important_matched,
-        );
+        if !universal.is_empty() {
+            consider(Some(universal), &mut normal_matched, &mut important_matched);
+        }
 
         if normal_matched.is_empty() && important_matched.is_empty() {
             return None;
@@ -4555,38 +4660,62 @@ impl Stylesheet {
                 }
             };
 
-        consider(
-            self.by_local.get(local),
-            &mut normal_matched,
-            &mut important_matched,
-        );
-        if is_root_element(tree, nid) {
+        // The contextual part walks the contextual rules' buckets alone.
+        let filters = matches!(part, MatchPart::Contextual).then(|| {
+            (
+                &self.contextual.class_filter,
+                &self.contextual.attribute_filter,
+            )
+        });
+        let (by_root, by_id, by_class, by_attribute, by_local, universal) = match part {
+            MatchPart::Contextual => (
+                &self.contextual.by_root,
+                &self.contextual.by_id,
+                &self.contextual.by_class,
+                &self.contextual.by_attribute,
+                &self.contextual.by_local,
+                &self.contextual.universal,
+            ),
+            MatchPart::All | MatchPart::ContextFree => (
+                &self.by_root,
+                &self.by_id,
+                &self.by_class,
+                &self.by_attribute,
+                &self.by_local,
+                &self.universal,
+            ),
+        };
+        if !by_local.is_empty() {
             consider(
-                (!self.by_root.is_empty()).then_some(&self.by_root),
+                by_local.get(local),
                 &mut normal_matched,
                 &mut important_matched,
             );
         }
-        if let Some(id) = id {
-            consider(
-                self.by_id.get(id),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !by_root.is_empty() && is_root_element(tree, nid) {
+            consider(Some(by_root), &mut normal_matched, &mut important_matched);
         }
-        for c in classes {
-            consider(
-                self.by_class.get(c),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if let Some(id) = id.filter(|_| !by_id.is_empty()) {
+            consider(by_id.get(id), &mut normal_matched, &mut important_matched);
         }
-        if !self.by_attribute.is_empty() {
+        if !by_class.is_empty() {
+            for c in classes {
+                if filters.is_some_and(|(classes, _)| !classes.may_contain(c)) {
+                    continue;
+                }
+                consider(by_class.get(c), &mut normal_matched, &mut important_matched);
+            }
+        }
+        if !by_attribute.is_empty() {
             if let Some(node) = tree.borrow_node(nid) {
                 if let Some(attributes) = node.attrs() {
                     for attribute in attributes {
+                        let name = attribute.name.local.as_ref();
+                        if filters.is_some_and(|(_, attributes)| !attributes.may_contain(name)) {
+                            continue;
+                        }
                         consider(
-                            self.by_attribute.get(attribute.name.local.as_ref()),
+                            by_attribute.get(name),
                             &mut normal_matched,
                             &mut important_matched,
                         );
@@ -4594,12 +4723,8 @@ impl Stylesheet {
                 }
             }
         }
-        if !self.universal.is_empty() {
-            consider(
-                Some(&self.universal),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !universal.is_empty() {
+            consider(Some(universal), &mut normal_matched, &mut important_matched);
         }
 
         if normal_matched.len() > 1 {

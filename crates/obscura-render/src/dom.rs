@@ -12271,15 +12271,26 @@ fn layout_dom_once(
 /// into the enclosing block formatting context, so Taffy must not serve it
 /// from the cache when it is laid out inside one.
 fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) -> bool {
+    // A subtree whose key is the one it had when it was last walked holds a
+    // float as it did then, and its boxes keep the marks they got: it is not
+    // walked again (`TaffyTree::subtree_memo`).
+    let _ = taffy_tree.subtree_key(root);
     // Children first, without recursion or child-list copies: (node, whether
     // its children are done, whether one of them holds or is a float).
     let mut marked = Vec::new();
+    let mut walked = Vec::new();
     let mut stack: Vec<(taffy::NodeId, usize)> = vec![(root, 0)];
     let mut holds: Vec<bool> = vec![false];
     while let Some(&mut (node, ref mut next)) = stack.last_mut() {
         let children = taffy_tree.child_slice(node);
         if let Some(&child) = children.get(*next) {
             *next += 1;
+            if let Some(held) = taffy_tree.subtree_memo(child) {
+                if let Some(parent) = holds.last_mut() {
+                    *parent |= held;
+                }
+                continue;
+            }
             stack.push((child, 0));
             holds.push(false);
             continue;
@@ -12289,15 +12300,19 @@ fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) 
         if has_float {
             marked.push(node);
         }
+        let floated = taffy_tree
+            .style(node)
+            .is_ok_and(|style| style.float != taffy::style::Float::None);
+        walked.push((node, has_float || floated));
         if let Some(parent) = holds.last_mut() {
-            let floated = taffy_tree
-                .style(node)
-                .is_ok_and(|style| style.float != taffy::style::Float::None);
             *parent |= has_float || floated;
         }
         if stack.is_empty() {
             for node in marked {
                 taffy_tree.set_float_sensitive(node, true);
+            }
+            for (node, held) in walked {
+                taffy_tree.set_subtree_memo(node, held);
             }
             return has_float;
         }
@@ -13737,11 +13752,24 @@ fn reparent_indexed_positioned_nodes(
     // The box the nearest ancestor that captures them gives `id`'s absolute
     // (and, with `fixed`, fixed) descendants. An ancestor without a style
     // passes the root on, as the full walk does.
-    let containing_block = |id: NodeId, fixed: bool| {
+    // Memoized by ancestor (and `fixed`): what it gives its descendants, so
+    // each ancestor chain is walked once for all the elements under it.
+    let mut given: HashMap<(NodeId, bool), taffy::NodeId> = HashMap::default();
+    let mut containing_block = |id: NodeId, fixed: bool| {
+        let mut chain = Vec::new();
         let mut current = rendered_parent(tree, id);
-        while let Some(ancestor) = current {
+        let found = loop {
+            let Some(ancestor) = current else {
+                break taffy_root;
+            };
+            if let Some(&known) = given.get(&(ancestor, fixed)) {
+                break known;
+            }
             let Some(style) = styles.get(&ancestor) else {
-                return taffy_root;
+                // An ancestor without a style gives the root, as do all its
+                // descendants in the chain (none of them was reached).
+                chain.push(ancestor);
+                break taffy_root;
             };
             let establishes = style.establishes_positioning_containing_block();
             let captures = if fixed {
@@ -13751,12 +13779,17 @@ fn reparent_indexed_positioned_nodes(
             };
             if captures {
                 if let Some(&own) = reverse.get(&ancestor) {
-                    return own;
+                    given.insert((ancestor, fixed), own);
+                    break own;
                 }
             }
+            chain.push(ancestor);
             current = rendered_parent(tree, ancestor);
+        };
+        for ancestor in chain {
+            given.insert((ancestor, fixed), found);
         }
-        taffy_root
+        found
     };
     let mut static_candidates = Vec::new();
     for dom_id in in_rendered_preorder(tree, positioned) {
@@ -19359,16 +19392,14 @@ fn defer_cyclic_flex_inline_sizes(
     memo: &mut DeferralMemo,
     affected: Option<(&[bool], &[NodeId])>,
 ) -> Vec<DeferredCyclicInlineSize> {
-    let previous = std::mem::take(memo);
+    let mut previous = std::mem::take(memo);
     let incremental = affected.is_some() && !previous.candidates.is_empty();
     let candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)> = match affected {
         Some((_, written)) if incremental => {
             let written: HashSet<NodeId> = written.iter().copied().collect();
-            let mut candidates: Vec<_> = previous
-                .candidates
-                .iter()
+            let mut candidates: Vec<_> = std::mem::take(&mut previous.candidates)
+                .into_iter()
                 .filter(|(id, _, _)| !written.contains(id) && styles.contains_key(id))
-                .cloned()
                 .collect();
             for &id in &written {
                 if let Some(style) = styles.get(&id) {
@@ -19401,12 +19432,11 @@ fn defer_cyclic_flex_inline_sizes(
             .collect()
     });
     let mut rewritten_widths: HashSet<NodeId> = HashSet::default();
-    let memo_candidates = candidates.clone();
 
-    for (id, slot, source) in candidates {
+    for &(id, slot, ref source) in &candidates {
         if !affected_at(id) {
-            if let Some(outcome) = previous.outcomes.get(&(id, slot)) {
-                if let Some(entry) = outcome {
+            if let Some(outcome) = previous.outcomes.remove(&(id, slot)) {
+                if let Some(entry) = &outcome {
                     if let Some(style) = styles.get_mut_untracked(&id) {
                         match slot {
                             0 => {
@@ -19427,7 +19457,7 @@ fn defer_cyclic_flex_inline_sizes(
                     }
                     deferred.push(entry.clone());
                 }
-                outcomes.insert((id, slot), outcome.clone());
+                outcomes.insert((id, slot), outcome);
                 continue;
             }
         }
@@ -19555,13 +19585,13 @@ fn defer_cyclic_flex_inline_sizes(
     if crate::prof::enabled() {
         eprintln!(
             "[timing] deferrals candidates={} deferred={} incremental={incremental} affected={}",
-            memo_candidates.len(),
+            candidates.len(),
             deferred.len(),
             affected.map_or(0, |(affected, _)| affected.iter().filter(|a| **a).count())
         );
     }
     *memo = DeferralMemo {
-        candidates: memo_candidates,
+        candidates,
         outcomes,
     };
     deferred
