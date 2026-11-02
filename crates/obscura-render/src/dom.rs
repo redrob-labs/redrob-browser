@@ -344,6 +344,8 @@ pub struct DomLayout {
     /// The previous render's derived geometry and where this layout changed
     /// since, when this is a retained layout (see `derived::DerivedSeed`).
     pub(crate) derived_seed: Option<derived::DerivedSeed>,
+    /// Whether a style has a counter directive (see `resolve_css_counters`).
+    pub(crate) counters_used: bool,
 }
 
 /// Whether `OBSCURA_LAYOUT_VERIFY` asks every incremental layout to be checked
@@ -1185,6 +1187,8 @@ pub(crate) struct RetainedGeometry {
     pub(crate) previous_rendered: Option<std::rc::Rc<FlatTree>>,
     /// What the render of that layout derived from it.
     pub(crate) derived: Option<derived::PreviousDerived>,
+    /// Whether a style of that layout had a counter directive.
+    pub(crate) counters_used: bool,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -4616,7 +4620,86 @@ impl CssCounterState {
 /// its descendants and following siblings, and expire with their shared
 /// parent. That is the scope shape used by browser counter managers and covers
 /// nested chapter numbering as well as line counters reset on a `<code>`.
-fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
+///
+/// `fresh`: the elements a retained layout restyled, when the layout its
+/// other styles come from had no counter directive anywhere. Then a counter
+/// can only appear in a fresh style; when none has one, every counter reads
+/// its default and only the fresh styles need their generated text, which is
+/// what the walk would give them. Returns whether any counter directive was
+/// met (`false` when `fresh` was enough).
+fn resolve_css_counters(
+    tree: &DomTree,
+    styles: &mut HashMap<NodeId, crate::LayoutStyle>,
+    fresh: Option<&HashSet<NodeId>>,
+) -> bool {
+    fn has_directives(style: &crate::LayoutStyle) -> bool {
+        !style.counter_reset.is_empty()
+            || !style.counter_increment.is_empty()
+            || !style.counter_set.is_empty()
+    }
+    if let Some(fresh) = fresh {
+        if !fresh
+            .iter()
+            .any(|id| styles.get(id).is_some_and(has_directives))
+        {
+            let empty = CssCounterState::default();
+            let flat = current_flat_tree(tree);
+            for &id in fresh {
+                // Only where the walk goes: rendered, outside `display: none`.
+                let mut walked = flat.contains(id);
+                let mut node = id;
+                while walked && node != tree.document() {
+                    if styles
+                        .get(&node)
+                        .is_some_and(|style| style.display == crate::Display::None)
+                    {
+                        walked = false;
+                    } else if let Some(parent) = rendered_parent(tree, node) {
+                        node = parent;
+                    } else {
+                        walked = false;
+                    }
+                }
+                if !walked {
+                    continue;
+                }
+                if let Some(style) = styles.get_mut(&id) {
+                    generated_counter_text(style, &empty, true);
+                    generated_counter_text(style, &empty, false);
+                }
+            }
+            return false;
+        }
+    }
+    fn generated_counter_text(
+        style: &mut crate::LayoutStyle,
+        counters: &CssCounterState,
+        before: bool,
+    ) {
+        let pseudo = if before {
+            style.before_pseudo.as_mut()
+        } else {
+            style.after_pseudo.as_mut()
+        };
+        if let Some(pseudo) = pseudo {
+            if let Some(items) = pseudo.generated_content.as_deref() {
+                pseudo.before_content = Some(counters.render(items));
+            }
+        }
+        let content = if before {
+            &style.before_pseudo
+        } else {
+            &style.after_pseudo
+        }
+        .as_ref()
+        .filter(|pseudo| pseudo.position != Some(taffy::Position::Absolute))
+        .and_then(|pseudo| pseudo.before_content.clone());
+        if before {
+            style.before_content = content;
+        } else {
+            style.after_content = content;
+        }
+    }
     fn walk(
         tree: &DomTree,
         id: NodeId,
@@ -4642,16 +4725,7 @@ fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::Layo
         });
 
         if let Some(style) = styles.get_mut(&id) {
-            if let Some(pseudo) = style.before_pseudo.as_mut() {
-                if let Some(items) = pseudo.generated_content.as_deref() {
-                    pseudo.before_content = Some(counters.render(items));
-                }
-            }
-            style.before_content = style
-                .before_pseudo
-                .as_ref()
-                .filter(|pseudo| pseudo.position != Some(taffy::Position::Absolute))
-                .and_then(|pseudo| pseudo.before_content.clone());
+            generated_counter_text(style, counters, true);
         }
 
         let mut child_scopes = Vec::new();
@@ -4661,16 +4735,7 @@ fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::Layo
         counters.pop_created(&child_scopes);
 
         if let Some(style) = styles.get_mut(&id) {
-            if let Some(pseudo) = style.after_pseudo.as_mut() {
-                if let Some(items) = pseudo.generated_content.as_deref() {
-                    pseudo.before_content = Some(counters.render(items));
-                }
-            }
-            style.after_content = style
-                .after_pseudo
-                .as_ref()
-                .filter(|pseudo| pseudo.position != Some(taffy::Position::Absolute))
-                .and_then(|pseudo| pseudo.before_content.clone());
+            generated_counter_text(style, counters, false);
         }
 
         // Non-element nodes cannot create counter scopes, but walking through
@@ -4681,6 +4746,7 @@ fn resolve_css_counters(tree: &DomTree, styles: &mut HashMap<NodeId, crate::Layo
     let mut counters = CssCounterState::default();
     let root_scopes = walk(tree, tree.document(), styles, &mut counters);
     counters.pop_created(&root_scopes);
+    styles.values().any(has_directives)
 }
 
 /// Lay out a DOM tree within `viewport` (width, height) in CSS pixels.
@@ -7579,7 +7645,15 @@ fn layout_dom_once(
         }
     }
     let cascade_signatures = std::mem::take(&mut cascade_cx.signatures);
-    resolve_css_counters(tree, &mut styles);
+    let counters_used = resolve_css_counters(
+        tree,
+        &mut styles,
+        fresh_styles.as_ref().filter(|_| {
+            retained_geometry
+                .as_ref()
+                .is_some_and(|geometry| !geometry.counters_used)
+        }),
+    );
     let cascade_time = t1.elapsed();
     let mut phase_marks: Vec<(&'static str, (std::time::Instant, u64))> =
         vec![("cascade", crate::prof::mark())];
@@ -11090,6 +11164,7 @@ fn layout_dom_once(
             ifc: ifc_items.ifc,
             generated_boxes,
             derived_seed,
+            counters_used,
         },
         signature,
         query_stats,

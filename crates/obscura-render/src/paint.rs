@@ -4264,6 +4264,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             clip_inputs: previous.layout.clip_inputs,
             previous_rendered,
             derived: previous_derived,
+            counters_used: previous.layout.counters_used,
         }),
     };
     drop(previous);
