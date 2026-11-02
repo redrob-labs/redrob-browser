@@ -24825,7 +24825,7 @@ mod tests {
     #[cfg(feature = "stealth")]
     #[tokio::test(flavor = "current_thread")]
     async fn stealth_same_origin_fetch_sends_origin_for_non_get_methods() {
-        let (mut rt, origin, requests) = raw_request_runtime(6);
+        let (rt, origin, requests) = raw_request_runtime(6);
         rt.set_stealth_client(std::sync::Arc::new(obscura_net::StealthHttpClient::new(
             std::sync::Arc::new(obscura_net::CookieJar::new()),
         )));
