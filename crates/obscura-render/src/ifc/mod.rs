@@ -240,12 +240,27 @@ pub(crate) struct Ifc {
     /// over whole (see `IfcStore::create`): it already has the line layout
     /// `adopt_layout_of` would give it.
     pub(crate) reused_laid: bool,
+    /// Changes whenever what `fragments` reads may have changed (see
+    /// `touch`).
+    pub(crate) epoch: u64,
+    /// `fragments` at an origin, under the epoch it was made in.
+    pub(crate) fragments_cache: Option<((u64, u32, u32), std::sync::Arc<geom::Fragments>)>,
 }
 
+/// The next `Ifc::epoch`.
+static NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 impl Ifc {
+    /// Its final lines, their positions or its spans may change: forget the
+    /// fragments made from them.
+    pub(crate) fn touch(&mut self) {
+        self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Take the line layout another IFC of the same template ended its
     /// layout with, for a box whose Taffy layout is reused unchanged.
     pub(crate) fn adopt_layout_of(&mut self, laid: Box<Ifc>) {
+        self.touch();
         let laid = *laid;
         self.layout = laid.layout;
         self.final_layout = laid.final_layout;
@@ -361,6 +376,7 @@ impl IfcStore {
             params,
         )?;
         let ifc = self.get_mut(index)?;
+        ifc.touch();
         ifc.layout.break_all_lines(width);
         ifc.layout.align(
             ifc.params.align,

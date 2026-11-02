@@ -1306,6 +1306,8 @@ impl IfcStore {
             clip: None,
             marker,
             reused_laid: false,
+            epoch: 0,
+            fragments_cache: None,
             template_id: if key.is_some() {
                 NEXT_TEMPLATE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             } else {

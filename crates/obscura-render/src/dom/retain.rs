@@ -134,6 +134,8 @@ pub(crate) struct StyleIndex {
     pub(super) percent_padding: crate::HashSet<NodeId>,
     /// A `container-type` or `container-name`.
     pub(crate) containers: crate::HashSet<NodeId>,
+    /// `position: absolute` (or fixed).
+    pub(super) absolute: crate::HashSet<NodeId>,
 }
 
 impl StyleIndex {
@@ -167,6 +169,10 @@ impl StyleIndex {
             style.is_some_and(Self::has_percent_padding),
         );
         toggle(&mut self.containers, style.is_some_and(Self::is_container));
+        toggle(
+            &mut self.absolute,
+            style.is_some_and(|style| matches!(style.position, Some(taffy::Position::Absolute))),
+        );
     }
 
     /// Bring the index up to date: the styles of `ids` were written, or,

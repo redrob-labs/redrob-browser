@@ -16,7 +16,7 @@ pub(crate) struct Fragments {
     /// Per line border boxes of inline `::before`/`::after` boxes.
     pub(crate) pseudos: Vec<(NodeId, GeneratedBoxKind, Rect)>,
     /// Per line font boxes of each text node, with the text on that line.
-    pub(crate) texts: Vec<(NodeId, Rect, String)>,
+    pub(crate) texts: Vec<(NodeId, Rect, std::sync::Arc<str>)>,
     /// The box of each `<br>`.
     pub(crate) breaks: Vec<(NodeId, Rect)>,
 }
@@ -209,6 +209,20 @@ impl Ifc {
             }
         }
         depths
+    }
+
+    /// `fragments`, kept with the IFC until its final lines change (see
+    /// `Ifc::touch`) or it is asked for another origin.
+    pub(crate) fn cached_fragments(&mut self, origin: (f32, f32)) -> std::sync::Arc<Fragments> {
+        let key = (self.epoch, origin.0.to_bits(), origin.1.to_bits());
+        if let Some((cached_key, fragments)) = &self.fragments_cache {
+            if *cached_key == key {
+                return fragments.clone();
+            }
+        }
+        let fragments = std::sync::Arc::new(self.fragments(origin));
+        self.fragments_cache = Some((key, fragments.clone()));
+        fragments
     }
 
     /// Every fragment of this IFC, with the content box at `origin`.
@@ -500,7 +514,7 @@ impl Ifc {
                 }
             }
             for (node, x0, x1, baseline, ascent, descent, range, offset) in texts {
-                let text = self.text.get(range).unwrap_or_default().to_string();
+                let text: std::sync::Arc<str> = self.text.get(range).unwrap_or_default().into();
                 out.texts.push((
                     node,
                     Rect {
