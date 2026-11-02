@@ -258,7 +258,12 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
     let mut text = Vec::new();
     if let Some(text_node) = target.and_then(|t| first_text_child(&tree, t)) {
         let parent = tree.with_node(text_node, |node| node.parent).flatten();
-        for round in 0..5 {
+        // BENCH_TEXT_ROUNDS: how many text edits to time (default 5).
+        let text_rounds: usize = std::env::var("BENCH_TEXT_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+        for round in 0..text_rounds {
             tree.with_node_mut(text_node, |node| {
                 if let NodeData::Text { contents } = &mut node.data {
                     contents.push_str(&format!(" edit{round}"));

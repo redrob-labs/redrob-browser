@@ -4165,11 +4165,22 @@ impl Page {
             // before navigation becomes capture-ready. Known parser resources
             // are filtered by the render cache, so ordinary pages pay only the
             // inexpensive scan on this second pass.
+            // Start their loads without waiting for them: the load event has
+            // already fired, and the page's own timers and frames would stall
+            // behind the wait (YouTube's watch page waited ~0.8 s here before
+            // it could request its comments). Results are applied as they
+            // land by the event-loop pump, and every capture path still
+            // prepares resources itself. A positive
+            // OBSCURA_RENDER_RESOURCE_POST_SCRIPT_WARMUP_MS waits as before.
             let warmup_ms = std::env::var("OBSCURA_RENDER_RESOURCE_POST_SCRIPT_WARMUP_MS")
                 .ok()
                 .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(1_000);
-            let _ = self.prepare_screenshot_resources(warmup_ms).await;
+                .unwrap_or(0);
+            if warmup_ms == 0 {
+                self.spawn_pending_render_resources();
+            } else {
+                let _ = self.prepare_screenshot_resources(warmup_ms).await;
+            }
         }
 
         self.lifecycle = LifecycleState::DomContentLoaded;
