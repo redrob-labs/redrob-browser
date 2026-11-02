@@ -9,13 +9,13 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use cef::{
     rc::Rc as _, sys, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
-    CefString, Client, ContextMenuHandler, CursorInfo, DownloadHandler, FindHandler,
-    JsdialogHandler, PermissionHandler, CursorType, DevToolsMessageObserver, DictionaryValue,
-    DisplayHandler, FocusHandler, FocusSource, Frame, ImplBrowser, ImplBrowserHost, ImplClient,
-    ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler,
-    ImplLoadHandler, LifeSpanHandler, LoadHandler, PopupFeatures, Registration, RenderHandler,
-    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
-    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    CefString, Client, ContextMenuHandler, CursorInfo, CursorType, DevToolsMessageObserver,
+    DictionaryValue, DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource,
+    Frame, ImplBrowser, ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver,
+    ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler,
+    JsdialogHandler, LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration,
+    RenderHandler, WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver,
+    WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
 };
 use serde_json::{json, Value};
 

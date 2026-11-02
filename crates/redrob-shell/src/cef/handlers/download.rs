@@ -81,7 +81,10 @@ pub fn safe_name(name: &str) -> String {
             c => c,
         })
         .collect();
-    let cleaned = cleaned.trim().trim_start_matches('.').trim_end_matches(['.', ' ']);
+    let cleaned = cleaned
+        .trim()
+        .trim_start_matches('.')
+        .trim_end_matches(['.', ' ']);
     if cleaned.is_empty() {
         "download".to_string()
     } else {

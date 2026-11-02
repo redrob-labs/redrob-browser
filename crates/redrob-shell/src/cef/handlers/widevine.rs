@@ -44,6 +44,9 @@ pub fn install() {
         return;
     }
     let mut done = Installed::new();
-    updater.update(Some(&id), ComponentUpdatePriority::FOREGROUND, Some(&mut done));
+    updater.update(
+        Some(&id),
+        ComponentUpdatePriority::FOREGROUND,
+        Some(&mut done),
+    );
 }
-

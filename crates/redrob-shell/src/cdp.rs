@@ -204,7 +204,10 @@ pub enum Event {
     /// The page's context menu, for the window to draw.
     ContextMenu(crate::cef::handlers::context_menu::Menu),
     /// Matches for `Op::Find`: how many, which one is selected (1-based).
-    FindResult { count: i32, active: i32 },
+    FindResult {
+        count: i32,
+        active: i32,
+    },
     /// The page's zoom changed, in percent.
     Zoom(u32),
     /// Put this text on the clipboard ("Copy link address").

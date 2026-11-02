@@ -216,10 +216,7 @@ pub fn cookies_file(profile: &Path) -> Option<PathBuf> {
 /// Read `source`'s cookies. Returns the cookies and how many could not be
 /// opened. Expired ones are left out. Keys are as for passwords
 /// ([`import_passwords`]).
-pub fn read_cookies(
-    source: &Source,
-    scratch: &Path,
-) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
+pub fn read_cookies(source: &Source, scratch: &Path) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
     if cfg!(windows) {
         anyhow::bail!(
             "{} encrypts cookies so only it can read them. Sign in to your sites again here.",
@@ -238,10 +235,7 @@ pub fn read_cookies(
     out
 }
 
-fn read_cookies_db(
-    path: &Path,
-    key: &[u8; 16],
-) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
+fn read_cookies_db(path: &Path, key: &[u8; 16]) -> anyhow::Result<(Vec<ChromeCookie>, usize)> {
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     // Since version 24 the plain value starts with SHA-256 of the host.
     let version: i64 = db

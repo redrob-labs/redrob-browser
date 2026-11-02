@@ -47,9 +47,6 @@ wrap_find_handler! {
             active_match_ordinal: ::std::os::raw::c_int,
             _final_update: ::std::os::raw::c_int,
         ) {
-            if std::env::var_os("REDROB_TRACE_UI").is_some() {
-                eprintln!("TRACE found count={count} active={active_match_ordinal} final={_final_update}");
-            }
             if let Some(b) = browser {
                 self.sink.send(
                     b.identifier(),

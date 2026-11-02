@@ -15,9 +15,13 @@ pub enum Kind {
     Alert,
     Confirm,
     /// `prompt()`, with the text the field starts with.
-    Prompt { default_text: String },
+    Prompt {
+        default_text: String,
+    },
     /// The page asks before it is left; `reload` when the person reloads.
-    BeforeUnload { reload: bool },
+    BeforeUnload {
+        reload: bool,
+    },
 }
 
 /// A dialog for the window to show, carried by `Event::Dialog`.
@@ -58,7 +62,11 @@ fn close_all(browser: Option<&mut Browser>) {
     let Some(b) = browser else {
         return;
     };
-    if let Some(list) = open_dialogs().lock().ok().and_then(|mut o| o.remove(&b.identifier())) {
+    if let Some(list) = open_dialogs()
+        .lock()
+        .ok()
+        .and_then(|mut o| o.remove(&b.identifier()))
+    {
         for open in list {
             open.store(false, Ordering::Relaxed);
         }

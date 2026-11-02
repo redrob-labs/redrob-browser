@@ -162,7 +162,14 @@ impl Menu {
     }
 }
 
-fn run(sink: &Sink, browser: &Browser, frame: Option<&Frame>, t: &Target, at: (i32, i32), c: Command) {
+fn run(
+    sink: &Sink,
+    browser: &Browser,
+    frame: Option<&Frame>,
+    t: &Target,
+    at: (i32, i32),
+    c: Command,
+) {
     let id = browser.identifier();
     let opened = |url: &str| Event::OpenTab(url.to_string());
     let download = |url: &str| {
@@ -189,17 +196,27 @@ fn run(sink: &Sink, browser: &Browser, frame: Option<&Frame>, t: &Target, at: (i
         Command::Undo => edit(|f| f.undo()),
         Command::Redo => edit(|f| f.redo()),
         // Linux: the window's clipboard, not Chromium's (clipboard.rs).
-        Command::Cut if super::clipboard::OWN => super::clipboard::copy(sink, browser, true),
-        Command::Copy if super::clipboard::OWN => super::clipboard::copy(sink, browser, false),
+        // The selection as Chromium reported it with the menu: by now the
+        // window's menu has the focus and the page may have dropped it.
+        Command::Cut | Command::Copy if super::clipboard::OWN => {
+            if !t.selection.is_empty() {
+                sink.send(id, Event::Clipboard(t.selection.clone()));
+            }
+            if c == Command::Cut {
+                edit(|f| f.del());
+            }
+        }
         Command::Paste if super::clipboard::OWN => super::clipboard::paste(browser),
         Command::Cut => edit(|f| f.cut()),
         Command::Copy => edit(|f| f.copy()),
         Command::Paste => edit(|f| f.paste()),
         Command::SelectAll => edit(|f| f.select_all()),
         Command::Print => super::print::print(sink, browser),
+        // In a tab, as Chrome does (CEF's own view_source opens a text editor).
         Command::ViewSource => {
             if let Some(f) = browser.main_frame() {
-                f.view_source();
+                let url = super::text(&f.url());
+                sink.send(id, Event::OpenTab(format!("view-source:{url}")));
             }
         }
         Command::Inspect => inspect(browser, Some(at)),
@@ -227,7 +244,12 @@ pub fn inspect(browser: &Browser, at: Option<(i32, i32)>) {
     let settings = BrowserSettings::default();
     let point = at.map(|(x, y)| Point { x, y });
     let mut client = crate::cef::client::devtools_client();
-    host.show_dev_tools(Some(&info), Some(&mut client), Some(&settings), point.as_ref());
+    host.show_dev_tools(
+        Some(&info),
+        Some(&mut client),
+        Some(&settings),
+        point.as_ref(),
+    );
 }
 
 fn flag(bits: u32, f: u32) -> bool {

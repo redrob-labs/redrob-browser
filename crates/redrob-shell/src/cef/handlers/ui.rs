@@ -99,6 +99,8 @@ pub struct Prompts {
     menu: Option<(TabId, Menu)>,
     find: Option<FindBar>,
     zoom: Option<(TabId, u32, Instant)>,
+    /// A menu, dialog or the find bar closed: the page gets the keyboard back.
+    refocus: bool,
 }
 
 impl Prompts {
@@ -150,6 +152,16 @@ impl Prompts {
         None
     }
 
+    /// Whether the page's context menu is open.
+    pub fn menu_open(&self) -> bool {
+        self.menu.is_some()
+    }
+
+    /// Whether the page should take the keyboard focus back (once).
+    pub fn take_refocus(&mut self) -> bool {
+        std::mem::take(&mut self.refocus)
+    }
+
     /// The tab closed: answer what it still asks, as dismissed.
     pub fn close_tab(&mut self, tab: TabId) {
         for (_, p) in extract(&mut self.permissions, |(t, _)| *t == tab) {
@@ -191,7 +203,11 @@ impl Prompts {
             let next = i.consume_key(cmd, Key::G) || i.consume_key(Modifiers::NONE, Key::F3);
             let prev = i.consume_key(cmd | Modifiers::SHIFT, Key::G)
                 || i.consume_key(Modifiers::SHIFT, Key::F3);
-            if let Some(f) = self.find.as_ref().filter(|f| f.tab == active && !f.text.is_empty()) {
+            if let Some(f) = self
+                .find
+                .as_ref()
+                .filter(|f| f.tab == active && !f.text.is_empty())
+            {
                 if next || prev {
                     ops.push(find_op(&f.text, !prev, true));
                 }
@@ -279,7 +295,12 @@ impl Prompts {
         let (_, d, text) = &mut self.dialogs[i];
         let (title, message) = match d.kind {
             DialogKind::BeforeUnload { reload } => (
-                tr(if reload { "Reload site?" } else { "Leave site?" }).to_string(),
+                tr(if reload {
+                    "Reload site?"
+                } else {
+                    "Leave site?"
+                })
+                .to_string(),
                 tr("Changes you made may not be saved.").to_string(),
             ),
             _ => (trf("{0} says", &d.origin), d.message.clone()),
@@ -337,6 +358,7 @@ impl Prompts {
         if let Some(ok) = done {
             let (_, d, text) = self.dialogs.remove(i);
             d.answer(ok, &text);
+            self.refocus = true;
         }
     }
 
@@ -369,11 +391,7 @@ impl Prompts {
                                 let b = egui::Button::new(tr(command.label()))
                                     .frame(false)
                                     .min_size(egui::vec2(ui.available_width(), 0.0));
-                                let r = ui.add_enabled(*enabled, b);
-                                if std::env::var_os("REDROB_TRACE_UI").is_some() {
-                                    eprintln!("TRACE menu {:?} at {:?}", command, r.rect.center());
-                                }
-                                if r.clicked() {
+                                if ui.add_enabled(*enabled, b).clicked() {
                                     chosen = Some(*command);
                                 }
                             }
@@ -388,10 +406,17 @@ impl Prompts {
             if let Some((_, m)) = self.menu.take() {
                 m.choose(chosen);
             }
+            self.refocus = true;
         }
     }
 
-    fn show_find(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect, ops: &mut Vec<Op>) {
+    fn show_find(
+        &mut self,
+        ctx: &egui::Context,
+        active: TabId,
+        page: egui::Rect,
+        ops: &mut Vec<Op>,
+    ) {
         let Some(f) = self.find.as_mut() else {
             return;
         };
@@ -443,18 +468,24 @@ impl Prompts {
                             ui.weak(format!("{}/{}", f.active, f.count));
                         }
                     }
-                    if std::env::var_os("REDROB_TRACE_UI").is_some() {
-                        eprintln!("TRACE find {:?} {}/{} enter={enter}", f.text, f.active, f.count);
-                    }
                     let any = !f.text.is_empty();
-                    if ui.add_enabled(any, egui::Button::new("⏶")).on_hover_text(tr("Previous")).clicked() {
+                    if ui
+                        .add_enabled(any, egui::Button::new("⏶"))
+                        .on_hover_text(tr("Previous"))
+                        .clicked()
+                    {
                         ops.push(find_op(&f.text, false, true));
                     }
-                    if ui.add_enabled(any, egui::Button::new("⏷")).on_hover_text(tr("Next")).clicked() {
+                    if ui
+                        .add_enabled(any, egui::Button::new("⏷"))
+                        .on_hover_text(tr("Next"))
+                        .clicked()
+                    {
                         ops.push(find_op(&f.text, true, true));
                     }
                     if ui.button("✕").on_hover_text(tr("Close")).clicked()
-                        || (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(Key::Escape))
+                        || (r.has_focus() || r.lost_focus())
+                            && ui.input(|i| i.key_pressed(Key::Escape))
                     {
                         close = true;
                     }
@@ -463,6 +494,7 @@ impl Prompts {
         if close {
             self.find = None;
             ops.push(Op::StopFind);
+            self.refocus = true;
         }
     }
 
@@ -575,9 +607,14 @@ mod tests {
             modifiers: Modifiers::COMMAND,
         };
         let mut input = egui::RawInput::default();
-        input.events = vec![press(Key::F), press(Key::Plus), press(Key::Num0), press(Key::P)];
+        input.events = vec![
+            press(Key::F),
+            press(Key::Plus),
+            press(Key::Num0),
+            press(Key::P),
+        ];
         let mut ops = Vec::new();
-        let _ = ctx.run(input, |ctx| ops = p.keys(ctx, 7));
+        let _ = ctx.run_ui(input, |ui| ops = p.keys(ui.ctx(), 7));
         assert!(p.find.as_ref().is_some_and(|f| f.tab == 7));
         assert!(matches!(ops[0], Op::Zoom(Step::In)));
         assert!(matches!(ops[1], Op::Zoom(Step::Reset)));

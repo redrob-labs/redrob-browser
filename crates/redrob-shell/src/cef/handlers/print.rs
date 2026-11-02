@@ -88,7 +88,10 @@ mod tests {
 
     #[test]
     fn pdf_is_named_after_the_site() {
-        assert_eq!(pdf_name("https://www.example.com/a/b?c"), "www.example.com.pdf");
+        assert_eq!(
+            pdf_name("https://www.example.com/a/b?c"),
+            "www.example.com.pdf"
+        );
         assert_eq!(pdf_name("about:blank"), "page.pdf");
         assert_eq!(pdf_name(""), "page.pdf");
     }

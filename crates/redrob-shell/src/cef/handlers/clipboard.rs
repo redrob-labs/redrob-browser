@@ -43,10 +43,7 @@ pub fn copy(sink: &Sink, browser: &Browser, cut: bool) {
         browser,
         "Runtime.evaluate",
         json!({ "expression": format!("{SELECTION_JS}({cut})"), "returnByValue": true }),
-        move |ok, r| {
-            if std::env::var_os("REDROB_TRACE_UI").is_some() {
-                eprintln!("TRACE copy ok={ok} len={}", r["result"]["value"].as_str().map_or(0, str::len));
-            }
+        move |_, r| {
             if let Some(t) = r["result"]["value"].as_str().filter(|t| !t.is_empty()) {
                 sink.send(id, Event::Clipboard(t.to_string()));
             }
@@ -61,12 +58,17 @@ pub fn insert(browser: &Browser, text: &str) {
     }
 }
 
-/// Type the clipboard's text into the page.
+/// Type the clipboard's text into the page. The clipboard is read off the
+/// window thread: when Chromium owns the selection, it answers on that
+/// thread, so reading there would wait on itself.
 pub fn paste(browser: &Browser) {
-    if let Some(text) = arboard::Clipboard::new()
-        .ok()
-        .and_then(|mut c| c.get_text().map_err(|e| if std::env::var_os("REDROB_TRACE_UI").is_some() { eprintln!("TRACE paste {e}") }).ok())
-    {
-        insert(browser, &text);
-    }
+    let browser = browser.clone();
+    std::thread::spawn(move || {
+        let text = arboard::Clipboard::new()
+            .ok()
+            .and_then(|mut c| c.get_text().ok());
+        if let Some(text) = text {
+            super::on_ui(move || insert(&browser, &text));
+        }
+    });
 }

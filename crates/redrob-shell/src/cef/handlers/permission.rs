@@ -89,7 +89,10 @@ pub fn prompt_kinds(bits: u32) -> Vec<Kind> {
         (P::CEF_PERMISSION_TYPE_MIDI_SYSEX, Kind::Midi),
         (P::CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS, Kind::Downloads),
         (P::CEF_PERMISSION_TYPE_STORAGE_ACCESS, Kind::Storage),
-        (P::CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS, Kind::Storage),
+        (
+            P::CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS,
+            Kind::Storage,
+        ),
         (P::CEF_PERMISSION_TYPE_LOCAL_FONTS, Kind::Fonts),
         (P::CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT, Kind::Windows),
         (P::CEF_PERMISSION_TYPE_IDLE_DETECTION, Kind::Idle),
@@ -130,7 +133,10 @@ pub fn media_bits(requested: u32, allowed: &[Kind]) -> u32 {
     let mut out = 0;
     let parts = [
         (M::CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE, Kind::Camera),
-        (M::CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE, Kind::Microphone),
+        (
+            M::CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE,
+            Kind::Microphone,
+        ),
         (M::CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE, Kind::Screen),
         (M::CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE, Kind::Screen),
     ];
@@ -413,7 +419,10 @@ mod tests {
     fn choices_are_remembered_per_site() {
         let sites = SiteSettings::memory();
         let kinds = [Kind::Camera, Kind::Location];
-        assert_eq!(known(&sites, "https://a.example", &kinds).undecided, kinds.to_vec());
+        assert_eq!(
+            known(&sites, "https://a.example", &kinds).undecided,
+            kinds.to_vec()
+        );
         sites.set("https://a.example", &Kind::Camera.key(), Some("allow"));
         sites.set("https://a.example", &Kind::Location.key(), Some("block"));
         let k = known(&sites, "https://a.example", &kinds);
@@ -421,10 +430,16 @@ mod tests {
         assert_eq!(k.blocked, vec![Kind::Location]);
         assert!(k.undecided.is_empty());
         // Another site starts fresh.
-        assert_eq!(known(&sites, "https://b.example", &kinds).undecided.len(), 2);
+        assert_eq!(
+            known(&sites, "https://b.example", &kinds).undecided.len(),
+            2
+        );
         for k in kinds {
             sites.set("https://a.example", &k.key(), None);
         }
-        assert_eq!(known(&sites, "https://a.example", &kinds).undecided.len(), 2);
+        assert_eq!(
+            known(&sites, "https://a.example", &kinds).undecided.len(),
+            2
+        );
     }
 }

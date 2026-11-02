@@ -664,7 +664,7 @@ impl Window {
     }
 
     fn on_download(&mut self, item: model::DownloadItem) {
-        let finished = item.state != "inProgress";
+        let finished = matches!(item.state.as_str(), "completed" | "canceled");
         match self
             .model
             .downloads
@@ -2435,7 +2435,9 @@ impl Window {
                 )
             });
         }
-        if focused != self.page_focused {
+        // The page's context menu takes egui's focus, not the page's: the
+        // page keeps its caret for the menu's Paste and Cut.
+        if focused != self.page_focused && !self.prompts.menu_open() {
             self.page_focused = focused;
             self.op(tab, Op::Focus(focused));
         }
@@ -2455,6 +2457,10 @@ impl Window {
             .filter(&mut events, rect, link.as_deref(), text)
         {
             self.open_tab(&url, false);
+        }
+        // Clicks on the page's context menu are the menu's, not the page's.
+        if self.prompts.menu_open() {
+            events.clear();
         }
         let mut ops = cef::input::to_ops(
             &mut self.page_input,
@@ -2556,6 +2562,10 @@ impl Window {
         }
         for op in self.prompts.show(&ctx, tab, rect) {
             self.op(tab, op);
+        }
+        if self.prompts.take_refocus() {
+            self.focus_page = true;
+            ctx.request_repaint();
         }
     }
 }

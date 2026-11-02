@@ -9,7 +9,11 @@ use crate::import_chrome::ChromeCookie;
 pub fn url_of(c: &ChromeCookie) -> String {
     let host = c.host.trim_start_matches('.');
     let scheme = if c.secure { "https" } else { "http" };
-    let path = if c.path.starts_with('/') { c.path.as_str() } else { "/" };
+    let path = if c.path.starts_with('/') {
+        c.path.as_str()
+    } else {
+        "/"
+    };
     format!("{scheme}://{host}{path}")
 }
 
