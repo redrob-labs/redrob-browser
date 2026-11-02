@@ -59,17 +59,12 @@ struct Shared {
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadItem>,
     closed: Vec<(String, String)>,
-    /// One GPU compositor for all windows, with a page texture per window;
-    /// the reason when there is none.
-    gpu: Option<crate::compositor::Gpu>,
-    gpu_error: String,
 }
 
 impl Shared {
     fn lend(&mut self, w: &mut Window) {
         w.profile = self.profile.take();
         w.vault = self.vault.take();
-        w.gpu = self.gpu.take().ok_or_else(|| self.gpu_error.clone());
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -79,7 +74,6 @@ impl Shared {
     fn reclaim(&mut self, w: &mut Window) {
         self.profile = w.profile.take();
         self.vault = w.vault.take();
-        self.gpu = std::mem::replace(&mut w.gpu, Err(String::new())).ok();
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -131,77 +125,6 @@ pub struct Browser {
     session_saved_at: Instant,
     /// The session was saved for the last time; closing must not overwrite it.
     final_saved: bool,
-}
-
-/// The window's wgpu device. It may import Chromium's frames as GPU
-/// textures (cef/osr.rs), which on Linux and Vulkan on Windows needs the
-/// external-memory feature where the adapter has it.
-pub fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
-    use eframe::wgpu;
-    let mut setup = WgpuSetupCreateNew::without_display_handle();
-    let base = setup.device_descriptor.clone();
-    setup.device_descriptor = Arc::new(move |adapter: &wgpu::Adapter| {
-        let mut d = base(adapter);
-        let wanted = wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF
-            | wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32;
-        d.required_features |= adapter.features() & wanted;
-        d
-    });
-    eframe::egui_wgpu::WgpuConfiguration {
-        wgpu_setup: WgpuSetup::CreateNew(setup),
-        ..Default::default()
-    }
-}
-
-/// Whether Chromium may hand frames as shared GPU textures: a hardware
-/// adapter whose device can import them. `REDROB_OSR=cpu` or `gpu` decides.
-fn shared_texture(state: &eframe::egui_wgpu::RenderState) -> bool {
-    use eframe::wgpu;
-    match std::env::var("REDROB_OSR").as_deref() {
-        Ok("cpu") => return false,
-        Ok("gpu") => return true,
-        _ => {}
-    }
-    let info = state.adapter.get_info();
-    if matches!(
-        info.device_type,
-        wgpu::DeviceType::Cpu | wgpu::DeviceType::Other
-    ) {
-        return false;
-    }
-    let features = state.device.features();
-    match info.backend {
-        wgpu::Backend::Vulkan if cfg!(target_os = "linux") => {
-            features.contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_DMA_BUF)
-        }
-        wgpu::Backend::Vulkan if cfg!(windows) => {
-            features.contains(wgpu::Features::VULKAN_EXTERNAL_MEMORY_WIN32)
-        }
-        wgpu::Backend::Dx12 => cfg!(windows),
-        wgpu::Backend::Metal => cfg!(target_os = "macos"),
-        _ => false,
-    }
-}
-
-/// Which way Chromium's frames reach the window, for the log.
-fn frame_path(state: Option<&eframe::egui_wgpu::RenderState>, accelerated: bool) -> String {
-    let Some(state) = state else {
-        return "pixel upload (no wgpu device)".to_string();
-    };
-    let info = state.adapter.get_info();
-    let gpu = format!("{} on {:?}", info.name, info.backend);
-    if !accelerated {
-        return format!("pixel upload (OnPaint), {gpu}");
-    }
-    let kind = if cfg!(target_os = "linux") {
-        "dmabuf"
-    } else if cfg!(target_os = "macos") {
-        "IOSurface"
-    } else {
-        "D3D11 shared handle"
-    };
-    format!("GPU shared texture (OnAcceleratedPaint, {kind}), {gpu}")
 }
 
 /// The OS window for a browser window: undecorated except on macOS, at
@@ -348,18 +271,6 @@ impl Browser {
             },
             None => None,
         };
-        let (gpu, gpu_error) = match cc.wgpu_render_state.as_ref() {
-            Some(state) => match crate::compositor::Gpu::new(state) {
-                Ok(g) => (Some(g), String::new()),
-                Err(e) => (None, e),
-            },
-            None => (None, "no wgpu device".to_string()),
-        };
-        let accelerated = cc.wgpu_render_state.as_ref().is_some_and(shared_texture);
-        eprintln!(
-            "redrob-browser: page frames: {}",
-            frame_path(cc.wgpu_render_state.as_ref(), accelerated)
-        );
         // Per-site choices: the profile's, or memory only for incognito.
         let sites = profile
             .as_ref()
@@ -370,11 +281,7 @@ impl Browser {
             sites,
             downloads: crate::profile::downloads_dir(),
         });
-        cdp::init(
-            sink,
-            gpu.as_ref().filter(|_| accelerated).map(|g| g.device()),
-            accelerated,
-        );
+        cdp::init(sink);
         let mut browser = Self {
             windows: Vec::new(),
             shared: Shared {
@@ -384,8 +291,6 @@ impl Browser {
                 history: loaded.history,
                 downloads: Vec::new(),
                 closed: Vec::new(),
-                gpu,
-                gpu_error,
             },
             updates: upd_rx,
             commands: cmd_tx,
@@ -479,12 +384,16 @@ impl Browser {
             focus_address: false,
             focus_page: false,
             error: None,
-            last_size: (0, 0, 0.0, (0, 0)),
+            last_place: None,
             address_id: egui::Id::new("address"),
-            page_input: Default::default(),
             prompts: Default::default(),
             page_focused: false,
-            autoscroll: Default::default(),
+            took_focus: false,
+            page_shortcuts: Vec::new(),
+            status: None,
+            native: None,
+            native_token: String::new(),
+            native_tries: 0,
             incognito: self.incognito,
             wid,
             viewport,
@@ -498,8 +407,6 @@ impl Browser {
             tab_drag: None,
             top_sites: None,
             new_tab_query: String::new(),
-            // Lent from `Shared` while the window draws.
-            gpu: Err(String::new()),
             last_title: String::new(),
         }
     }
@@ -747,6 +654,11 @@ impl Browser {
         crate::ime::before_pass(&ctx, focused);
         w.frame(ui);
         crate::ime::after_pass(&ctx, focused);
+        // The page has the keyboard: its window is the one in front (the
+        // window itself then reads as unfocused).
+        if std::mem::take(&mut w.took_focus) {
+            self.focused = w.wid;
+        }
         self.shared.reclaim(w);
     }
 
@@ -760,6 +672,8 @@ impl Browser {
             return;
         }
         let mut w = self.windows.remove(i);
+        // Its pages leave its native window before that is destroyed.
+        let _ = w.commands.send(cdp::Command::Detach);
         for t in std::mem::take(&mut w.model.tabs) {
             w.op(t.id, cdp::Op::Close);
         }
@@ -944,11 +858,7 @@ impl Browser {
         let windows = self.windows.len();
         self.handle_requests(ctx);
         // The windows' commands go to Chromium, and Chromium does its work.
-        for tab in cdp::process(&mut self.command_rx) {
-            if let Some(gpu) = &mut self.shared.gpu {
-                gpu.release_tab(tab);
-            }
-        }
+        cdp::process(&mut self.command_rx);
         if self.windows.is_empty() {
             ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Close);
             return;

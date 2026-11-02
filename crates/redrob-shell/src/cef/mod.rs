@@ -4,17 +4,19 @@
 //! `cdp::Update` comes out. This module answers that contract with CEF
 //! instead of the Obscura child process.
 //!
-//! CEF runs in the window process with windowless (off-screen) rendering
-//! and an external message pump: the eframe loop calls [`pump`] every pass
-//! and whenever CEF asks for it, so every CEF callback runs on the window's
-//! own thread. Renderer, GPU and utility processes are this executable
+//! CEF runs in the window process with an external message pump: the
+//! eframe loop calls [`pump`] every pass and whenever CEF asks for it, so
+//! every CEF callback runs on the window's own thread. Each tab's page is a
+//! native child window of its browser window (native.rs). Renderer, GPU and utility processes are this executable
 //! started again with `--type=...`; [`subprocess`] runs them.
 
 pub mod app;
 pub mod client;
 pub mod handlers;
-pub mod input;
-pub mod osr;
+pub mod keys;
+pub mod native;
+#[cfg(target_os = "linux")]
+mod wake;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -87,11 +89,6 @@ impl Sink {
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
-    }
-
-    /// Redraw the window showing `tab` (a new frame, a cursor change).
-    pub fn repaint(&self, tab: TabId) {
-        (self.wake)(Some(tab));
     }
 }
 
@@ -325,7 +322,6 @@ pub fn start(config: Config) -> anyhow::Result<()> {
 
     let resources = resources_dir();
     let mut settings = cef::Settings {
-        windowless_rendering_enabled: 1,
         external_message_pump: 1,
         no_sandbox: (!sandbox_usable()) as _,
         root_cache_path: CefString::from(config.root.to_string_lossy().as_ref()),
@@ -491,6 +487,8 @@ pub fn pump() {
     PUMPS.fetch_add(1, Ordering::Relaxed);
     *PUMP_DUE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     cef::do_message_loop_work();
+    #[cfg(target_os = "linux")]
+    wake::after_pump();
     IN_PUMP.set(false);
     // A pass now and then even when CEF scheduled none, so nothing it
     // forgot to ask for stalls; CEF asks for every pass it needs.

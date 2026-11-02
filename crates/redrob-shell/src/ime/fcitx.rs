@@ -352,7 +352,7 @@ impl Fcitx {
         let Some(sym) = keysym(key, modifiers.shift) else {
             return (false, Vec::new());
         };
-        let code = crate::cef::input::xkb_keycode(physical.unwrap_or(key)).unwrap_or(0) as u32;
+        let code = xkb_keycode(physical.unwrap_or(key)).unwrap_or(0) as u32;
         let mut state = 0;
         if modifiers.shift {
             state |= SHIFT_MASK;
@@ -498,6 +498,131 @@ pub(crate) fn keysym(key: Key, shift: bool) -> Option<u32> {
         AltRight => Some(0xffea),
         _ => None,
     }
+}
+
+// Physical key numbers for fcitx5 (moved from the old page input module).
+
+/// The key's position on a US keyboard as Linux evdev / PC set-1 scan
+/// codes (the same numbers for the main block), and whether Windows calls
+/// it an extended key.
+fn scan_code(k: Key) -> Option<(i32, bool)> {
+    use Key::*;
+    Some(match k {
+        Escape => (1, false),
+        Num1 => (2, false),
+        Num2 => (3, false),
+        Num3 => (4, false),
+        Num4 => (5, false),
+        Num5 => (6, false),
+        Num6 => (7, false),
+        Num7 => (8, false),
+        Num8 => (9, false),
+        Num9 => (10, false),
+        Num0 => (11, false),
+        Minus => (12, false),
+        Equals | Plus => (13, false),
+        Backspace => (14, false),
+        Tab => (15, false),
+        Q => (16, false),
+        W => (17, false),
+        E => (18, false),
+        R => (19, false),
+        T => (20, false),
+        Y => (21, false),
+        U => (22, false),
+        I => (23, false),
+        O => (24, false),
+        P => (25, false),
+        OpenBracket | OpenCurlyBracket => (26, false),
+        CloseBracket | CloseCurlyBracket => (27, false),
+        Enter => (28, false),
+        ControlLeft => (29, false),
+        A => (30, false),
+        S => (31, false),
+        D => (32, false),
+        F => (33, false),
+        G => (34, false),
+        H => (35, false),
+        J => (36, false),
+        K => (37, false),
+        L => (38, false),
+        Semicolon | Colon => (39, false),
+        Quote => (40, false),
+        Backtick => (41, false),
+        ShiftLeft => (42, false),
+        Backslash | Pipe => (43, false),
+        Z => (44, false),
+        X => (45, false),
+        C => (46, false),
+        V => (47, false),
+        B => (48, false),
+        N => (49, false),
+        M => (50, false),
+        Comma => (51, false),
+        Period => (52, false),
+        Slash | Questionmark => (53, false),
+        ShiftRight => (54, false),
+        AltLeft => (56, false),
+        Space => (57, false),
+        F1 => (59, false),
+        F2 => (60, false),
+        F3 => (61, false),
+        F4 => (62, false),
+        F5 => (63, false),
+        F6 => (64, false),
+        F7 => (65, false),
+        F8 => (66, false),
+        F9 => (67, false),
+        F10 => (68, false),
+        IntlBackslash => (86, false),
+        F11 => (87, false),
+        F12 => (88, false),
+        // Set-1 extended codes; evdev numbers these apart (below).
+        ControlRight => (0x1D, true),
+        AltRight => (0x38, true),
+        Home => (0x47, true),
+        ArrowUp => (0x48, true),
+        PageUp => (0x49, true),
+        ArrowLeft => (0x4B, true),
+        ArrowRight => (0x4D, true),
+        End => (0x4F, true),
+        ArrowDown => (0x50, true),
+        PageDown => (0x51, true),
+        Insert => (0x52, true),
+        Delete => (0x53, true),
+        SuperLeft => (0x5B, true),
+        SuperRight => (0x5C, true),
+        _ => return None,
+    })
+}
+
+/// Linux evdev numbers of the keys Windows calls extended.
+fn evdev_extended(k: Key) -> Option<i32> {
+    use Key::*;
+    Some(match k {
+        ControlRight => 97,
+        AltRight => 100,
+        Home => 102,
+        ArrowUp => 103,
+        PageUp => 104,
+        ArrowLeft => 105,
+        ArrowRight => 106,
+        End => 107,
+        ArrowDown => 108,
+        PageDown => 109,
+        Insert => 110,
+        Delete => 111,
+        SuperLeft => 125,
+        SuperRight => 126,
+        _ => return None,
+    })
+}
+
+/// The XKB keycode of the physical key (Linux evdev number + 8).
+fn xkb_keycode(k: Key) -> Option<i32> {
+    let (scan, extended) = scan_code(k)?;
+    let evdev = if extended { evdev_extended(k)? } else { scan };
+    Some(evdev + 8)
 }
 
 #[cfg(test)]

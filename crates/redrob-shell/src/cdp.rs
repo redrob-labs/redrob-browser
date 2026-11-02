@@ -15,8 +15,7 @@ use serde_json::json;
 use tokio::sync::mpsc;
 
 use crate::cef::client::{self, TabCtx, LOGIN_BINDING, WORLD};
-use crate::cef::input::{self, Button, Edit, Ime, KeyKind, MouseKind};
-use crate::cef::osr::{self, SharedView};
+use crate::cef::native::{self, Handle, Place};
 use crate::cef::Sink;
 use crate::model::TabId;
 
@@ -78,46 +77,8 @@ pub enum Op {
     Forward,
     Reload,
     Stop,
-    Mouse {
-        kind: MouseKind,
-        x: f32,
-        y: f32,
-        button: Button,
-        clicks: u32,
-        /// CEF event flags (cef/input.rs).
-        modifiers: u32,
-    },
-    Wheel {
-        x: f32,
-        y: f32,
-        dx: f32,
-        dy: f32,
-        modifiers: u32,
-    },
-    Key {
-        kind: KeyKind,
-        windows_key_code: i32,
-        native_key_code: i32,
-        character: u16,
-        modifiers: u32,
-    },
-    /// Typed characters.
-    Text(String),
-    /// Input method composition.
-    Ime(Ime),
-    /// An editing command (macOS takes these from the menu, not keys).
-    Edit(Edit),
-    /// The page area gained or lost keyboard focus.
+    /// Give the page the keyboard, or take it away.
     Focus(bool),
-    /// Files from the desktop over the page (`drop`: let go).
-    DropFiles {
-        x: f32,
-        y: f32,
-        files: Vec<std::path::PathBuf>,
-        drop: bool,
-    },
-    /// Files dragged over the page left it.
-    DragLeave,
     /// Chromium's developer tools for this tab, in their own window.
     DevTools,
     /// Type a saved login into the page's sign-in form.
@@ -160,14 +121,19 @@ impl Commands {
 
 pub enum Command {
     Tab(TabId, Op),
-    /// The page area of the window that sent it: CSS pixels, the device
-    /// scale factor and its top-left on screen.
-    Resize {
-        width: u32,
-        height: u32,
-        scale: f32,
-        origin: (i32, i32),
+    /// The page area of the window that sent it: its native window, the
+    /// rectangle in physical pixels from that window's top-left, the scale,
+    /// and whether a page shows there (the window draws its own pages, the
+    /// new tab page and settings, in the same place).
+    Place {
+        place: Place,
+        visible: bool,
     },
+    /// The window's own controls take the keyboard from the page.
+    FocusWindow,
+    /// The window is about to close: its pages leave it first, so none is
+    /// left inside a destroyed native window.
+    Detach,
 }
 
 pub enum Event {
@@ -223,6 +189,15 @@ pub enum Event {
         path: String,
         bytes: u64,
     },
+    /// A window shortcut pressed while the page had the keyboard
+    /// (cef/keys.rs).
+    Shortcut(crate::cef::keys::Shortcut),
+    /// The page took the keyboard (a click in it, or the window gave it).
+    Focused,
+    /// Tab or Shift+Tab past the page's last or first field.
+    TakeFocus,
+    /// The link under the pointer, for the status bubble.
+    Status(Option<String>),
     Error(String),
 }
 
@@ -234,64 +209,56 @@ pub struct Update {
 struct Tab {
     browser: Browser,
     _devtools: Option<Registration>,
+    /// The page's native window.
+    native: Option<Handle>,
+    /// Where it is now, and whether it is shown.
+    at: Option<(Place, bool)>,
 }
 
 /// Every tab's CEF browser. Lives on the window thread, where CEF runs.
 struct Engine {
     sink: Sink,
-    gpu: Option<osr::Gpu>,
-    shared_texture: bool,
     tabs: HashMap<TabId, Tab>,
     /// Tabs asked for whose browser CEF has not created yet: their address,
     /// and ops that came meanwhile.
     opening: HashMap<TabId, (String, Vec<Op>)>,
-    views: HashMap<TabId, SharedView>,
+    /// Tabs waiting for their window's native handle before CEF can make
+    /// their page.
+    unplaced: HashMap<TabId, String>,
     /// Browsers asked to close and not closed yet.
     closing: HashSet<TabId>,
     /// The tab on screen in each window.
     active: HashMap<WindowId, TabId>,
-    /// Each window's page area.
-    sizes: HashMap<WindowId, (u32, u32, f32, (i32, i32))>,
+    /// Each window's page area, and whether a page shows there.
+    places: HashMap<WindowId, (Place, bool)>,
     /// Which window shows each tab.
     tab_window: HashMap<TabId, WindowId>,
-    /// Which tabs' browsers send GPU frames (osr.rs).
-    paths: osr::Paths,
 }
 
 thread_local! {
     static ENGINE: RefCell<Option<Engine>> = const { RefCell::new(None) };
 }
 
-/// Start answering commands. `gpu`: the window's device, when CEF may
-/// hand frames as textures it can import (`shared_texture`).
-pub fn init(sink: Sink, gpu: Option<osr::Gpu>, shared_texture: bool) {
+/// Start answering commands.
+pub fn init(sink: Sink) {
     ENGINE.with_borrow_mut(|e| {
         *e = Some(Engine {
             sink,
-            gpu,
-            shared_texture,
             tabs: HashMap::new(),
             opening: HashMap::new(),
-            views: HashMap::new(),
+            unplaced: HashMap::new(),
             closing: HashSet::new(),
             active: HashMap::new(),
-            sizes: HashMap::new(),
+            places: HashMap::new(),
             tab_window: HashMap::new(),
-            paths: osr::Paths::default(),
         })
     });
 }
 
-/// A tab's page, for the window to draw.
-pub fn view(tab: TabId) -> Option<SharedView> {
-    ENGINE.with_borrow(|e| e.as_ref()?.views.get(&tab).cloned())
-}
-
 /// Let CEF work, adopt the browsers it created and run every queued
-/// command. Returns the tabs whose browser closed, to free their textures.
-pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> Vec<TabId> {
+/// command.
+pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
     crate::cef::pump();
-    let mut gone = Vec::new();
     loop {
         let created = client::take_created();
         let closed = client::take_closed();
@@ -306,10 +273,7 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> V
                 e.adopt(c);
             }
             for tab in closed {
-                gone.push(tab);
                 e.closing.remove(&tab);
-                e.views.remove(&tab);
-                e.paths.forget(tab);
                 if e.tabs.remove(&tab).is_some() {
                     e.tab_window.remove(&tab);
                     e.active.retain(|_, t| *t != tab);
@@ -322,22 +286,6 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> V
             run(window, cmd);
         }
     }
-    // A GPU frame could not be imported: every tab still on the GPU path
-    // gets a browser that sends pixels, now.
-    if osr::import_failed() {
-        let Some(mut e) = ENGINE.with_borrow_mut(|e| e.take()) else {
-            return gone;
-        };
-        for tab in e.paths.switch(true) {
-            e.rehost(tab);
-        }
-        ENGINE.with_borrow_mut(|slot| {
-            if slot.is_none() {
-                *slot = Some(e);
-            }
-        });
-    }
-    gone
 }
 
 /// Close every browser and wait (pumping) until CEF has, at most `limit`.
@@ -347,6 +295,7 @@ pub fn close_all(limit: Duration) {
             return Vec::new();
         };
         e.opening.clear();
+        e.unplaced.clear();
         let ids: Vec<TabId> = e.tabs.keys().copied().collect();
         e.closing.extend(ids);
         e.tabs.drain().map(|(_, t)| t.browser).collect()
@@ -387,25 +336,31 @@ pub fn close_all(limit: Duration) {
 }
 
 impl Engine {
-    fn size_of(&self, tab: TabId) -> (u32, u32, f32, (i32, i32)) {
-        self.tab_window
-            .get(&tab)
-            .and_then(|w| self.sizes.get(w))
-            .or_else(|| self.sizes.values().next())
-            .copied()
-            .unwrap_or((1280, 800, 1.0, (0, 0)))
-    }
-
     fn adopt(&mut self, c: client::Created) {
         let browser = c.browser.clone();
         let devtools = c.observe();
-        self.paths.adopted(c.tab, c.ctx.gpu.is_some());
-        self.views.insert(c.tab, c.ctx.view.clone());
+        // A page another page opened lives in its opener's window.
+        if !self.tab_window.contains_key(&c.tab) {
+            let parent = client::place_of(c.tab).map(|p| p.parent);
+            let window = self
+                .places
+                .iter()
+                .find(|(_, (p, _))| Some(p.parent) == parent)
+                .map(|(w, _)| *w);
+            if let Some(w) = window {
+                self.tab_window.insert(c.tab, w);
+            }
+        }
+        let native = native::of(&browser);
+        // Where CEF made it: hidden unless it is its window's tab on screen.
+        let at = client::place_of(c.tab).map(|p| (p, false));
         self.tabs.insert(
             c.tab,
             Tab {
                 browser: c.browser,
                 _devtools: devtools,
+                native,
+                at,
             },
         );
         let (url, ops) = self.opening.remove(&c.tab).unwrap_or_default();
@@ -435,22 +390,169 @@ impl Engine {
                 }
             }
         });
-        // A tab is hidden until its window shows it.
-        let shown = self.active.values().any(|t| *t == tab);
-        if let Some(h) = browser.host() {
-            h.was_hidden((!shown) as _);
+        // Created shown or hidden; make it match its window now.
+        let shown = self.shown(tab);
+        if let Some(t) = self.tabs.get_mut(&tab) {
+            if let Some((p, _)) = t.at {
+                t.at = Some((p, !shown));
+            }
         }
+        self.sync(tab);
         let window = self.tab_window.get(&tab).copied().unwrap_or(0);
         for op in ops {
             self.handle(window, tab, op);
         }
     }
 
-    fn resize(&mut self, window: WindowId, size: (u32, u32, f32, (i32, i32))) {
-        if self.sizes.get(&window) == Some(&size) {
+    /// Whether `tab` is the page on screen in its window.
+    fn shown(&self, tab: TabId) -> bool {
+        let Some(w) = self.tab_window.get(&tab) else {
+            return false;
+        };
+        self.active.get(w) == Some(&tab) && self.places.get(w).is_some_and(|(_, v)| *v)
+    }
+
+    /// Put the tab's page where its window wants it: in that window, over
+    /// its page area, shown only while it is the tab on screen.
+    fn sync(&mut self, tab: TabId) {
+        let shown = self.shown(tab);
+        let place = self
+            .tab_window
+            .get(&tab)
+            .and_then(|w| self.places.get(w))
+            .map(|(p, _)| *p);
+        let Some(t) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        let Some(child) = t.native else {
+            return;
+        };
+        let Some(place) = place else {
+            // Its window has no native handle yet (a tab moving to a new
+            // window): out of sight until it has.
+            if let Some((p, true)) = t.at {
+                native::set_visible(child, false, None);
+                if let Some(h) = t.browser.host() {
+                    h.was_hidden(1);
+                }
+                t.at = Some((p, false));
+            }
+            return;
+        };
+        let before = t.at;
+        if before == Some((place, shown)) {
             return;
         }
-        self.sizes.insert(window, size);
+        if before.is_some_and(|(p, _)| p.parent != place.parent) {
+            native::reparent(child, place);
+        }
+        match (before.map(|(_, s)| s), shown) {
+            (Some(true), true) => native::place(child, place),
+            (_, true) => native::set_visible(child, true, Some(place)),
+            (Some(false), false) => {}
+            (_, false) => native::set_visible(child, false, None),
+        }
+        let host = t.browser.host();
+        if let Some(h) = &host {
+            if before.map(|(_, s)| s) != Some(shown) {
+                h.was_hidden((!shown) as _);
+            }
+            if before.is_some_and(|(p, _)| p.scale != place.scale) {
+                h.notify_screen_info_changed();
+            }
+            if shown {
+                h.was_resized();
+            }
+        }
+        t.at = Some((place, shown));
+        client::set_place(tab, Some(place));
+    }
+
+    fn sync_window(&mut self, window: WindowId) {
+        let tabs: Vec<TabId> = self
+            .tab_window
+            .iter()
+            .filter(|(_, w)| **w == window)
+            .map(|(t, _)| *t)
+            .collect();
+        // Hide first, then show: two pages never cover each other.
+        let (on, off): (Vec<TabId>, Vec<TabId>) = tabs.into_iter().partition(|t| self.shown(*t));
+        for t in off.into_iter().chain(on) {
+            self.sync(t);
+        }
+    }
+
+    fn set_place(&mut self, window: WindowId, place: Place, visible: bool) {
+        if self.places.get(&window) == Some(&(place, visible)) {
+            return;
+        }
+        self.places.insert(window, (place, visible));
+        // Tabs that waited for the window's handle get their pages now.
+        let waiting: Vec<TabId> = self
+            .unplaced
+            .keys()
+            .copied()
+            .filter(|t| self.tab_window.get(t) == Some(&window))
+            .collect();
+        for tab in waiting {
+            if let Some(url) = self.unplaced.remove(&tab) {
+                self.create(tab, url);
+            }
+        }
+        self.sync_window(window);
+    }
+
+    fn open(&mut self, window: WindowId, tab: TabId, url: String) {
+        self.tab_window.insert(tab, window);
+        self.opening.insert(tab, (url.clone(), Vec::new()));
+        if self.places.contains_key(&window) {
+            self.create(tab, url);
+        } else {
+            self.unplaced.insert(tab, url);
+        }
+    }
+
+    /// Ask CEF for the tab's browser; `adopt` takes it once it exists.
+    fn create(&mut self, tab: TabId, _url: String) {
+        let Some((place, _)) = self
+            .tab_window
+            .get(&tab)
+            .and_then(|w| self.places.get(w))
+            .copied()
+        else {
+            return;
+        };
+        let shown = self.shown(tab);
+        let mut client = client::new(TabCtx {
+            tab,
+            sink: self.sink.clone(),
+        });
+        client::set_place(tab, Some(place));
+        let info = native::child_info(place, shown);
+        let settings = client::browser_settings();
+        let mut context = crate::cef::request_context();
+        // The page loads its address once the window's scripts are in
+        // place (adopt), so it starts blank.
+        let ok = cef::browser_host_create_browser(
+            Some(&info),
+            Some(&mut client),
+            Some(&CefString::from("about:blank")),
+            Some(&settings),
+            None,
+            context.as_mut(),
+        ) == 1;
+        if !ok {
+            self.opening.remove(&tab);
+            client::set_place(tab, None);
+            self.sink.send_tab(
+                tab,
+                Event::Error("Chromium could not open the tab".to_string()),
+            );
+        }
+    }
+
+    /// The window `window` goes away: its pages move out of it first.
+    fn detach(&mut self, window: WindowId) {
         let tabs: Vec<TabId> = self
             .tab_window
             .iter()
@@ -458,121 +560,16 @@ impl Engine {
             .map(|(t, _)| *t)
             .collect();
         for tab in tabs {
-            self.fit(tab);
-        }
-    }
-
-    /// Give the tab its window's page size.
-    fn fit(&mut self, tab: TabId) {
-        let (w, h, scale, origin) = self.size_of(tab);
-        let Some(view) = self.views.get(&tab) else {
-            return;
-        };
-        let (resized, rescaled) = {
-            let mut v = osr::lock(view);
-            let resized = (v.width, v.height) != (w, h);
-            let rescaled = v.scale != scale;
-            v.width = w;
-            v.height = h;
-            v.scale = scale;
-            v.origin = origin;
-            (resized, rescaled)
-        };
-        if let Some(host) = self.tabs.get(&tab).and_then(|t| t.browser.host()) {
-            if rescaled {
-                host.notify_screen_info_changed();
-            }
-            if resized || rescaled {
-                host.was_resized();
+            if let Some(t) = self.tabs.get_mut(&tab) {
+                if let Some(child) = t.native {
+                    native::set_visible(child, false, None);
+                    native::detach(child);
+                }
+                t.at = None;
             }
         }
-    }
-
-    fn open(&mut self, window: WindowId, tab: TabId, url: String) {
-        self.tab_window.insert(tab, window);
-        let view = SharedView::default();
-        {
-            let (w, h, scale, origin) = self.size_of(tab);
-            let mut v = osr::lock(&view);
-            v.width = w;
-            v.height = h;
-            v.scale = scale;
-            v.origin = origin;
-        }
-        self.views.insert(tab, view.clone());
-        self.opening.insert(tab, (url, Vec::new()));
-        let shared_texture = osr::Paths::gpu_for_new(self.shared_texture, osr::import_failed());
-        if !self.create(tab, view, shared_texture) {
-            self.opening.remove(&tab);
-            self.views.remove(&tab);
-            self.sink.send_tab(
-                tab,
-                Event::Error("Chromium could not open the tab".to_string()),
-            );
-        }
-    }
-
-    /// Ask CEF for the tab's browser; `adopt` takes it once it exists.
-    fn create(&mut self, tab: TabId, view: SharedView, shared_texture: bool) -> bool {
-        let mut client = client::new(TabCtx {
-            tab,
-            sink: self.sink.clone(),
-            view,
-            gpu: self.gpu.clone().filter(|_| shared_texture),
-        });
-        let info = client::window_info(shared_texture);
-        let settings = client::browser_settings();
-        let mut context = crate::cef::request_context();
-        // The page loads its address once the window's scripts are in
-        // place (adopt), so it starts blank.
-        cef::browser_host_create_browser(
-            Some(&info),
-            Some(&mut client),
-            Some(&CefString::from("about:blank")),
-            Some(&settings),
-            None,
-            context.as_mut(),
-        ) == 1
-    }
-
-    /// Move a tab whose browser sends GPU frames the window cannot import to
-    /// a new browser that sends pixels. CEF cannot switch a browser's render
-    /// path, so the page loads again at the same address, in the same
-    /// profile (cookies, storage, zoom), and keeps its tab, window and place.
-    fn rehost(&mut self, tab: TabId) {
-        let Some(old) = self.tabs.remove(&tab) else {
-            return;
-        };
-        let Some(view) = self.views.get(&tab).cloned() else {
-            return;
-        };
-        let url = old
-            .browser
-            .main_frame()
-            .map(|f| CefString::from(&f.url()).to_string())
-            .unwrap_or_default();
-        // Its closing is not the tab's: the window keeps the tab.
-        client::retire(old.browser.identifier());
-        if let Some(h) = old.browser.host() {
-            h.close_browser(1);
-        }
-        drop(old);
-        {
-            let mut v = osr::lock(&view);
-            v.page = osr::Layer::default();
-            v.popup = osr::Layer::default();
-            v.popup_rect = None;
-        }
-        eprintln!("redrob-browser: tab {tab} re-hosted with pixel upload");
-        self.opening.insert(tab, (url, Vec::new()));
-        if !self.create(tab, view, false) {
-            self.opening.remove(&tab);
-            self.sink.send_tab(
-                tab,
-                Event::Error("Chromium could not open the tab".to_string()),
-            );
-        }
-        self.sink.repaint(tab);
+        self.places.remove(&window);
+        self.active.remove(&window);
     }
 
     fn handle(&mut self, window: WindowId, tab: TabId, op: Op) {
@@ -580,18 +577,40 @@ impl Engine {
             self.open(window, tab, url);
             return;
         }
+        // Activate is the window's, not the page's: it may move the tab to
+        // another window before its page exists.
+        if let Op::Activate = op {
+            self.activate(window, tab);
+            if self.tabs.contains_key(&tab) {
+                return;
+            }
+        }
         if let Some((_, waiting)) = self.opening.get_mut(&tab) {
-            waiting.push(op);
+            if !matches!(op, Op::Activate) {
+                waiting.push(op);
+            }
             return;
+        }
+        if let Op::Close = op {
+            // Never created (its window had no handle yet).
+            if self.unplaced.remove(&tab).is_some() {
+                self.tab_window.remove(&tab);
+                self.active.retain(|_, t| *t != tab);
+                return;
+            }
         }
         let Some(browser) = self.tabs.get(&tab).map(|t| t.browser.clone()) else {
             return;
         };
         match op {
-            Op::Open(_) => {}
+            Op::Open(_) | Op::Activate => {}
             Op::Close => {
-                self.tabs.remove(&tab);
-                self.paths.forget(tab);
+                if let Some(t) = self.tabs.remove(&tab) {
+                    // Out of sight at once; Chromium destroys it later.
+                    if let Some(child) = t.native {
+                        native::set_visible(child, false, None);
+                    }
+                }
                 self.closing.insert(tab);
                 self.tab_window.remove(&tab);
                 self.active.retain(|_, t| *t != tab);
@@ -599,24 +618,17 @@ impl Engine {
                     h.close_browser(1);
                 }
             }
-            Op::Activate => {
-                let before = self.tab_window.insert(tab, window);
-                if let Some(prev) = self.active.insert(window, tab).filter(|p| *p != tab) {
-                    if let Some(h) = self.tabs.get(&prev).and_then(|t| t.browser.host()) {
-                        h.set_focus(0);
-                        h.was_hidden(1);
-                    }
+            Op::Focus(true) => {
+                if let Some(child) = self.tabs.get(&tab).and_then(|t| t.native) {
+                    native::focus(child);
                 }
-                // A tab handed to another window leaves the old one's screen.
-                if let Some(old) = before.filter(|w| *w != window) {
-                    if self.active.get(&old) == Some(&tab) {
-                        self.active.remove(&old);
-                    }
-                }
-                self.fit(tab);
                 if let Some(h) = browser.host() {
-                    h.was_hidden(0);
-                    h.invalidate(cef::sys::cef_paint_element_type_t::PET_VIEW.into());
+                    h.set_focus(1);
+                }
+            }
+            Op::Focus(false) => {
+                if let Some(h) = browser.host() {
+                    h.set_focus(0);
                 }
             }
             Op::Navigate(url) => {
@@ -635,30 +647,7 @@ impl Engine {
                 browser.stop_load();
                 self.sink.send_tab(tab, Event::Loading(false));
             }
-            Op::DevTools => {
-                if let Some(h) = browser.host() {
-                    let info = cef::WindowInfo {
-                        bounds: cef::Rect {
-                            x: 0,
-                            y: 0,
-                            width: 1100,
-                            height: 760,
-                        },
-                        window_name: CefString::from("Redrob Browser DevTools"),
-                        // Chrome style: CEF refuses Alloy for DevTools windows.
-                        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME
-                            .into(),
-                        ..Default::default()
-                    };
-                    let mut client = client::devtools_client();
-                    h.show_dev_tools(
-                        Some(&info),
-                        Some(&mut client),
-                        Some(&cef::BrowserSettings::default()),
-                        None,
-                    );
-                }
-            }
+            Op::DevTools => crate::cef::handlers::context_menu::inspect(&browser, None),
             Op::FillLogin { username, password } => {
                 let sink = self.sink.clone();
                 let b = browser.clone();
@@ -688,27 +677,56 @@ impl Engine {
                     },
                 );
             }
-            op if crate::cef::handlers::is_feature(&op) => {
-                crate::cef::handlers::run_op(&self.sink, &browser, op)
-            }
-            other => input::apply(&browser, other),
+            op => crate::cef::handlers::run_op(&self.sink, &browser, op),
         }
+    }
+
+    /// `tab` is now the page on screen in `window`, which may take it from
+    /// another window.
+    fn activate(&mut self, window: WindowId, tab: TabId) {
+        let before = self.tab_window.insert(tab, window);
+        let prev = self.active.insert(window, tab).filter(|p| *p != tab);
+        // A tab handed to another window leaves the old one's screen.
+        if let Some(old) = before.filter(|w| *w != window) {
+            if self.active.get(&old) == Some(&tab) {
+                self.active.remove(&old);
+            }
+            // Its page has not been made yet: it is made in this window.
+            if self.unplaced.contains_key(&tab) && self.places.contains_key(&window) {
+                if let Some(url) = self.unplaced.remove(&tab) {
+                    self.create(tab, url);
+                }
+            }
+        }
+        if let Some(p) = prev {
+            if let Some(h) = self.tabs.get(&p).and_then(|t| t.browser.host()) {
+                h.set_focus(0);
+            }
+            self.sync(p);
+        }
+        self.sync(tab);
     }
 }
 
 fn run(window: WindowId, cmd: Command) {
     // Take the engine out while a command runs: CEF calls made for it may
-    // run callbacks that look at it (view sizes, created browsers).
+    // run callbacks that look at it.
     let Some(mut e) = ENGINE.with_borrow_mut(|e| e.take()) else {
         return;
     };
     match cmd {
-        Command::Resize {
-            width,
-            height,
-            scale,
-            origin,
-        } => e.resize(window, (width, height, scale, origin)),
+        Command::Place { place, visible } => e.set_place(window, place, visible),
+        Command::FocusWindow => {
+            if let Some(tab) = e.active.get(&window).copied() {
+                if let Some(h) = e.tabs.get(&tab).and_then(|t| t.browser.host()) {
+                    h.set_focus(0);
+                }
+            }
+            if let Some((p, _)) = e.places.get(&window) {
+                native::focus(p.parent);
+            }
+        }
+        Command::Detach => e.detach(window),
         Command::Tab(tab, op) => e.handle(window, tab, op),
     }
     ENGINE.with_borrow_mut(|slot| {

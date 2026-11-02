@@ -195,18 +195,6 @@ fn run(
         Command::CopyImageAddress => sink.send(id, Event::Clipboard(t.image.clone())),
         Command::Undo => edit(|f| f.undo()),
         Command::Redo => edit(|f| f.redo()),
-        // Linux: the window's clipboard, not Chromium's (clipboard.rs).
-        // The selection as Chromium reported it with the menu: by now the
-        // window's menu has the focus and the page may have dropped it.
-        Command::Cut | Command::Copy if super::clipboard::OWN => {
-            if !t.selection.is_empty() {
-                sink.send(id, Event::Clipboard(t.selection.clone()));
-            }
-            if c == Command::Cut {
-                edit(|f| f.del());
-            }
-        }
-        Command::Paste if super::clipboard::OWN => super::clipboard::paste(browser),
         Command::Cut => edit(|f| f.cut()),
         Command::Copy => edit(|f| f.copy()),
         Command::Paste => edit(|f| f.paste()),
