@@ -565,9 +565,16 @@ impl<'a> Element for DomElement<'a> {
             .with_node(self.node_id, |n| {
                 n.get_attribute("class")
                     .map(|class_attr| {
+                        // Most checks miss: reject those without splitting.
+                        if case_sensitivity == CaseSensitivity::CaseSensitive
+                            && !class_attr.contains(name.0.as_str())
+                        {
+                            return false;
+                        }
+                        let name = name.0.as_bytes();
                         class_attr
                             .split_whitespace()
-                            .any(|c| case_sensitivity.eq(c.as_bytes(), name.0.as_bytes()))
+                            .any(|c| case_sensitivity.eq(c.as_bytes(), name))
                     })
                     .unwrap_or(false)
             })

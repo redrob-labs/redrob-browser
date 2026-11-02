@@ -2673,6 +2673,16 @@ pub struct Stylesheet {
     before_rules: PseudoRuleMap,
     after_rules: PseudoRuleMap,
     placeholder_rules: PseudoRuleMap,
+    /// Unique per content: a fresh sheet and every parse into one get a new
+    /// value, so caches of matching and cascade results can key on it.
+    epoch: u64,
+}
+
+/// The next `Stylesheet::epoch`.
+static NEXT_SHEET_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_sheet_epoch() -> u64 {
+    NEXT_SHEET_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 const MAX_STYLESHEET_CACHE_SOURCE_BYTES: usize = 8 * 1024 * 1024;
@@ -3295,7 +3305,13 @@ impl Stylesheet {
             before_rules: PseudoRuleMap::default(),
             after_rules: PseudoRuleMap::default(),
             placeholder_rules: PseudoRuleMap::default(),
+            epoch: next_sheet_epoch(),
         }
+    }
+
+    /// See `Stylesheet::epoch`.
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Append the rules of `sources` after those already in the sheet. A
@@ -3310,6 +3326,7 @@ impl Stylesheet {
         fold: &mut ParseFold,
     ) {
         let sheet = self;
+        sheet.epoch = next_sheet_epoch();
         let mut order = fold.order;
         let mut layers = std::mem::take(&mut fold.layers);
         let mut keyframe_winners = std::mem::take(&mut fold.keyframe_winners);

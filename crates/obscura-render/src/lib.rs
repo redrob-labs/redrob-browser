@@ -47,7 +47,11 @@ pub mod prof {
     pub const STYLE_UNCHANGED: usize = 11;
     /// A layout-tree style a repair pass actually changed.
     pub const STYLE_SET: usize = 12;
-    const NAMES: [&str; 13] = [
+    /// A node `resolve_clip_rects` walked.
+    pub const CLIP_WALK: usize = 13;
+    /// A node whose rect changed since the retained layout.
+    pub const RECT_MOVED: usize = 14;
+    const NAMES: [&str; 15] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -61,9 +65,11 @@ pub mod prof {
         "style_share_miss",
         "style_unchanged",
         "style_set",
+        "clip_walk",
+        "rect_moved",
     ];
-    static NANOS: [AtomicU64; 13] = [const { AtomicU64::new(0) }; 13];
-    static COUNTS: [AtomicU64; 13] = [const { AtomicU64::new(0) }; 13];
+    static NANOS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
+    static COUNTS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();

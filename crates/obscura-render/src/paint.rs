@@ -4281,6 +4281,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
         styles: std::mem::take(&mut previous.layout.styles),
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
         signatures: std::mem::take(&mut previous.layout.cascade_signatures),
+        share: std::mem::take(&mut previous.layout.cascade_share),
         definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
         previous_rendered: previous.layout.rendered_tree.take(),
         geometry: Some(crate::dom::RetainedGeometry {

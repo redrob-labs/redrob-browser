@@ -297,6 +297,9 @@ pub struct DomLayout {
     /// retained layout can tell a restyled element that would get the same
     /// style. Elements whose cascade reads more context have none.
     pub(crate) cascade_signatures: HashMap<NodeId, u64>,
+    /// The cascade's style sharing cache, kept for the next retained layout:
+    /// an inserted element shares with a cousin styled in an earlier layout.
+    pub(crate) cascade_share: StyleShareCache,
     /// The elements that give their children a definite containing-block
     /// height (computed from styles alone), kept so a retained layout can
     /// skip walking subtrees whose styles all stayed.
@@ -1222,6 +1225,8 @@ pub(crate) struct RetainedStyleMaps {
     pub custom_properties: HashMap<NodeId, std::rc::Rc<HashMap<String, String>>>,
     /// The cascade inputs of each retained style (`DomLayout::cascade_signatures`).
     pub signatures: HashMap<NodeId, u64>,
+    /// `DomLayout::cascade_share`.
+    pub(crate) share: StyleShareCache,
     /// The elements whose children had a definite containing-block height
     /// in the layout these styles come from (`DomLayout::definite_heights`).
     /// `None`: unknown, every retained element is walked again.
@@ -3248,6 +3253,7 @@ fn resolve_clip_rects(
     {
         *slot = true;
     }
+    crate::prof::count(crate::prof::CLIP_WALK);
     clip_rects.insert(id, inherited.clone());
     let style = styles.get(&id);
     let rect = rects.get(&id).copied().unwrap_or_default();
@@ -3406,6 +3412,7 @@ impl ClipDirty {
         };
         for (id, rect) in rects {
             if old_rects.get(id) != Some(rect) {
+                crate::prof::count(crate::prof::RECT_MOVED);
                 dirty.mark(tree, *id, Self::RECT);
             }
         }
@@ -3948,7 +3955,8 @@ pub(crate) struct CascadeCx {
 /// ancestor is `display:none`.
 #[derive(PartialEq)]
 struct StyleShareKey {
-    sheet: *const crate::css::Stylesheet,
+    /// `Stylesheet::epoch`: the cache outlives one layout.
+    sheet: u64,
     matched: crate::css::MatchedRules,
     inline: Option<String>,
     parent_props: std::rc::Rc<HashMap<String, String>>,
@@ -3959,7 +3967,7 @@ impl StyleShareKey {
     fn hash(&self) -> u64 {
         use std::hash::BuildHasher;
         foldhash::fast::FixedState::default().hash_one((
-            self.sheet as usize,
+            self.sheet,
             &self.matched,
             &self.inline,
             std::rc::Rc::as_ptr(&self.parent_props) as usize,
@@ -3990,7 +3998,7 @@ struct StyleShareEntry {
 impl StyleShareCache {
     /// Entries kept per pass; a document with more distinct styles keeps
     /// cascading the rest normally.
-    const CAPACITY: usize = 4096;
+    const CAPACITY: usize = 8192;
 
     fn get(
         &self,
@@ -4014,8 +4022,17 @@ impl StyleShareCache {
         output: crate::LayoutStyle,
         props: Option<std::rc::Rc<HashMap<String, String>>>,
     ) {
-        if self.len >= Self::CAPACITY {
-            return;
+        // Entries of another sheet can never hit again; a full cache starts
+        // over rather than keep only the oldest styles.
+        if self.len >= Self::CAPACITY
+            || self
+                .entries
+                .values()
+                .next()
+                .is_some_and(|entries| entries[0].key.sheet != key.sheet)
+        {
+            self.entries.clear();
+            self.len = 0;
         }
         self.len += 1;
         self.entries
@@ -4434,7 +4451,7 @@ fn cascade_node_style(
             pseudo_matches = Some(pseudo);
             let share = &mut cx.share;
             let key = StyleShareKey {
-                sheet: sheet as *const crate::css::Stylesheet,
+                sheet: sheet.epoch(),
                 matched,
                 inline: inline.map(str::to_owned),
                 parent_props: parent_props.clone(),
@@ -7743,6 +7760,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                     styles: std::mem::take(&mut laid.styles),
                     custom_properties: std::mem::take(&mut laid.custom_properties),
                     signatures: std::mem::take(&mut laid.cascade_signatures),
+                    share: StyleShareCache::default(),
                     definite_heights: None,
                     previous_rendered: None,
                     geometry: None,
@@ -7874,10 +7892,12 @@ fn layout_dom_once(
     let t1 = std::time::Instant::now();
     let mut matcher = tree.matcher();
     let mut retained_geometry = None;
+    let mut share = StyleShareCache::default();
     let (styles, mut custom_properties, mut fresh_styles, signatures, prior_definite_heights) =
         match retained {
             Some((retained, fresh)) => {
                 retained_geometry = retained.geometry;
+                share = retained.share;
                 (
                     retained.styles,
                     retained.custom_properties,
@@ -7921,6 +7941,7 @@ fn layout_dom_once(
         .map(|fresh| fresh_style_ancestors(tree, fresh));
     let mut cascade_cx = CascadeCx {
         signatures,
+        share,
         ..CascadeCx::default()
     };
     cascade_walk(
@@ -7951,6 +7972,7 @@ fn layout_dom_once(
         }
     }
     let cascade_signatures = std::mem::take(&mut cascade_cx.signatures);
+    let cascade_share = std::mem::take(&mut cascade_cx.share);
     let counters_used = resolve_css_counters(
         tree,
         &mut styles,
@@ -11957,6 +11979,7 @@ fn layout_dom_once(
             styles: styles.into_inner(),
             custom_properties,
             cascade_signatures,
+            cascade_share,
             definite_heights: definite_height_nodes,
             rendered_tree: Some(current_flat_tree(tree)),
             clip_rects,
@@ -22804,6 +22827,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                share: StyleShareCache::default(),
                 definite_heights: None,
                 previous_rendered: None,
                 geometry: None,
@@ -22848,6 +22872,7 @@ mod tests {
                 styles: std::mem::take(&mut active.styles),
                 custom_properties: std::mem::take(&mut active.custom_properties),
                 signatures: HashMap::default(),
+                share: StyleShareCache::default(),
                 definite_heights: None,
                 previous_rendered: None,
                 geometry: None,
@@ -22950,6 +22975,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23075,6 +23101,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23160,6 +23187,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23234,6 +23262,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23538,6 +23567,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23641,6 +23671,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -23983,6 +24014,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -24035,6 +24067,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -24673,6 +24706,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                share: StyleShareCache::default(),
                 definite_heights: None,
                 previous_rendered: None,
                 geometry: None,
@@ -24886,6 +24920,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                share: StyleShareCache::default(),
                 definite_heights: None,
                 previous_rendered: None,
                 geometry: None,
@@ -25060,6 +25095,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -25113,6 +25149,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -25172,6 +25209,7 @@ mod tests {
             styles: std::mem::take(&mut initial.styles),
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
+            share: StyleShareCache::default(),
             definite_heights: None,
             previous_rendered: None,
             geometry: None,
@@ -25933,6 +25971,7 @@ mod tests {
                 styles: std::mem::take(&mut initial.styles),
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
+                share: StyleShareCache::default(),
                 definite_heights: None,
                 previous_rendered: None,
                 geometry: None,
