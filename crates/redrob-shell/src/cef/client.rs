@@ -349,7 +349,7 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         fn on_before_popup(
             &self,
-            _browser: Option<&mut Browser>,
+            opener: Option<&mut Browser>,
             _frame: Option<&mut Frame>,
             popup_id: ::std::os::raw::c_int,
             target_url: Option<&CefString>,
@@ -379,8 +379,20 @@ wrap_life_span_handler! {
                 return 1;
             };
             PLACES.with_borrow_mut(|p| p.insert(tab, place));
-            *window_info = native::child_info(place, false);
-            *client = Some(new(ctx));
+            let c = new(ctx);
+            // An opener hosted as a Chrome browser of its own (host.rs)
+            // gets its pages as such too: CEF asks its view for them.
+            let hosted = opener.as_deref().is_some_and(super::host::hosts);
+            if hosted {
+                super::host::expect_popup(&c, tab);
+                *window_info = WindowInfo {
+                    runtime_style: native::style(),
+                    ..Default::default()
+                };
+            } else {
+                *window_info = native::child_info(place, false);
+            }
+            *client = Some(c);
             if let Some(s) = settings {
                 *s = browser_settings();
             }

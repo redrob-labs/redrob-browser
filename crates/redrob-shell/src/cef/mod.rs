@@ -17,6 +17,7 @@
 pub mod app;
 pub mod client;
 pub mod handlers;
+pub mod host;
 pub mod keys;
 pub mod native;
 #[cfg(target_os = "linux")]

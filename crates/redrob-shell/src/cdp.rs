@@ -683,14 +683,25 @@ impl Engine {
         let mut context = crate::cef::request_context();
         // The page loads its address once the window's scripts are in
         // place (adopt), so it starts blank.
-        let ok = cef::browser_host_create_browser(
-            Some(&info),
-            Some(&mut client),
-            Some(&CefString::from("about:blank")),
-            Some(&settings),
-            None,
-            context.as_mut(),
-        ) == 1;
+        let ok = if crate::cef::host::enabled() {
+            crate::cef::host::create(
+                tab,
+                place,
+                &mut client,
+                "about:blank",
+                &settings,
+                context.as_mut(),
+            )
+        } else {
+            cef::browser_host_create_browser(
+                Some(&info),
+                Some(&mut client),
+                Some(&CefString::from("about:blank")),
+                Some(&settings),
+                None,
+                context.as_mut(),
+            ) == 1
+        };
         if !ok {
             self.opening.remove(&tab);
             client::set_place(tab, None);

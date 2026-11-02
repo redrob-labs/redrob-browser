@@ -22,7 +22,7 @@ pub struct Place {
 
 /// Far off screen: where a page waits until it is shown (Linux has no
 /// hidden flag at creation).
-const AWAY: i32 = -30_000;
+pub(crate) const AWAY: i32 = -30_000;
 
 /// The runtime style of every page (docs/CEF.md, docs/CHROME-FEATURES.md): Chrome
 /// style, so pages get Chrome's own features (print preview, extensions,
@@ -117,6 +117,24 @@ pub fn of(browser: &cef::Browser) -> Option<Handle> {
 }
 
 pub use imp::{detach, find_window, focus, place, raise, reparent, set_visible};
+
+/// The native window of a CEF Views window (cef/host.rs).
+pub fn window_of(window: &cef::Window) -> Option<Handle> {
+    use cef::ImplWindow;
+    let h = handle_value(window.window_handle());
+    (h != 0).then_some(Handle(h))
+}
+
+/// Move a page's own top-level window into `place.parent`, out of sight,
+/// before it is first shown (cef/host.rs): it never reaches the window
+/// manager, and from then on it is a page like a child one.
+#[cfg(target_os = "linux")]
+pub use imp::embed;
+
+#[cfg(not(target_os = "linux"))]
+pub fn embed(child: Handle, place: Place) {
+    reparent(child, place);
+}
 
 /// Where the pointer is on screen (physical pixels) and whether its
 /// primary button is down, whichever window has it: a tab dragged out of
@@ -335,6 +353,19 @@ mod imp {
         }
         let _ = x.conn.flush();
         place(child, p);
+    }
+
+    pub fn embed(child: Handle, p: Place) {
+        let Some(x) = x() else { return };
+        let w = child.0 as Window;
+        if let Ok(c) = x
+            .conn
+            .reparent_window(w, p.parent.0 as Window, AWAY as i16, AWAY as i16)
+        {
+            c.ignore_error();
+        }
+        set_hidden_state(x, w, true);
+        let _ = x.conn.flush();
     }
 
     /// Out of its window, which is about to be destroyed: under the root,
