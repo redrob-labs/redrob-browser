@@ -2083,11 +2083,7 @@ impl DomLayout {
         let mut right = viewport.0.max(0.0);
         let mut bottom = viewport.1.max(0.0);
 
-        if let Some(root) = tree
-            .descendants(tree.document())
-            .into_iter()
-            .find(|id| tree.borrow_node(*id).is_some_and(|node| node.is_element()))
-        {
+        if let Some(root) = document_element(tree) {
             accumulate_scrolling_overflow(
                 tree,
                 root,
@@ -6848,12 +6844,7 @@ fn layout_dom_once(
     // into children, pop on the way back out. This is what lets descendant
     // combinators (".mw-body .firstHeading") fast-reject via the filter
     // instead of falling back to the always-true "can't reject" case.
-    let quirks_mode = !tree.descendants(tree.document()).into_iter().any(|id| {
-        tree.with_node(id, |node| {
-            matches!(node.data, obscura_dom::tree::NodeData::Doctype { .. })
-        })
-        .unwrap_or(false)
-    });
+    let quirks_mode = !document_has_doctype(tree);
     let fresh_ancestors = fresh_styles
         .as_ref()
         .map(|fresh| fresh_style_ancestors(tree, fresh));
@@ -6892,30 +6883,18 @@ fn layout_dom_once(
     grow_trailing_auto_cells(tree, &mut styles);
     shrink_block_level_buttons(tree, &mut styles, fresh_styles.as_ref());
 
-    let descendants = tree.descendants(tree.document());
     // Style and script text never renders, and is often megabytes of CSS.
-    let needs_emoji_font = descendants.iter().any(|id| {
-        tree.with_node(*id, |node| match &node.data {
-            obscura_dom::tree::NodeData::Text { contents } => {
-                // Parent first: style and script text is often megabytes.
-                !node.parent.is_some_and(|parent| {
-                    element_local_name(tree, parent)
-                        .is_some_and(|name| name == "style" || name == "script")
-                }) && crate::inline::text_may_need_emoji_font(contents)
-            }
-            _ => false,
-        })
-        .unwrap_or(false)
-    }) || styles.values().any(|style| {
-        style
-            .before_content
-            .as_deref()
-            .is_some_and(crate::inline::text_may_need_emoji_font)
-            || style
-                .after_content
+    let needs_emoji_font = text_may_need_emoji_font(tree)
+        || styles.values().any(|style| {
+            style
+                .before_content
                 .as_deref()
                 .is_some_and(crate::inline::text_may_need_emoji_font)
-    });
+                || style
+                    .after_content
+                    .as_deref()
+                    .is_some_and(crate::inline::text_may_need_emoji_font)
+        });
 
     // The leaf context is the index of a cosmic-text inline formatting
     // context in `engine`; leaves without text carry no context.
@@ -6930,10 +6909,7 @@ fn layout_dom_once(
 
     // The document node itself is not an element; lay out from the first
     // element descendant (the <html> root).
-    let root = descendants.into_iter().find(|id| {
-        tree.with_node(*id, |node| node.is_element())
-            .unwrap_or(false)
-    });
+    let root = document_element(tree);
 
     let mut rects = HashMap::default();
     let mut grid_overflow = HashMap::default();
@@ -10370,10 +10346,7 @@ fn shaped_item_clip(
 }
 
 fn container_snapshot(tree: &DomTree, layout: &DomLayout) -> crate::css::ContainerSnapshot {
-    let root_font_size = tree
-        .descendants(tree.document())
-        .into_iter()
-        .find(|id| tree.borrow_node(*id).is_some_and(|node| node.is_element()))
+    let root_font_size = document_element(tree)
         .and_then(|id| layout.styles.get(&id))
         .and_then(|style| style.font_size)
         .filter(|size| size.is_finite() && *size > 0.0)
@@ -12962,6 +12935,103 @@ fn style_children(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
 /// ordinary children remain its fallback content.
 /// Return the flattened-tree children that generate boxes for `id`.
 pub(crate) fn rendered_children(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
+    if let Some(children) = with_flat_tree(tree, |flat| flat.children(id).map(<[NodeId]>::to_vec)) {
+        return children;
+    }
+    rendered_children_uncached(tree, id)
+}
+
+/// The flattened rendering tree of one document state: its preorder walk and,
+/// for every node on it (and the document), its rendered children and parent.
+/// A layout walks the tree a dozen times; each walk then reads these instead
+/// of the DOM's shadow, slot and `<details>` state again.
+struct FlatTree {
+    generation: u64,
+    walk: std::rc::Rc<Vec<NodeId>>,
+    /// (start, len) into `kids` by node index; `start == u32::MAX`: not recorded.
+    spans: Vec<(u32, u32)>,
+    kids: Vec<NodeId>,
+    /// Rendered parent by node index, `None` when not recorded.
+    parents: Vec<Option<NodeId>>,
+}
+
+impl FlatTree {
+    fn children(&self, id: NodeId) -> Option<&[NodeId]> {
+        let &(start, len) = self.spans.get(id.index())?;
+        (start != u32::MAX).then(|| &self.kids[start as usize..(start + len) as usize])
+    }
+
+    fn parent(&self, id: NodeId) -> Option<Option<NodeId>> {
+        self.parents.get(id.index()).copied().flatten().map(Some)
+    }
+}
+
+thread_local! {
+    static FLAT_TREE: std::cell::RefCell<Option<std::rc::Rc<FlatTree>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on the flat tree of `tree`'s current state, if one was built.
+fn with_flat_tree<R>(tree: &DomTree, f: impl FnOnce(&FlatTree) -> Option<R>) -> Option<R> {
+    let flat = FLAT_TREE
+        .try_with(|slot| slot.borrow().clone())
+        .ok()
+        .flatten()?;
+    (flat.generation == tree.mutation_generation())
+        .then(|| f(&flat))
+        .flatten()
+}
+
+/// Build the flat tree of the document (see `rendered_descendants_uncached`).
+fn build_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
+    let root = tree.document();
+    let slots = tree.node_slot_count();
+    let limit = tree.len();
+    let mut walk = Vec::new();
+    let mut spans = vec![(u32::MAX, 0u32); slots];
+    let mut kids = Vec::new();
+    let mut parents = vec![None; slots];
+    let mut visited = vec![false; slots];
+    let mut record = |id: NodeId, children: &[NodeId], spans: &mut Vec<(u32, u32)>| {
+        if let Some(span) = spans.get_mut(id.index()) {
+            *span = (kids.len() as u32, children.len() as u32);
+            kids.extend_from_slice(children);
+        }
+    };
+    let root_children = rendered_children_uncached(tree, root);
+    record(root, &root_children, &mut spans);
+    let mut stack: Vec<(NodeId, NodeId)> = root_children
+        .iter()
+        .rev()
+        .map(|child| (*child, root))
+        .collect();
+    while let Some((id, parent)) = stack.pop() {
+        match visited.get_mut(id.index()) {
+            Some(seen) if *seen => continue,
+            Some(seen) => *seen = true,
+            None => continue,
+        }
+        walk.push(id);
+        if let Some(slot) = parents.get_mut(id.index()) {
+            *slot = Some(parent);
+        }
+        if walk.len() >= limit {
+            break;
+        }
+        let children = rendered_children_uncached(tree, id);
+        record(id, &children, &mut spans);
+        stack.extend(children.into_iter().rev().map(|child| (child, id)));
+    }
+    std::rc::Rc::new(FlatTree {
+        generation: tree.mutation_generation(),
+        walk: std::rc::Rc::new(walk),
+        spans,
+        kids,
+        parents,
+    })
+}
+
+fn rendered_children_uncached(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
     if let Some(shadow_children) = tree.shadow_children(id) {
         // A shadow host's light children stay in the DOM but its box tree is
         // generated from the shadow root. Matching light children re-enter at
@@ -13136,7 +13206,61 @@ fn is_non_atomic_inline_box(
     true
 }
 
+/// The document element: the first element in document order. Only the
+/// document's own children can precede it, since doctypes and comments have
+/// none, so this reads them instead of collecting every descendant.
+pub(crate) fn document_element(tree: &DomTree) -> Option<NodeId> {
+    tree.children(tree.document()).into_iter().find(|id| {
+        tree.with_node(*id, |node| node.is_element())
+            .unwrap_or(false)
+    })
+}
+
+/// Whether the document has a doctype (no doctype: quirks mode). A doctype
+/// can only be a child of the document.
+fn document_has_doctype(tree: &DomTree) -> bool {
+    tree.children(tree.document()).into_iter().any(|id| {
+        tree.with_node(id, |node| {
+            matches!(node.data, obscura_dom::tree::NodeData::Doctype { .. })
+        })
+        .unwrap_or(false)
+    })
+}
+
+/// Whether any rendered text may need the emoji font. Style and script text
+/// never renders and is often megabytes of CSS. The answer depends only on
+/// the tree, so it is kept per tree state like the document walk.
+fn text_may_need_emoji_font(tree: &DomTree) -> bool {
+    thread_local! {
+        static ANSWER: std::cell::Cell<Option<(u64, bool)>> = const { std::cell::Cell::new(None) };
+    }
+    let generation = tree.mutation_generation();
+    if let Some((cached, answer)) = ANSWER.with(std::cell::Cell::get) {
+        if cached == generation {
+            return answer;
+        }
+    }
+    let answer = tree.descendants(tree.document()).iter().any(|id| {
+        tree.with_node(*id, |node| match &node.data {
+            obscura_dom::tree::NodeData::Text { contents } => {
+                // Parent first: style and script text is often megabytes.
+                !node.parent.is_some_and(|parent| {
+                    element_local_name(tree, parent)
+                        .is_some_and(|name| name == "style" || name == "script")
+                }) && crate::inline::text_may_need_emoji_font(contents)
+            }
+            _ => false,
+        })
+        .unwrap_or(false)
+    });
+    ANSWER.with(|slot| slot.set(Some((generation, answer))));
+    answer
+}
+
 pub(crate) fn rendered_parent(tree: &DomTree, id: NodeId) -> Option<NodeId> {
+    if let Some(parent) = with_flat_tree(tree, |flat| flat.parent(id)) {
+        return parent;
+    }
     let parent = tree.with_node(id, |node| node.parent)??;
     if let Some(root) = tree.shadow_root_info(parent) {
         return Some(root.host);
@@ -13158,28 +13282,16 @@ pub(crate) fn rendered_descendants(tree: &DomTree, root: NodeId) -> Vec<NodeId> 
     // One layout walks the whole rendered tree a dozen times (cascade, box
     // construction, row rects, scroll and sticky trees, paint order). The
     // walk is a pure function of the DOM, so the document's is computed once
-    // per tree state.
-    thread_local! {
-        static DOCUMENT_WALK: std::cell::RefCell<Option<(u64, std::rc::Rc<Vec<NodeId>>)>> =
-            const { std::cell::RefCell::new(None) };
-    }
+    // per tree state, together with every node's rendered children.
     if root != tree.document() {
         return rendered_descendants_uncached(tree, root);
     }
-    let generation = tree.mutation_generation();
-    if let Some(walk) = DOCUMENT_WALK.with(|cache| {
-        cache
-            .borrow()
-            .as_ref()
-            .filter(|(cached, _)| *cached == generation)
-            .map(|(_, walk)| walk.clone())
-    }) {
-        return walk.as_ref().clone();
+    if let Some(walk) = with_flat_tree(tree, |flat| Some(flat.walk.as_ref().clone())) {
+        return walk;
     }
-    let walk = rendered_descendants_uncached(tree, root);
-    DOCUMENT_WALK.with(|cache| {
-        *cache.borrow_mut() = Some((generation, std::rc::Rc::new(walk.clone())));
-    });
+    let flat = build_flat_tree(tree);
+    let walk = flat.walk.as_ref().clone();
+    let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
     walk
 }
 
