@@ -14020,6 +14020,23 @@ fn repair_intrinsic_column_flex_negative_margins(
             .then_some((node, style))
         })
         .collect();
+    // Only a negative block margin can need the repair: a child whose style
+    // has no negative (or percentage/calc) top or bottom margin has none.
+    let may_be_negative = |value: taffy::LengthPercentageAuto| {
+        let raw = value.into_raw();
+        raw.tag() != taffy::CompactLength::AUTO_TAG
+            && (raw.tag() != taffy::CompactLength::LENGTH_TAG || raw.value() < 0.0)
+    };
+    let containers: Vec<(taffy::NodeId, &crate::LayoutStyle)> = containers
+        .into_iter()
+        .filter(|(node, _)| {
+            taffy_tree.child_slice(*node).iter().any(|&child| {
+                taffy_tree.style(child).is_ok_and(|style| {
+                    may_be_negative(style.margin.top) || may_be_negative(style.margin.bottom)
+                })
+            })
+        })
+        .collect();
     let nodes: Vec<taffy::NodeId> = containers.iter().map(|(node, _)| *node).collect();
     place(taffy_tree, &nodes, true);
     for (node, style) in containers {
