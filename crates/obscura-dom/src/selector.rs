@@ -57,6 +57,35 @@ impl PrecomputedHash for CssString {
     }
 }
 
+/// The classes of a `class` attribute, split on whitespace the way class
+/// matching splits them (Unicode whitespace), with the faster ASCII split for
+/// the usual all-ASCII attribute (the same tokens there).
+pub fn class_tokens(value: &str) -> ClassTokens<'_> {
+    if value.is_ascii() {
+        ClassTokens::Ascii(value.split_ascii_whitespace())
+    } else {
+        ClassTokens::Unicode(value.split_whitespace())
+    }
+}
+
+/// See `class_tokens`.
+pub enum ClassTokens<'a> {
+    Ascii(std::str::SplitAsciiWhitespace<'a>),
+    Unicode(std::str::SplitWhitespace<'a>),
+}
+
+impl<'a> Iterator for ClassTokens<'a> {
+    type Item = &'a str;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a str> {
+        match self {
+            Self::Ascii(tokens) => tokens.next(),
+            Self::Unicode(tokens) => tokens.next(),
+        }
+    }
+}
+
 /// `CssString::precomputed_hash` of a borrowed string.
 fn css_string_hash(value: &str) -> u32 {
     let mut h: u32 = 5381;
@@ -1088,7 +1117,7 @@ impl AncestorFilter {
                     push_hash(hashes, filter, css_string_hash(id));
                 }
                 if let Some(class) = node.get_attribute("class") {
-                    for c in class.split_whitespace() {
+                    for c in class_tokens(class) {
                         push_hash(hashes, filter, css_string_hash(c));
                     }
                 }

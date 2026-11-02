@@ -4220,9 +4220,66 @@ fn chain_feature(parent: u64, feature: u64) -> u64 {
 
 struct StyleShareEntry {
     key: StyleShareKey,
-    input: crate::LayoutStyle,
+    input: ShareInput,
     output: crate::LayoutStyle,
     props: Option<std::rc::Rc<HashMap<String, String>>>,
+}
+
+/// The style an entry's rules were applied to, or what that style is made
+/// of when nothing outside the element changes it (`StartInputs`).
+enum ShareInput {
+    Style(crate::LayoutStyle),
+    Start(StartInputs),
+}
+
+/// What a context-free element's starting style (UA style and
+/// presentational hints) is made of: its name, its attributes but `class`,
+/// `id` and `style`, the inherited color scheme and the document mode.
+#[derive(PartialEq)]
+struct StartInputs {
+    ns: String,
+    local: String,
+    attributes: Vec<(String, String)>,
+    color_scheme_dark: bool,
+    quirks_mode: bool,
+}
+
+/// `StartInputs` of the element being cascaded, borrowed.
+struct StartInputsRef<'a> {
+    ns: &'a str,
+    local: &'a str,
+    attributes: &'a [(&'a str, &'a str)],
+    color_scheme_dark: bool,
+    quirks_mode: bool,
+}
+
+impl StartInputsRef<'_> {
+    fn to_owned(&self) -> StartInputs {
+        StartInputs {
+            ns: self.ns.to_owned(),
+            local: self.local.to_owned(),
+            attributes: self
+                .attributes
+                .iter()
+                .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+            color_scheme_dark: self.color_scheme_dark,
+            quirks_mode: self.quirks_mode,
+        }
+    }
+
+    fn matches(&self, inputs: &StartInputs) -> bool {
+        self.color_scheme_dark == inputs.color_scheme_dark
+            && self.quirks_mode == inputs.quirks_mode
+            && self.local == inputs.local
+            && self.ns == inputs.ns
+            && self.attributes.len() == inputs.attributes.len()
+            && self.attributes.iter().zip(&inputs.attributes).all(
+                |(&(name, value), (kept_name, kept_value))| {
+                    name == kept_name && value == kept_value
+                },
+            )
+    }
 }
 
 impl StyleShareCache {
@@ -4267,14 +4324,36 @@ impl StyleShareCache {
         self.entries
             .get(&key.hash())?
             .iter()
-            .find(|entry| entry.key == *key && entry.input == *input)
+            .find(|entry| {
+                entry.key == *key
+                    && matches!(&entry.input, ShareInput::Style(style) if style == input)
+            })
+            .map(|entry| (entry.output.clone(), entry.props.clone()))
+    }
+
+    /// `get` for an element whose starting style is made of `start`.
+    fn get_by_start(
+        &self,
+        key: &StyleShareKey,
+        start: &StartInputsRef<'_>,
+    ) -> Option<(
+        crate::LayoutStyle,
+        Option<std::rc::Rc<HashMap<String, String>>>,
+    )> {
+        self.entries
+            .get(&key.hash())?
+            .iter()
+            .find(|entry| {
+                entry.key == *key
+                    && matches!(&entry.input, ShareInput::Start(inputs) if start.matches(inputs))
+            })
             .map(|entry| (entry.output.clone(), entry.props.clone()))
     }
 
     fn insert(
         &mut self,
         key: StyleShareKey,
-        input: crate::LayoutStyle,
+        input: ShareInput,
         output: crate::LayoutStyle,
         props: Option<std::rc::Rc<HashMap<String, String>>>,
     ) {
@@ -4558,7 +4637,7 @@ fn cascade_node_style(
         let node_id = node.get_attribute("id");
         let classes: Vec<&str> = node
             .get_attribute("class")
-            .map(|c| c.split_whitespace().collect())
+            .map(|c| obscura_dom::selector::class_tokens(c).collect())
             .unwrap_or_default();
         let shadow_host_sheet = tree
             .shadow_root(id)
@@ -4653,10 +4732,10 @@ fn cascade_node_style(
                 && node.parent.is_some_and(|parent| {
                     element_local_name(tree, parent).as_deref() == Some("picture")
                 }));
-            let signature = context_free.then(|| {
-                use std::hash::BuildHasher;
-                let attributes = node
-                    .attrs()
+            // The attributes the starting style can read (presentational
+            // hints, `hidden`, `type`, `href`): every one but these three.
+            let attributes = context_free.then(|| {
+                node.attrs()
                     .map(|attributes| {
                         attributes
                             .iter()
@@ -4668,7 +4747,10 @@ fn cascade_node_style(
                             })
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+            });
+            let signature = attributes.as_ref().map(|attributes| {
+                use std::hash::BuildHasher;
                 foldhash::fast::FixedState::default().hash_one((
                     sheet as *const crate::css::Stylesheet as usize,
                     &matched,
@@ -4716,7 +4798,6 @@ fn cascade_node_style(
                     ));
                 }
             }
-            style = starting_style();
             match signature {
                 Some(signature) => {
                     cx.signatures.insert(id, signature);
@@ -4734,7 +4815,38 @@ fn cascade_node_style(
                 parent_props: parent_props.clone(),
                 ancestor_display_none,
             };
-            match shareable.then(|| share.get(&key, &style)).flatten() {
+            // A context-free element's starting style is a function of
+            // these: compare them instead of making and comparing the style.
+            // Kept only for short attribute values: an entry keeps a copy.
+            let short = |attributes: &&[(&str, &str)]| {
+                attributes
+                    .iter()
+                    .map(|(name, value)| name.len() + value.len())
+                    .sum::<usize>()
+                    <= 512
+            };
+            let start = attributes
+                .as_deref()
+                .filter(short)
+                .map(|attributes| StartInputsRef {
+                    ns: elem.ns.as_ref(),
+                    local,
+                    attributes,
+                    color_scheme_dark: inherited_color_scheme_dark,
+                    quirks_mode,
+                });
+            let mut built = None;
+            let found = if !shareable {
+                None
+            } else if let Some(start) = &start {
+                share.get_by_start(&key, start)
+            } else {
+                let starting = starting_style();
+                let found = share.get(&key, &starting);
+                built = Some(starting);
+                found
+            };
+            match found {
                 Some((shared, props)) => {
                     crate::prof::count(crate::prof::STYLE_SHARE_HIT);
                     style = shared;
@@ -4747,7 +4859,11 @@ fn cascade_node_style(
                 }
                 None => {
                     crate::prof::count(crate::prof::STYLE_SHARE_MISS);
-                    let input = shareable.then(|| style.clone());
+                    style = built.unwrap_or_else(starting_style);
+                    let input = shareable.then(|| match &start {
+                        Some(start) => ShareInput::Start(start.to_owned()),
+                        None => ShareInput::Style(style.clone()),
+                    });
                     let effective_props = sheet.apply_matched_rules_without_scopes(
                         id,
                         &mut style,
@@ -13871,16 +13987,19 @@ fn reparent_indexed_positioned_nodes(
     // passes the root on, as the full walk does.
     // Memoized by ancestor (and `fixed`): what it gives its descendants, so
     // each ancestor chain is walked once for all the elements under it.
-    let mut given: HashMap<(NodeId, bool), taffy::NodeId> = HashMap::default();
+    // By node index, for absolute and for fixed descendants.
+    let slots = tree.node_slot_count();
+    let mut given: [Vec<Option<taffy::NodeId>>; 2] = [vec![None; slots], vec![None; slots]];
     let mut containing_block = |id: NodeId, fixed: bool| {
+        let given = &mut given[usize::from(fixed)];
         let mut chain = Vec::new();
         let mut current = rendered_parent(tree, id);
         let found = loop {
             let Some(ancestor) = current else {
                 break taffy_root;
             };
-            if let Some(&known) = given.get(&(ancestor, fixed)) {
-                break known;
+            if let Some(Some(known)) = given.get(ancestor.index()) {
+                break *known;
             }
             let Some(style) = styles.get(&ancestor) else {
                 // An ancestor without a style gives the root, as do all its
@@ -13896,7 +14015,9 @@ fn reparent_indexed_positioned_nodes(
             };
             if captures {
                 if let Some(&own) = reverse.get(&ancestor) {
-                    given.insert((ancestor, fixed), own);
+                    if let Some(slot) = given.get_mut(ancestor.index()) {
+                        *slot = Some(own);
+                    }
                     break own;
                 }
             }
@@ -13904,7 +14025,9 @@ fn reparent_indexed_positioned_nodes(
             current = rendered_parent(tree, ancestor);
         };
         for ancestor in chain {
-            given.insert((ancestor, fixed), found);
+            if let Some(slot) = given.get_mut(ancestor.index()) {
+                *slot = Some(found);
+            }
         }
         found
     };

@@ -806,9 +806,17 @@ pub(crate) fn apply_declarations_with_locked_color_scheme(style: &mut LayoutStyl
         let Some((name, value)) = decl.split_once(':') else {
             continue;
         };
-        let name = name.trim().to_ascii_lowercase();
+        // Sheets are lowercased already: copy only a name that is not.
+        let name = name.trim();
+        let lower;
+        let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            lower = name.to_ascii_lowercase();
+            lower.as_str()
+        } else {
+            name
+        };
         if name != "color-scheme" {
-            apply_value(style, &name, value.trim());
+            apply_value(style, name, value.trim());
         }
     }
 }
@@ -1258,6 +1266,18 @@ fn apply_cssom_value(style: &mut LayoutStyle, name: &str, value: &str) {
             .cssom
             .ua_overrides
             .retain(|(property, _)| !declaration_sets(name, property));
+    }
+    // Only the properties below read the value.
+    if !matches!(
+        name,
+        "text-align" | "vertical-align" | "font-family" | "font" | "font-size"
+    ) {
+        match name {
+            "flex-direction" | "flex-flow" => style.cssom.flex_direction = style.flex_direction,
+            "align-items" | "place-items" => style.cssom.align_items = style.align_items,
+            _ => {}
+        }
+        return;
     }
     let lower = value.trim().to_ascii_lowercase();
     match name {
