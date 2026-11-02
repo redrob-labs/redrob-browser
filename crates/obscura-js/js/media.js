@@ -315,10 +315,16 @@
   class SourceBufferList extends Array {
     static get [Symbol.species]() { return Array; }
     item(i) { return this[i] || null; }
+    addEventListener(type, callback, options) { EventTarget.prototype.addEventListener.call(this, type, callback, options); }
+    removeEventListener(type, callback, options) { EventTarget.prototype.removeEventListener.call(this, type, callback, options); }
+    dispatchEvent(event) { return EventTarget.prototype.dispatchEvent.call(this, event); }
   }
   let nextSourceBufferId = 0;
-  class SourceBuffer {
+  // Both are EventTargets in Chrome; players subscribe with addEventListener
+  // (TikTok's MSE engine threw "e.addEventListener is not a function").
+  class SourceBuffer extends EventTarget {
     constructor(ms, type) {
+      super();
       this._ms = ms;
       this._type = type;
       this._id = ++nextSourceBufferId;
@@ -396,8 +402,9 @@
       this._times = new SegmentTimes(this._type);
     }
   }
-  class MediaSource {
+  class MediaSource extends EventTarget {
     constructor() {
+      super();
       this._readyState = 'closed';
       this._duration = NaN;
       this._el = null;

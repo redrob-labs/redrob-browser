@@ -76,6 +76,12 @@ impl WorkerResponse {
     }
 }
 
+// Layout and the DOM allocate heavily on the page's thread; jemalloc's
+// thread caches cut that cost against glibc malloc.
+#[cfg(unix)]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     tracing_subscriber::fmt()

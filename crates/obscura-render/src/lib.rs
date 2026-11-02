@@ -1418,6 +1418,19 @@ pub enum TextOrientation {
     Sideways,
 }
 
+/// An intrinsic `width` keyword (CSS Sizing 3 §3.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IntrinsicWidth {
+    /// `fit-content`: max-content clamped between min-content and the
+    /// available space.
+    #[default]
+    FitContent,
+    /// `max-content`: the widest the content can be, ignoring available space.
+    MaxContent,
+    /// `min-content`: the narrowest the content can be.
+    MinContent,
+}
+
 /// The subset of CSS that influences box layout. Expanded in later phases.
 /// `PartialEq` lets paint damage tell an unchanged style from a changed one.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1503,6 +1516,9 @@ pub struct LayoutStyle {
     /// so `width` remains `Auto` while the DOM layout convergence pass applies
     /// the CSS shrink-to-fit formula from min/max-content measurements.
     pub width_fit_content: bool,
+    /// Which intrinsic keyword `width_fit_content` stands for: the shrink-to-
+    /// fit `fit-content` clamp, or the bare `max-content`/`min-content` size.
+    pub width_intrinsic: IntrinsicWidth,
     pub height: Dimension,
     /// Which box edge `width`/`height` and min/max sizes describe. CSS starts
     /// at `content-box`; many modern reset sheets opt into `border-box`.

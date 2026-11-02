@@ -168,7 +168,7 @@ pub(crate) struct TextRange {
 }
 
 /// Root-style properties the line layout needs.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RootParams {
     pub(crate) align: parley::Alignment,
     pub(crate) justify: bool,
@@ -195,6 +195,7 @@ pub(crate) struct RootParams {
 }
 
 /// One inline formatting context.
+#[derive(Clone)]
 pub(crate) struct Ifc {
     /// The element whose style is the root inline style: the container, or
     /// for an anonymous block the element that holds it.
@@ -232,6 +233,22 @@ pub(crate) struct Ifc {
     pub(crate) clip: Option<crate::Rect>,
     /// The shaped "…" marker of a clamped or ellipsized IFC.
     pub(crate) marker: Option<parley::Layout<Brush>>,
+    /// The [`build::IfcTemplate`] this IFC was shaped as (0: none). Two
+    /// IFCs of one template have the same content and lay out alike.
+    pub(crate) template_id: u64,
+}
+
+impl Ifc {
+    /// Take the line layout another IFC of the same template ended its
+    /// layout with, for a box whose Taffy layout is reused unchanged.
+    pub(crate) fn adopt_layout_of(&mut self, laid: &Ifc) {
+        self.layout = laid.layout.clone();
+        self.final_layout = laid.final_layout.clone();
+        self.layout_is_final = laid.layout_is_final;
+        self.content_offset = laid.content_offset;
+        self.logical_size = laid.logical_size;
+        self.line_shifts = laid.line_shifts.clone();
+    }
 }
 
 impl Ifc {
@@ -252,6 +269,9 @@ pub(crate) struct IfcStore {
     pub(crate) by_node: std::collections::HashMap<NodeId, Vec<usize>>,
     #[cfg(feature = "paint")]
     pub(crate) raster: paint::GlyphRaster,
+    /// The shaped, not yet laid out IFCs this store created, with what they
+    /// were built from. A later layout reuses one whose inputs are equal.
+    pub(crate) templates: Vec<build::IfcTemplate>,
 }
 
 impl Default for IfcStore {
@@ -264,6 +284,7 @@ impl Default for IfcStore {
             by_node: Default::default(),
             #[cfg(feature = "paint")]
             raster: Default::default(),
+            templates: Vec::new(),
         }
     }
 }
@@ -356,6 +377,10 @@ impl Ifc {
 impl Drop for IfcStore {
     fn drop(&mut self) {
         self.deactivate();
+        build::retain_templates(
+            std::mem::take(&mut self.templates),
+            std::mem::take(&mut self.ifcs),
+        );
         if let Some(fonts) = self.fonts.take() {
             fonts.give_back();
         }
