@@ -712,8 +712,12 @@ pub const BADGE_JS: &str = r#"(init) => {
     catch (e) { done(undefined); }
   });
   const getters = { text: 'getBadgeText', bg: 'getBadgeBackgroundColor', fg: 'getBadgeTextColor' };
+  // Chrome answers this for the blocked-request count it draws itself
+  // (declarativeNetRequest's displayActionCountAsBadgeText), not the count.
+  const COUNT = '<<declarativeNetRequestActionCount>>';
   const read = (field, tabId) => typeof a[getters[field]] === 'function'
-    ? call(a, getters[field], tabId == null ? {} : { tabId }) : Promise.resolve(undefined);
+    ? call(a, getters[field], tabId == null ? {} : { tabId }).then((v) => (v === COUNT ? undefined : v))
+    : Promise.resolve(undefined);
   let s = globalThis.__redrobBadges;
   const put = (key, field, value, at) => {
     const it = s.items[key] || (s.items[key] = {});
