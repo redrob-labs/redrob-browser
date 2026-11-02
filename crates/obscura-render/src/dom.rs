@@ -3018,8 +3018,19 @@ fn resolve_clip_rects(
         }
         _ => inherited,
     };
-    let retained_child =
-        retained.map(|(dirty, same_inputs)| (dirty, same_inputs && !dirty.changed(id)));
+    // A box passes on what it inherited unless it clips, transforms or sets
+    // a perspective: then its rect counts too, besides its style.
+    let passes_on_rect = !own_transform.is_identity()
+        || style.is_some_and(|style| {
+            style.perspective.is_some()
+                || (style.overflow_hidden && !is_viewport_overflow_source(id, styles))
+        });
+    let retained_child = retained.map(|(dirty, same_inputs)| {
+        (
+            dirty,
+            same_inputs && !dirty.style_changed(id) && !(passes_on_rect && dirty.rect_changed(id)),
+        )
+    });
     for cid in rendered_children_ref(tree, id).iter().copied() {
         resolve_clip_rects(
             tree,
@@ -3044,8 +3055,8 @@ fn resolve_clip_rects(
 /// What changed for `resolve_clip_rects` since a retained layout: nodes whose
 /// rect or style (or a neighbour's style) changed, and their ancestors.
 pub(crate) struct ClipDirty {
-    /// By node index: the node changed.
-    own: Vec<bool>,
+    /// By node index: what of the node changed (`RECT`, `STYLE`).
+    own: Vec<u8>,
     /// By node index: the node or a descendant changed.
     subtree: Vec<bool>,
 }
@@ -3059,17 +3070,17 @@ impl ClipDirty {
     ) -> Self {
         let slots = tree.node_slot_count();
         let mut dirty = Self {
-            own: vec![false; slots],
+            own: vec![0; slots],
             subtree: vec![false; slots],
         };
         for (id, rect) in rects {
             if old_rects.get(id) != Some(rect) {
-                dirty.mark(tree, *id);
+                dirty.mark(tree, *id, Self::RECT);
             }
         }
         for id in old_rects.keys() {
             if !rects.contains_key(id) {
-                dirty.mark(tree, *id);
+                dirty.mark(tree, *id, Self::RECT);
             }
         }
         let document = tree.document();
@@ -3079,22 +3090,25 @@ impl ClipDirty {
             if id == document {
                 continue;
             }
-            dirty.mark(tree, id);
+            dirty.mark(tree, id, Self::STYLE);
             if let Some(parent) = rendered_parent(tree, id) {
-                dirty.mark(tree, parent);
+                dirty.mark(tree, parent, Self::STYLE);
             }
             for child in rendered_children_ref(tree, id).iter().copied() {
-                dirty.mark(tree, child);
+                dirty.mark(tree, child, Self::STYLE);
             }
         }
         dirty
     }
 
-    fn mark(&mut self, tree: &DomTree, id: NodeId) {
+    const RECT: u8 = 1;
+    const STYLE: u8 = 2;
+
+    fn mark(&mut self, tree: &DomTree, id: NodeId, what: u8) {
         let Some(own) = self.own.get_mut(id.index()) else {
             return;
         };
-        *own = true;
+        *own |= what;
         let mut current = Some(id);
         while let Some(node) = current {
             match self.subtree.get_mut(node.index()) {
@@ -3105,8 +3119,16 @@ impl ClipDirty {
         }
     }
 
-    fn changed(&self, id: NodeId) -> bool {
-        self.own.get(id.index()).copied().unwrap_or(true)
+    fn rect_changed(&self, id: NodeId) -> bool {
+        self.own
+            .get(id.index())
+            .map_or(true, |own| own & Self::RECT != 0)
+    }
+
+    fn style_changed(&self, id: NodeId) -> bool {
+        self.own
+            .get(id.index())
+            .map_or(true, |own| own & Self::STYLE != 0)
     }
 
     fn in_subtree(&self, id: NodeId) -> bool {
@@ -9254,14 +9276,46 @@ fn layout_dom_once(
         }
 
         phase_marks.push(("fixups", crate::prof::mark()));
-        resolve_grid_areas(tree, root_id, &mut styles);
+        // A retained style already holds the placements its grid resolved;
+        // only grids with a fresh style or a fresh item resolve them again.
+        // (The full walk below reads light trees only.)
+        let grid_candidates = fresh_styles
+            .as_ref()
+            .filter(|_| !tree.has_shadow_roots())
+            .map(|fresh| {
+                let document = tree.document();
+                let mut seen: HashSet<NodeId> = HashSet::default();
+                for &id in fresh {
+                    if id == document {
+                        continue;
+                    }
+                    seen.insert(id);
+                    let mut parent = rendered_parent(tree, id);
+                    while let Some(p) = parent {
+                        if !seen.insert(p) {
+                            break;
+                        }
+                        if !styles.get(&p).is_some_and(|style| style.display_contents) {
+                            break;
+                        }
+                        parent = rendered_parent(tree, p);
+                    }
+                }
+                seen.into_iter().collect::<Vec<_>>()
+            });
+        resolve_grid_areas(tree, root_id, &mut styles, grid_candidates);
         phase_marks.push(("r.grid", crate::prof::mark()));
 
         // A fieldset's rendered legend (its first legend child, in flow)
         // sits on the fieldset's top border: the border and padding-top
         // come after it (Chrome: the legend's top is the fieldset's border
         // edge, the content starts padding-top below the legend).
-        for id in rendered_descendants(tree, root_id) {
+        let fieldsets = if element_kinds_present(tree) & ElementKind::FIELDSET != 0 {
+            rendered_descendants(tree, root_id)
+        } else {
+            Vec::new()
+        };
+        for id in fieldsets {
             if !tree.borrow_node(id).is_some_and(|node| {
                 node.as_element()
                     .is_some_and(|e| e.local.as_ref() == "fieldset")
@@ -10596,14 +10650,18 @@ fn layout_dom_once(
                     // than a pixel from the unrounded boxes, which are
                     // Chrome's (a 1px collapsed border puts a cell 0.5px
                     // inside the table).
-                    styles
-                        .keys()
-                        .copied()
-                        .filter(|&id| {
-                            with_local_name(tree, id, |local| matches!(local, "td" | "th"))
-                                .unwrap_or(false)
-                        })
-                        .collect::<HashSet<_>>()
+                    if element_kinds_present(tree) & ElementKind::CELL == 0 {
+                        HashSet::default()
+                    } else {
+                        styles
+                            .keys()
+                            .copied()
+                            .filter(|&id| {
+                                with_local_name(tree, id, |local| matches!(local, "td" | "th"))
+                                    .unwrap_or(false)
+                            })
+                            .collect::<HashSet<_>>()
+                    }
                 },
             );
             phase_marks.push(("x.frac", crate::prof::mark()));
@@ -10732,22 +10790,25 @@ fn layout_dom_once(
             }
             // CSSOM rows and sections are the same unions over the cells'
             // fractional rects.
-            let mut fractional_cells = rects.clone();
-            fractional_cells.extend(fractional_rects.iter().map(|(&id, &rect)| (id, rect)));
-            let unsynthesized: HashSet<NodeId> = fractional_cells.keys().copied().collect();
-            synthesize_row_rects(tree, &styles, &mut fractional_cells);
-            synthesize_row_rects(tree, &styles, &mut rects);
-            for (id, rect) in fractional_cells {
-                if unsynthesized.contains(&id) {
-                    continue;
-                }
-                if let Some(rounded) = rects.get(&id) {
-                    let close = (rect.x - rounded.x).abs() < 2.0
-                        && (rect.y - rounded.y).abs() < 2.0
-                        && (rect.width - rounded.width).abs() < 2.0
-                        && (rect.height - rounded.height).abs() < 2.0;
-                    if close && rect != *rounded {
-                        fractional_rects.insert(id, rect);
+            if element_kinds_present(tree) & (ElementKind::ROW_OR_SECTION | ElementKind::CELL) != 0
+            {
+                let mut fractional_cells = rects.clone();
+                fractional_cells.extend(fractional_rects.iter().map(|(&id, &rect)| (id, rect)));
+                let unsynthesized: HashSet<NodeId> = fractional_cells.keys().copied().collect();
+                synthesize_row_rects(tree, &styles, &mut fractional_cells);
+                synthesize_row_rects(tree, &styles, &mut rects);
+                for (id, rect) in fractional_cells {
+                    if unsynthesized.contains(&id) {
+                        continue;
+                    }
+                    if let Some(rounded) = rects.get(&id) {
+                        let close = (rect.x - rounded.x).abs() < 2.0
+                            && (rect.y - rounded.y).abs() < 2.0
+                            && (rect.width - rounded.width).abs() < 2.0
+                            && (rect.height - rounded.height).abs() < 2.0;
+                        if close && rect != *rounded {
+                            fractional_rects.insert(id, rect);
+                        }
                     }
                 }
             }
@@ -10836,7 +10897,7 @@ fn layout_dom_once(
                 if crate::prof::enabled() {
                     eprintln!(
                         "[timing] clip-dirty own={} subtree={} old_rects={} rects={}",
-                        dirty.own.iter().filter(|b| **b).count(),
+                        dirty.own.iter().filter(|b| **b != 0).count(),
                         dirty.subtree.iter().filter(|b| **b).count(),
                         geometry.rects.len(),
                         rects.len()
@@ -11396,12 +11457,22 @@ fn resolve_grid_areas(
     tree: &DomTree,
     root: NodeId,
     styles: &mut HashMap<NodeId, crate::LayoutStyle>,
+    containers: Option<Vec<NodeId>>,
 ) {
-    let mut stack = vec![root];
-    while let Some(id) = stack.pop() {
-        for cid in tree.children(id) {
-            stack.push(cid);
+    // Every element under `root`, unless the caller knows which can be grid
+    // containers whose placements changed.
+    let containers = containers.unwrap_or_else(|| {
+        let mut all = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            for cid in tree.children(id) {
+                stack.push(cid);
+            }
+            all.push(id);
         }
+        all
+    });
+    for id in containers {
         let (areas, col_lines, row_lines) = match styles.get(&id) {
             Some(s) if s.display == crate::Display::Grid => (
                 s.grid_areas.clone().filter(|a| !a.is_empty()),
@@ -13755,6 +13826,43 @@ pub(crate) struct FlatTree {
     kids: Vec<NodeId>,
     /// Rendered parent by node index, `None` when not recorded.
     parents: Vec<Option<NodeId>>,
+    /// The `ElementKind` bits of every node on the walk, by node index
+    /// (`ElementKind::UNKNOWN` elsewhere).
+    kinds: Vec<u8>,
+    /// The union of `kinds` over the walk.
+    kinds_present: u8,
+}
+
+/// Elements a few layout passes look for, as bits (see `FlatTree::kinds`).
+pub(crate) struct ElementKind;
+
+impl ElementKind {
+    pub(crate) const FIELDSET: u8 = 1;
+    pub(crate) const LEGEND: u8 = 2;
+    /// `tr`, `tbody`, `thead`, `tfoot`.
+    pub(crate) const ROW_OR_SECTION: u8 = 4;
+    /// `td`, `th`.
+    pub(crate) const CELL: u8 = 8;
+    pub(crate) const TABLE: u8 = 16;
+    const UNKNOWN: u8 = 0x80;
+
+    fn of(tree: &DomTree, id: NodeId) -> u8 {
+        with_local_name(tree, id, |local| match local {
+            "fieldset" => Self::FIELDSET,
+            "legend" => Self::LEGEND,
+            "tr" | "tbody" | "thead" | "tfoot" => Self::ROW_OR_SECTION,
+            "td" | "th" => Self::CELL,
+            "table" => Self::TABLE,
+            _ => 0,
+        })
+        .unwrap_or(0)
+    }
+}
+
+/// The `ElementKind` bits of some node on the rendered tree of `tree`'s
+/// current state.
+pub(crate) fn element_kinds_present(tree: &DomTree) -> u8 {
+    current_flat_tree(tree).kinds_present
 }
 
 impl FlatTree {
@@ -13916,6 +14024,10 @@ pub(crate) fn patch_flat_tree(
     let mut spans = previous.spans.clone();
     spans.resize(slots, (u32::MAX, 0));
     let mut kids = previous.kids.clone();
+    // A node keeps its kind unless the mutations inserted it (its slot may
+    // hold a new node).
+    let mut kinds = previous.kinds.clone();
+    kinds.resize(slots, ElementKind::UNKNOWN);
     let record = |id: NodeId, kids: &mut Vec<NodeId>, spans: &mut Vec<(u32, u32)>| {
         let children = rendered_children_uncached(tree, id);
         if let Some(span) = spans.get_mut(id.index()) {
@@ -13943,6 +14055,9 @@ pub(crate) fn patch_flat_tree(
                 let mut stack = vec![node];
                 while let Some(id) = stack.pop() {
                     record(id, &mut kids, &mut spans);
+                    if let Some(kind) = kinds.get_mut(id.index()) {
+                        *kind = ElementKind::UNKNOWN;
+                    }
                     if let Some(&(start, len)) = spans.get(id.index()) {
                         if start != u32::MAX {
                             stack.extend_from_slice(&kids[start as usize..(start + len) as usize]);
@@ -13963,6 +14078,7 @@ pub(crate) fn patch_flat_tree(
     let root = tree.document();
     let limit = tree.len();
     let mut walk = Vec::with_capacity(previous.walk.len());
+    let mut kinds_present = 0;
     let mut parents = vec![None; slots];
     let mut visited = vec![false; slots];
     let children_of = |id: NodeId, spans: &[(u32, u32)]| {
@@ -13990,6 +14106,12 @@ pub(crate) fn patch_flat_tree(
         if let Some(slot) = parents.get_mut(id.index()) {
             *slot = Some(parent);
         }
+        if let Some(kind) = kinds.get_mut(id.index()) {
+            if *kind == ElementKind::UNKNOWN {
+                *kind = ElementKind::of(tree, id);
+            }
+            kinds_present |= *kind;
+        }
         if walk.len() >= limit {
             break;
         }
@@ -14004,6 +14126,9 @@ pub(crate) fn patch_flat_tree(
     for (index, span) in spans.iter_mut().enumerate() {
         if index != root.index() && !visited.get(index).copied().unwrap_or(false) {
             *span = (u32::MAX, 0);
+            if let Some(kind) = kinds.get_mut(index) {
+                *kind = ElementKind::UNKNOWN;
+            }
         }
     }
     let flat = std::rc::Rc::new(FlatTree {
@@ -14012,6 +14137,8 @@ pub(crate) fn patch_flat_tree(
         spans,
         kids,
         parents,
+        kinds,
+        kinds_present,
     });
     if layout_verify_enabled() {
         let scratch = build_flat_tree(tree);
@@ -14019,6 +14146,17 @@ pub(crate) fn patch_flat_tree(
             flat.walk == scratch.walk,
             "OBSCURA_LAYOUT_VERIFY: patched flat tree walk differs from scratch"
         );
+        assert_eq!(
+            flat.kinds_present, scratch.kinds_present,
+            "OBSCURA_LAYOUT_VERIFY: patched flat tree element kinds differ"
+        );
+        for &id in scratch.walk.iter() {
+            assert_eq!(
+                flat.kinds.get(id.index()),
+                scratch.kinds.get(id.index()),
+                "OBSCURA_LAYOUT_VERIFY: patched flat tree kind of {id:?} differs"
+            );
+        }
         for &id in scratch.walk.iter().chain(std::iter::once(&root)) {
             assert_eq!(
                 flat.children(id),
@@ -14086,12 +14224,23 @@ fn build_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
         record(id, &children, &mut spans);
         stack.extend(children.into_iter().rev().map(|child| (child, id)));
     }
+    let mut kinds = vec![ElementKind::UNKNOWN; slots];
+    let mut kinds_present = 0;
+    for &id in &walk {
+        let kind = ElementKind::of(tree, id);
+        kinds_present |= kind;
+        if let Some(slot) = kinds.get_mut(id.index()) {
+            *slot = kind;
+        }
+    }
     std::rc::Rc::new(FlatTree {
         generation: tree.mutation_generation(),
         walk: std::rc::Rc::new(walk),
         spans,
         kids,
         parents,
+        kinds,
+        kinds_present,
     })
 }
 

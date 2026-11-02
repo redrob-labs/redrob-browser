@@ -3932,7 +3932,9 @@ fn verify_against_scratch(
         })
     });
     VERIFYING.with(|flag| flag.set(false));
-    let Some(scratch) = scratch else {
+    #[cfg_attr(not(feature = "scene"), allow(unused_mut))]
+    let Some(mut scratch) = scratch
+    else {
         panic!("OBSCURA_LAYOUT_VERIFY ({path}): scratch layout failed");
     };
     let mut difference = crate::dom::layout_difference(&prepared.layout, &scratch.layout);
