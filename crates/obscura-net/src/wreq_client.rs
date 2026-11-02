@@ -115,6 +115,13 @@ fn chrome_header_order() -> wreq::header::OrigHeaderMap {
     order
 }
 
+/// Whether pages use this transport without `--stealth`. On in every build
+/// that has it; `OBSCURA_IMPERSONATE_TLS=0` falls back to reqwest/rustls.
+#[cfg(feature = "stealth")]
+pub fn impersonate_tls_by_default() -> bool {
+    tracker_blocking_enabled(std::env::var("OBSCURA_IMPERSONATE_TLS").ok().as_deref())
+}
+
 #[cfg(feature = "stealth")]
 fn tracker_blocking_enabled(value: Option<&str>) -> bool {
     !matches!(
@@ -250,6 +257,11 @@ pub struct StealthHttpClient {
     pub cookie_jar: Arc<CookieJar>,
     pub extra_headers: RwLock<HashMap<String, String>>,
     pub in_flight: Arc<std::sync::atomic::AtomicU32>,
+    /// The page identity to send instead of the emulation profile's: its
+    /// User-Agent (with the matching client hints), Accept-Language and CDP
+    /// extra headers. Set when this client is the default transport, so the
+    /// Chrome TLS fingerprint carries the identity navigator reports.
+    identity: Option<Arc<crate::ObscuraHttpClient>>,
 }
 
 /// Scripted fetch exposes these headers before consuming the bounded body.
@@ -351,7 +363,63 @@ impl StealthHttpClient {
             cookie_jar,
             extra_headers: RwLock::new(HashMap::new()),
             in_flight: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            identity: None,
         }
+    }
+
+    /// The default transport: the Chrome TLS and HTTP/2 fingerprint with the
+    /// identity of `identity` (its User-Agent, client hints, Accept-Language
+    /// and extra headers, read per request so CDP overrides apply) and no
+    /// tracker blocking, which stays a `--stealth` choice.
+    pub fn with_identity(
+        cookie_jar: Arc<CookieJar>,
+        proxy_url: Option<&str>,
+        allow_private_network: bool,
+        identity: Arc<crate::ObscuraHttpClient>,
+    ) -> Self {
+        let mut client = Self::with_proxy(cookie_jar, proxy_url, allow_private_network);
+        client.block_trackers = false;
+        client.identity = Some(identity);
+        client
+    }
+
+    /// The identity's User-Agent, client hints and Accept-Language, minus any
+    /// header `overridden` names (an extra or caller header wins, as on the
+    /// reqwest path). Empty without an identity: the emulation profile's
+    /// defaults then apply.
+    async fn identity_headers(&self, overridden: impl Fn(&str) -> bool) -> wreq::header::HeaderMap {
+        let mut headers = wreq::header::HeaderMap::new();
+        let Some(identity) = &self.identity else {
+            return headers;
+        };
+        let ua = identity.user_agent.read().await.clone();
+        let (sec_ch_ua, sec_ch_ua_platform) = crate::client::chrome_client_hints(&ua);
+        let accept_language = identity.accept_language.read().await.clone();
+        for (name, value) in [
+            ("sec-ch-ua", sec_ch_ua),
+            ("sec-ch-ua-mobile", "?0".to_string()),
+            ("sec-ch-ua-platform", sec_ch_ua_platform),
+            ("user-agent", ua),
+            ("accept-language", accept_language),
+        ] {
+            if value.is_empty() || overridden(name) {
+                continue;
+            }
+            if let Ok(value) = wreq::header::HeaderValue::from_str(&value) {
+                headers.insert(name, value);
+            }
+        }
+        headers
+    }
+
+    async fn all_extra_headers(&self) -> HashMap<String, String> {
+        let mut headers = self.extra_headers.read().await.clone();
+        if let Some(identity) = &self.identity {
+            for (name, value) in identity.extra_headers.read().await.iter() {
+                headers.insert(name.clone(), value.clone());
+            }
+        }
+        headers
     }
 
     pub async fn fetch(&self, url: &Url) -> Result<Response, ObscuraNetError> {
@@ -410,6 +478,13 @@ impl StealthHttpClient {
         for _ in 0..=20 {
             validate_request_mode(&request, &current_url)?;
             let mut req = self.client.get(current_url.as_str());
+            let extra_headers = self.all_extra_headers().await;
+            req = req.headers(
+                self.identity_headers(|name| {
+                    extra_headers.keys().any(|k| k.eq_ignore_ascii_case(name))
+                })
+                .await,
+            );
 
             req = req
                 .header("accept", request.accept())
@@ -442,7 +517,7 @@ impl StealthHttpClient {
                 req = req.header("Cookie", &cookie_header);
             }
 
-            for (k, v) in self.extra_headers.read().await.iter() {
+            for (k, v) in extra_headers.iter() {
                 if k.eq_ignore_ascii_case("origin") {
                     continue;
                 }
@@ -458,7 +533,7 @@ impl StealthHttpClient {
             let request_info = RequestInfo {
                 url: current_url.clone(),
                 method: "GET".to_string(),
-                headers: self.extra_headers.read().await.clone(),
+                headers: extra_headers.clone(),
                 resource_type: request.resource_type,
             };
             if !request_callback_fired {
@@ -622,7 +697,17 @@ impl StealthHttpClient {
                 req = req.header("cookie", &cookie_header);
             }
         }
-        for (k, v) in self.extra_headers.read().await.iter() {
+        let extra_headers = self.all_extra_headers().await;
+        req = req.headers(
+            self.identity_headers(|name| {
+                extra_headers
+                    .keys()
+                    .chain(headers.keys())
+                    .any(|k| k.eq_ignore_ascii_case(name))
+            })
+            .await,
+        );
+        for (k, v) in extra_headers.iter() {
             req = req.header(k.as_str(), v.as_str());
         }
         for (k, v) in headers.iter() {

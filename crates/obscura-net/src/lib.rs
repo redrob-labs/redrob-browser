@@ -30,7 +30,7 @@ pub use robots::RobotsCache;
 pub use transport::{on_transport, spawn_on_transport, TransportTask};
 #[cfg(feature = "stealth")]
 pub use wreq_client::{
-    StealthHttpClient, STEALTH_NAVIGATOR_PLATFORM, STEALTH_UA_PLATFORM,
+    impersonate_tls_by_default, StealthHttpClient, STEALTH_NAVIGATOR_PLATFORM, STEALTH_UA_PLATFORM,
     STEALTH_UA_PLATFORM_VERSION, STEALTH_USER_AGENT,
 };
 

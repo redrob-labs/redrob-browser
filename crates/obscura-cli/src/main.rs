@@ -36,8 +36,9 @@ struct Args {
     #[arg(long, global = true)]
     proxy: Option<String>,
 
-    /// Enable stealth mode (consistent browser fingerprint, and with the
-    /// `stealth` build feature, TLS impersonation plus tracker blocking).
+    /// Enable stealth mode: the Windows Chrome identity plus tracker
+    /// blocking. Builds with the `stealth` feature (every release) send
+    /// Chrome's TLS fingerprint with or without this flag.
     /// Global: applies to fetch, serve, scrape, and mcp.
     #[arg(long, global = true)]
     stealth: bool,
@@ -547,9 +548,7 @@ async fn run_cli() -> anyhow::Result<()> {
             }
             if stealth {
                 #[cfg(feature = "stealth")]
-                tracing::info!(
-                    "Stealth mode enabled (TLS fingerprint impersonation + tracker blocking)"
-                );
+                tracing::info!("Stealth mode enabled (Windows Chrome identity + tracker blocking)");
                 #[cfg(not(feature = "stealth"))]
                 tracing::info!("Stealth mode enabled (tracker blocking)");
             }
@@ -1691,27 +1690,39 @@ async fn fetch_original_response(
     // impersonate and the wreq client only speaks http(s), so it is excluded
     // here the same way ObscuraHttpClient::fetch_with_method excludes it
     // internally.
-    if stealth && url.scheme() != "file" {
-        #[cfg(feature = "stealth")]
-        {
-            // `false` matches the reqwest path below (`with_options`); the
-            // CLI mirrors --allow-private-network into
-            // OBSCURA_ALLOW_PRIVATE_NETWORK at startup, which this client
-            // honours.
-            let client = obscura_net::StealthHttpClient::with_proxy(
-                Arc::new(obscura_net::CookieJar::new()),
+    #[cfg(feature = "stealth")]
+    if (stealth || obscura_net::impersonate_tls_by_default()) && url.scheme() != "file" {
+        // `false` matches the reqwest path below (`with_options`); the
+        // CLI mirrors --allow-private-network into
+        // OBSCURA_ALLOW_PRIVATE_NETWORK at startup, which this client
+        // honours. Without --stealth the request keeps the default
+        // identity (or --user-agent) over the Chrome TLS fingerprint.
+        let jar = Arc::new(obscura_net::CookieJar::new());
+        let client = if stealth {
+            obscura_net::StealthHttpClient::with_proxy(jar, proxy.as_deref(), false)
+        } else {
+            let identity = obscura_net::ObscuraHttpClient::with_options(jar.clone(), None);
+            if let Some(ua) = &user_agent {
+                identity.set_user_agent(ua).await;
+            }
+            obscura_net::StealthHttpClient::with_identity(
+                jar,
                 proxy.as_deref(),
                 false,
-            );
-            return match timeout(Duration::from_secs(timeout_secs), client.fetch(&url)).await {
-                Ok(Ok(resp)) => Ok(resp),
-                Ok(Err(e)) => {
-                    anyhow::bail!("Failed to fetch {}: {}", url_str, operator_network_error(e))
-                }
-                Err(_) => anyhow::bail!("Timed out fetching {} after {}s", url_str, timeout_secs),
-            };
-        }
+                Arc::new(identity),
+            )
+        };
+        return match timeout(Duration::from_secs(timeout_secs), client.fetch(&url)).await {
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(e)) => {
+                anyhow::bail!("Failed to fetch {}: {}", url_str, operator_network_error(e))
+            }
+            Err(_) => anyhow::bail!("Timed out fetching {} after {}s", url_str, timeout_secs),
+        };
     }
+
+    #[cfg(not(feature = "stealth"))]
+    let _ = stealth;
 
     let client = obscura_net::ObscuraHttpClient::with_options(
         Arc::new(obscura_net::CookieJar::new()),

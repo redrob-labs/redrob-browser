@@ -1051,7 +1051,7 @@ fn response_cache_lifetime(response: &Response) -> Option<Duration> {
 /// User-Agent string, using Chromium's per-major-version GREASE algorithm so
 /// the non-stealth HTTP path agrees with navigator.userAgentData instead of
 /// shipping a fixed Linux/Chrome-145 hint that contradicts a Windows profile.
-fn chrome_client_hints(ua: &str) -> (String, String) {
+pub(crate) fn chrome_client_hints(ua: &str) -> (String, String) {
     let major: usize = ua
         .split("Chrome/")
         .nth(1)

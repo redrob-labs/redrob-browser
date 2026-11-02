@@ -1276,18 +1276,24 @@ impl Page {
         // Page.getFrameTree return a frame the client cannot match,
         // triggering a Target.closeTarget and "Frame has been detached".
         let frame_id = id.clone();
+        // A build with the wreq/BoringSSL transport sends Chrome's TLS and
+        // HTTP/2 fingerprint on every page; rustls's ClientHello is flagged by
+        // DataDome and Cloudflare. `--stealth` adds the Windows Chrome
+        // identity and tracker blocking; without it the page keeps its own
+        // identity (User-Agent, client hints, CDP overrides) on the wire.
         #[cfg(feature = "stealth")]
         let stealth_client = if context.stealth {
-            // The wreq client backing StealthHttpClient does not speak SOCKS5.
-            // Callers must validate the proxy scheme up front and fail loudly
-            // (see obscura-cli) rather than silently rewriting socks5:// to
-            // http://, which only works when the upstream happens to be a
-            // Clash-style mixed-mode proxy and breaks plain SOCKS5 servers
-            // like `ssh -ND` (#160).
             Some(Arc::new(StealthHttpClient::with_proxy(
                 context.cookie_jar.clone(),
                 context.proxy_url.as_deref(),
                 context.allow_private_network,
+            )))
+        } else if obscura_net::impersonate_tls_by_default() {
+            Some(Arc::new(StealthHttpClient::with_identity(
+                context.cookie_jar.clone(),
+                context.proxy_url.as_deref(),
+                context.allow_private_network,
+                http_client.clone(),
             )))
         } else {
             None
@@ -2038,7 +2044,7 @@ impl Page {
         rt.set_session_history(session_history, session_index, session_index);
 
         #[cfg(feature = "stealth")]
-        if self.stealth_client.is_some() {
+        if self.context.stealth && self.stealth_client.is_some() {
             rt.set_stealth(true);
             rt.set_user_agent(obscura_net::STEALTH_USER_AGENT);
             rt.set_platform(

@@ -161,7 +161,7 @@ init → commit → domcontentloaded → load → networkidle2 → networkidle0
 
 ## Stealth
 
-`--stealth` swaps the default `reqwest` client for `obscura-net/wreq_client.rs`, which presents a real browser's TLS ClientHello, ALPN, and cipher order (a consistent Chrome fingerprint, not a randomized one) so the TLS layer matches the User-Agent and JS surfaces. It also applies the bundled tracker blocklist before any request leaves the process. Scripted `fetch()`/XHR go through the same stealth client, so subresource requests carry the same fingerprint as the navigation. `--stealth` is a global CLI flag that applies to `fetch`, `serve`, `scrape`, and `mcp`.
+Builds with the `stealth` feature (every release) send every page request through `obscura-net/wreq_client.rs`, which presents a real Chrome TLS ClientHello, ALPN, cipher and extension order and HTTP/2 settings (a consistent Chrome fingerprint, not a randomized one) while carrying the page's own User-Agent, client hints and CDP header overrides. Scripted `fetch()`/XHR go through the same client, so subresource requests carry the same fingerprint as the navigation. `--stealth` adds the Windows Chrome identity and the bundled tracker blocklist; it is a global CLI flag that applies to `fetch`, `serve`, `scrape`, and `mcp`. `OBSCURA_IMPERSONATE_TLS=0` selects the `reqwest`/rustls transport, which is also the only one in a build without the feature.
 
 ## Workspace conventions
 
