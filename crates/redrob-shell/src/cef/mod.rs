@@ -360,6 +360,9 @@ pub fn start(config: Config) -> anyhow::Result<()> {
         port
     };
 
+    // Linux: Widevine from a CDM already on the machine (widevine.rs).
+    handlers::widevine::prepare(&config.root);
+
     let resources = resources_dir();
     let mut settings = cef::Settings {
         external_message_pump: (!cfg!(target_os = "linux")) as _,
