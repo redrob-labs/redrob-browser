@@ -11,12 +11,14 @@
 //! glib message loop, which [`pump`] runs until idle, and the window learns
 //! of its work from glib's descriptors (wake.rs): the external pump returns
 //! from every nested run loop (drag and drop) within 10 ms. Each tab's page
-//! is a native child window of its browser window (native.rs). Renderer, GPU and utility processes are this executable
+//! is a native child window of its browser window (native.rs); on Linux a
+//! Chrome browser of its own moved in there (host.rs). Renderer, GPU and utility processes are this executable
 //! started again with `--type=...`; [`subprocess`] runs them.
 
 pub mod app;
 pub mod client;
 pub mod handlers;
+pub mod host;
 pub mod keys;
 pub mod native;
 #[cfg(target_os = "linux")]

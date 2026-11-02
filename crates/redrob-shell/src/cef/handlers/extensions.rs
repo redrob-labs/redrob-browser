@@ -1,13 +1,9 @@
 //! Chrome's extensions in the window's toolbar (docs/CHROME-FEATURES.md).
 //!
-//! A Chrome style page is a Chrome browser without a toolbar, so Chrome has
-//! nowhere to draw extension icons and will not open an action's popup
-//! ("Browser window has no toolbar"). `Extensions.triggerAction` crashes
-//! it: Chromium takes the browser's `ExtensionsContainer`, which only
-//! Chrome's toolbar registers, without checking for null (CEF hosts a page
-//! with a parent window in a popup-type Chrome browser with no toolbar, and
-//! allows one Chrome browser per CEF window). The window draws them
-//! instead:
+//! Chrome draws its extension icons in its own toolbar, which the window
+//! keeps out of sight (on Linux each page is a Chrome browser with Chrome's
+//! toolbar hidden, cef/host.rs; elsewhere a page has no Chrome toolbar at
+//! all). The window draws them instead:
 //! - [`refresh`] reads the installed extensions from the profile (Chrome's
 //!   own `extensions.settings`, each extension's manifest) and Chrome's own
 //!   pin list, which [`set_pinned`] changes, so chrome://extensions and the
@@ -15,8 +11,11 @@
 //! - a click runs the extension's action on the page on screen: its popup
 //!   page opens over the page, under the icon (cdp.rs), with
 //!   [`popup_script`] so `chrome.tabs.query({currentWindow})` finds that
-//!   page; an action without a popup has its `onClicked` listeners run in
-//!   its service worker ([`run_action`]);
+//!   page; with Chrome's toolbar behind the page, Chrome runs the action
+//!   first, which grants the extension `activeTab` and runs its `onClicked`
+//!   listeners ([`run_action`]). Without it (child pages, where
+//!   `Extensions.triggerAction` crashes Chromium: no `ExtensionsContainer`),
+//!   the listeners run in its service worker, without `activeTab`;
 //! - each icon carries the extension's badge for the tab on screen
 //!   ([`badge`]), read from its running contexts ([`poll_badges`]).
 
@@ -232,13 +231,15 @@ pub fn set_pinned(id: &str, pinned: bool) {
 }
 
 /// Run extension `id`'s toolbar action on `browser`'s page, for an action
-/// without a popup: its `onClicked` listeners get the page's tab. Chrome
-/// would also grant the extension `activeTab` on the page; every Chromium
-/// path to that grant goes through the toolbar's `ExtensionsContainer`,
-/// which these pages do not have (module comment), so an extension that
-/// relies on `activeTab` alone for the click is told the page is out of its
-/// reach.
+/// without a popup: Chrome runs it when the page has Chrome's toolbar
+/// behind it ([`trigger`]). Otherwise its `onClicked` listeners get the
+/// page's tab from its service worker, and an extension that relies on
+/// `activeTab` alone for the click is told the page is out of its reach.
 pub fn run_action(browser: &Browser, id: &str) {
+    if crate::cef::host::hosts(browser) {
+        trigger(browser, id);
+        return;
+    }
     let id = id.to_string();
     let b = browser.clone();
     client::devtools(
@@ -259,10 +260,34 @@ pub fn run_action(browser: &Browser, id: &str) {
     );
 }
 
+/// Chrome runs extension `id`'s action on `browser`'s page, as a click on
+/// its own toolbar icon does: the extension gets `activeTab` on the page
+/// and its `onClicked` listeners the page's tab. The page is a Chrome
+/// browser with Chrome's (hidden) toolbar, which holds the actions
+/// (cef/host.rs); the relay asks Chrome (`relay::trigger_action`).
+fn trigger(browser: &Browser, id: &str) {
+    let id = id.to_string();
+    client::devtools(
+        browser,
+        "Browser.getWindowForTarget",
+        json!({}),
+        move |_, r| match r["windowId"].as_i64() {
+            Some(window) => crate::relay::trigger_action(window, id),
+            None => eprintln!("redrob-browser: extension action: the page has no window"),
+        },
+    );
+}
+
 /// Before extension `id`'s popup opens: its background, which answers the
 /// popup's questions about "the active tab", finds the page's tab
 /// ([`WINDOW_TYPES`]).
 pub fn prepare_popup(browser: &Browser, id: &str) {
+    // Chrome grants `activeTab` when it opens an action's popup: run the
+    // action through Chrome first. Its own popup stays closed (it has no
+    // toolbar on screen to hang it from); the window opens it instead.
+    if crate::cef::host::hosts(browser) {
+        trigger(browser, id);
+    }
     in_worker(
         browser.clone(),
         id.to_string(),

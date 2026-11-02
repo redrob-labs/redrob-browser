@@ -107,6 +107,67 @@ impl From<crate::cef::DevTools> for Upstream {
     }
 }
 
+/// The relay's connection to Chromium, for the window's own calls that
+/// only a DevTools client may make ([`trigger_action`]).
+static WINDOW_HUB: std::sync::OnceLock<(Arc<Hub>, tokio::runtime::Handle)> =
+    std::sync::OnceLock::new();
+
+/// Have Chrome run extension `id`'s toolbar action on the page in Chrome
+/// window `window` (each of the window's pages is a Chrome window with one
+/// tab), as a click on Chrome's own toolbar icon does: the extension gets
+/// `activeTab` (cef/handlers/extensions.rs). `Extensions.triggerAction`
+/// answers DevTools clients only (CEF's own sessions are told "Method not
+/// allowed"), and names the page by its "tab" target.
+pub fn trigger_action(window: i64, id: String) {
+    let Some((hub, rt)) = WINDOW_HUB.get() else {
+        eprintln!("redrob-browser: extension action: no DevTools connection");
+        return;
+    };
+    let hub = hub.clone();
+    rt.spawn(async move {
+        if let Err(e) = trigger(&hub, window, &id).await {
+            eprintln!("redrob-browser: extension action: {e}");
+        }
+    });
+}
+
+async fn trigger(hub: &Hub, window: i64, id: &str) -> anyhow::Result<()> {
+    let tabs = hub
+        .call(
+            None,
+            "Target.getTargets",
+            json!({ "filter": [{ "type": "tab" }] }),
+        )
+        .await?;
+    let ids = tabs["targetInfos"]
+        .as_array()
+        .map(|all| {
+            all.iter()
+                .filter_map(|t| t["targetId"].as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for tab in ids {
+        let w = hub
+            .call(
+                None,
+                "Browser.getWindowForTarget",
+                json!({ "targetId": tab }),
+            )
+            .await;
+        if w.ok().and_then(|w| w["windowId"].as_i64()) == Some(window) {
+            hub.call(
+                None,
+                "Extensions.triggerAction",
+                json!({ "id": id, "targetId": tab }),
+            )
+            .await?;
+            return Ok(());
+        }
+    }
+    anyhow::bail!("no tab in Chrome window {window}")
+}
+
 /// Bind on loopback and serve clients against Chromium. Returns the relay's
 /// ws:// address, which carries its secret.
 // tungstenite fixes the handshake callback's error type.
@@ -114,6 +175,7 @@ impl From<crate::cef::DevTools> for Upstream {
 pub async fn start(upstream: Upstream, window: Window) -> anyhow::Result<String> {
     let pipe = matches!(upstream, Upstream::Pipe { .. });
     let hub = Hub::connect(upstream).await?;
+    let _ = WINDOW_HUB.set((hub.clone(), tokio::runtime::Handle::current()));
     // A pipe Chromium did not take stays silent: find out now. Silence
     // while Chromium's loop is not running (a window that cannot run its
     // passes) says nothing about the pipe.

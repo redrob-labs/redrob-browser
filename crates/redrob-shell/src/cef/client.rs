@@ -76,6 +76,8 @@ thread_local! {
     /// Pages that asked for a size of their own (`set_auto_resize_enabled`),
     /// in points.
     static RESIZED: RefCell<Vec<(TabId, i32, i32)>> = const { RefCell::new(Vec::new()) };
+    /// Pages that took the keyboard (`on_got_focus`).
+    static FOCUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
     /// Pages the DevTools debugger paused (`Debugger.paused`).
     static PAUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
 }
@@ -109,6 +111,11 @@ pub fn take_popup_escaped() -> bool {
 /// before its first script, cdp.rs).
 pub fn take_paused() -> Vec<TabId> {
     PAUSED.with_borrow_mut(std::mem::take)
+}
+
+/// Pages that took the keyboard since the last call.
+pub fn take_focused() -> Vec<TabId> {
+    FOCUSED.with_borrow_mut(std::mem::take)
 }
 
 /// Sizes pages asked for since the last call (cef/handlers/extensions.rs).
@@ -349,7 +356,7 @@ wrap_life_span_handler! {
     impl LifeSpanHandler {
         fn on_before_popup(
             &self,
-            _browser: Option<&mut Browser>,
+            opener: Option<&mut Browser>,
             _frame: Option<&mut Frame>,
             popup_id: ::std::os::raw::c_int,
             target_url: Option<&CefString>,
@@ -379,8 +386,20 @@ wrap_life_span_handler! {
                 return 1;
             };
             PLACES.with_borrow_mut(|p| p.insert(tab, place));
-            *window_info = native::child_info(place, false);
-            *client = Some(new(ctx));
+            let c = new(ctx);
+            // An opener hosted as a Chrome browser of its own (host.rs)
+            // gets its pages as such too: CEF asks its view for them.
+            let hosted = opener.as_deref().is_some_and(super::host::hosts);
+            if hosted {
+                super::host::expect_popup(&c, tab);
+                *window_info = WindowInfo {
+                    runtime_style: native::style(),
+                    ..Default::default()
+                };
+            } else {
+                *window_info = native::child_info(place, false);
+            }
+            *client = Some(c);
             if let Some(s) = settings {
                 *s = browser_settings();
             }
@@ -437,6 +456,11 @@ wrap_life_span_handler! {
             set_place(self.ctx.tab, None);
             handlers::extensions::forget_tab(self.ctx.tab);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
+            // A page Chrome closed itself (an agent's `Target.closeTarget`)
+            // gets no `do_close` when it is a Chrome window of its own
+            // (cef/host.rs): the window learns of it here. A tab the window
+            // closed is gone from it already.
+            self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
         }
     }
 }
@@ -453,6 +477,7 @@ wrap_focus_handler! {
 
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {
             // A click in the page, or the window gave it the keyboard.
+            FOCUSED.with_borrow_mut(|f| f.push(self.ctx.tab));
             self.ctx.sink.send_tab(self.ctx.tab, Event::Focused);
         }
 

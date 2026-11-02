@@ -342,9 +342,11 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
         let resized = client::take_resized();
         let paused = client::take_paused();
         let escaped = client::take_popup_escaped();
+        let focused = client::take_focused();
         let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
         if created.is_empty()
+            && focused.is_empty()
             && closed.is_empty()
             && resized.is_empty()
             && paused.is_empty()
@@ -361,6 +363,9 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
             }
             for (tab, w, h) in resized {
                 e.resize_popup(tab, w, h);
+            }
+            for tab in focused {
+                e.page_focused(tab);
             }
             for tab in paused {
                 e.popup_paused(tab);
@@ -533,6 +538,21 @@ impl Engine {
         }
     }
 
+    /// `tab`'s page took the keyboard (a click in it). A page hosted as a
+    /// Chrome window of its own (cef/host.rs) counts as active, and takes
+    /// keys, only while its own native window has the X input focus:
+    /// Chromium asks the window manager for that, which ignores a window
+    /// inside another. So the page on screen gets it here, as the window
+    /// manager would give it.
+    fn page_focused(&mut self, tab: TabId) {
+        if !crate::cef::host::enabled() || !self.shown(tab) {
+            return;
+        }
+        if let Some(child) = self.tabs.get(&tab).and_then(|t| t.native) {
+            native::focus(child);
+        }
+    }
+
     /// Whether `tab` is the page on screen in its window.
     fn shown(&self, tab: TabId) -> bool {
         let Some(w) = self.tab_window.get(&tab) else {
@@ -683,14 +703,25 @@ impl Engine {
         let mut context = crate::cef::request_context();
         // The page loads its address once the window's scripts are in
         // place (adopt), so it starts blank.
-        let ok = cef::browser_host_create_browser(
-            Some(&info),
-            Some(&mut client),
-            Some(&CefString::from("about:blank")),
-            Some(&settings),
-            None,
-            context.as_mut(),
-        ) == 1;
+        let ok = if crate::cef::host::enabled() {
+            crate::cef::host::create(
+                tab,
+                place,
+                &mut client,
+                "about:blank",
+                &settings,
+                context.as_mut(),
+            )
+        } else {
+            cef::browser_host_create_browser(
+                Some(&info),
+                Some(&mut client),
+                Some(&CefString::from("about:blank")),
+                Some(&settings),
+                None,
+                context.as_mut(),
+            ) == 1
+        };
         if !ok {
             self.opening.remove(&tab);
             client::set_place(tab, None);
