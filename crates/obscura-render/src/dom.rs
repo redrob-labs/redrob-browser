@@ -259,7 +259,7 @@ impl OverflowClip {
 
 /// Per-element border boxes after layout, in viewport coordinates.
 pub struct DomLayout {
-    pub rects: HashMap<NodeId, Rect>,
+    pub rects: crate::NodeMap<Rect>,
     /// Native grid track extents beyond the content box, including unoccupied
     /// tracks. Only element scroll containers expose these through CSSOM.
     grid_overflow: HashMap<NodeId, Rect>,
@@ -413,101 +413,105 @@ where
 /// fragments, text runs, computed styles, clips, transforms, generated boxes
 /// and the placement and line geometry of every shaped text item.
 pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option<String> {
-    first_map_difference("rects", &incremental.rects, &scratch.rects, |a, b| a == b)
-        .or_else(|| {
-            first_map_difference(
-                "grid_overflow",
-                &incremental.grid_overflow,
-                &scratch.grid_overflow,
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "grid_tracks",
-                &incremental.grid_tracks,
-                &scratch.grid_tracks,
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "inline_fragments",
-                &incremental.inline_fragments,
-                &scratch.inline_fragments,
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "text_runs",
-                &incremental.text_runs,
-                &scratch.text_runs,
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "styles",
-                incremental.styles.boxed(),
-                scratch.styles.boxed(),
-                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
-            )
-        })
-        .or_else(|| {
-            first_map_difference(
-                "custom_properties",
-                &incremental.custom_properties,
-                &scratch.custom_properties,
-                |a, b| a == b,
-            )
-        })
-        .or_else(|| {
-            // NaN != NaN: equal Debug output is the same value.
-            first_map_difference(
-                "clip_rects",
-                &incremental.clip_rects,
-                &scratch.clip_rects,
-                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
-            )
-        })
-        .or_else(|| {
-            // NaN != NaN: equal Debug output is the same value.
-            first_map_difference(
-                "translates",
-                &incremental.translates,
-                &scratch.translates,
-                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
-            )
-        })
-        .or_else(|| {
-            // NaN != NaN: equal Debug output is the same value.
-            first_map_difference(
-                "transforms",
-                &incremental.transforms,
-                &scratch.transforms,
-                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
-            )
-        })
-        .or_else(|| {
-            let boxes = |layout: &DomLayout| {
-                layout
-                    .generated_boxes
-                    .iter()
-                    .map(|generated| {
-                        format!(
-                            "{:?} {:?} {:?}",
-                            generated.host, generated.kind, generated.rect
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let (a, b) = (boxes(incremental), boxes(scratch));
-            (a != b).then(|| {
-                format!("generated_boxes differ\n  incremental: {a:?}\n  scratch:     {b:?}")
-            })
-        })
-        .or_else(|| text_item_difference(incremental, scratch))
+    first_map_difference(
+        "rects",
+        &incremental.rects.to_hash_map(),
+        &scratch.rects.to_hash_map(),
+        |a, b| a == b,
+    )
+    .or_else(|| {
+        first_map_difference(
+            "grid_overflow",
+            &incremental.grid_overflow,
+            &scratch.grid_overflow,
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "grid_tracks",
+            &incremental.grid_tracks,
+            &scratch.grid_tracks,
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "inline_fragments",
+            &incremental.inline_fragments,
+            &scratch.inline_fragments,
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "text_runs",
+            &incremental.text_runs,
+            &scratch.text_runs,
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "styles",
+            &incremental.styles.boxed(),
+            &scratch.styles.boxed(),
+            |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
+        )
+    })
+    .or_else(|| {
+        first_map_difference(
+            "custom_properties",
+            &incremental.custom_properties,
+            &scratch.custom_properties,
+            |a, b| a == b,
+        )
+    })
+    .or_else(|| {
+        // NaN != NaN: equal Debug output is the same value.
+        first_map_difference(
+            "clip_rects",
+            &incremental.clip_rects,
+            &scratch.clip_rects,
+            |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
+        )
+    })
+    .or_else(|| {
+        // NaN != NaN: equal Debug output is the same value.
+        first_map_difference(
+            "translates",
+            &incremental.translates,
+            &scratch.translates,
+            |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
+        )
+    })
+    .or_else(|| {
+        // NaN != NaN: equal Debug output is the same value.
+        first_map_difference(
+            "transforms",
+            &incremental.transforms,
+            &scratch.transforms,
+            |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
+        )
+    })
+    .or_else(|| {
+        let boxes = |layout: &DomLayout| {
+            layout
+                .generated_boxes
+                .iter()
+                .map(|generated| {
+                    format!(
+                        "{:?} {:?} {:?}",
+                        generated.host, generated.kind, generated.rect
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let (a, b) = (boxes(incremental), boxes(scratch));
+        (a != b)
+            .then(|| format!("generated_boxes differ\n  incremental: {a:?}\n  scratch:     {b:?}"))
+    })
+    .or_else(|| text_item_difference(incremental, scratch))
 }
 
 /// `TaffyTree::set_style` that leaves the node clean when nothing changed.
@@ -1251,7 +1255,7 @@ pub(crate) struct RetainedStyleMaps {
 pub(crate) struct RetainedGeometry {
     /// `DomLayout::container_nodes` of that layout.
     pub(crate) container_nodes: Option<Vec<NodeId>>,
-    pub(crate) rects: HashMap<NodeId, Rect>,
+    pub(crate) rects: crate::NodeMap<Rect>,
     pub(crate) clip_rects: HashMap<NodeId, Option<OverflowClip>>,
     pub(crate) translates: HashMap<NodeId, (f32, f32)>,
     pub(crate) transforms: HashMap<NodeId, crate::Affine2>,
@@ -2546,7 +2550,7 @@ fn accumulate_scrolling_overflow(
     id: NodeId,
     inherited_clip: Option<OverflowClip>,
     fixed: &HashSet<NodeId>,
-    rects: &HashMap<NodeId, Rect>,
+    rects: &crate::NodeMap<Rect>,
     styles: &crate::StyleTable,
     translates: &HashMap<NodeId, (f32, f32)>,
     transforms: &HashMap<NodeId, crate::Affine2>,
@@ -3104,7 +3108,7 @@ fn inline_percentage_height(style: &crate::LayoutStyle) -> Option<f32> {
 }
 
 fn sync_positioned_pseudo_percentage_padding(
-    rects: &HashMap<NodeId, Rect>,
+    rects: &crate::NodeMap<Rect>,
     styles: &mut StyleMap,
     // The hosts of such pseudo boxes, when indexed.
     indexed: Option<&[NodeId]>,
@@ -3293,7 +3297,7 @@ fn resolve_clip_rects(
     inherited: Option<OverflowClip>,
     tx: f32,
     ty: f32,
-    rects: &HashMap<NodeId, Rect>,
+    rects: &crate::NodeMap<Rect>,
     styles: &crate::StyleTable,
     clip_rects: &mut HashMap<NodeId, Option<OverflowClip>>,
     translates: &mut HashMap<NodeId, (f32, f32)>,
@@ -3567,8 +3571,8 @@ pub(crate) struct ClipStyleChanges<'a> {
 impl ClipDirty {
     fn new(
         tree: &DomTree,
-        old_rects: &HashMap<NodeId, Rect>,
-        rects: &HashMap<NodeId, Rect>,
+        old_rects: &crate::NodeMap<Rect>,
+        rects: &crate::NodeMap<Rect>,
         fresh: &HashSet<NodeId>,
         styles: &crate::StyleTable,
         style_changes: Option<ClipStyleChanges<'_>>,
@@ -4162,6 +4166,18 @@ pub(crate) struct CascadeCx {
     context_changed: bool,
     /// Set by `cascade_node_style`: the node just cascaded got a new style.
     changed: bool,
+    /// `RetainedStylePlan::Reuse::pruneable`: a node of it whose parent kept
+    /// its retained style in this pass keeps its own.
+    pruneable: HashSet<NodeId>,
+    /// Fresh elements that kept their retained styles in this pass.
+    kept: HashSet<NodeId>,
+}
+
+thread_local! {
+    /// The pruneable nodes of the retained plan the next `layout_dom_once`
+    /// runs with, and the tree (address, mutation generation) it is for.
+    static PRUNEABLE: std::cell::RefCell<(usize, u64, HashSet<NodeId>)> =
+        std::cell::RefCell::new((0, 0, HashSet::default()));
 }
 
 /// What applying author rules to an element reads besides the style it
@@ -4220,9 +4236,66 @@ fn chain_feature(parent: u64, feature: u64) -> u64 {
 
 struct StyleShareEntry {
     key: StyleShareKey,
-    input: crate::LayoutStyle,
+    input: ShareInput,
     output: crate::LayoutStyle,
     props: Option<std::rc::Rc<HashMap<String, String>>>,
+}
+
+/// The style an entry's rules were applied to, or what that style is made
+/// of when nothing outside the element changes it (`StartInputs`).
+enum ShareInput {
+    Style(crate::LayoutStyle),
+    Start(StartInputs),
+}
+
+/// What a context-free element's starting style (UA style and
+/// presentational hints) is made of: its name, its attributes but `class`,
+/// `id` and `style`, the inherited color scheme and the document mode.
+#[derive(PartialEq)]
+struct StartInputs {
+    ns: String,
+    local: String,
+    attributes: Vec<(String, String)>,
+    color_scheme_dark: bool,
+    quirks_mode: bool,
+}
+
+/// `StartInputs` of the element being cascaded, borrowed.
+struct StartInputsRef<'a> {
+    ns: &'a str,
+    local: &'a str,
+    attributes: &'a [(&'a str, &'a str)],
+    color_scheme_dark: bool,
+    quirks_mode: bool,
+}
+
+impl StartInputsRef<'_> {
+    fn to_owned(&self) -> StartInputs {
+        StartInputs {
+            ns: self.ns.to_owned(),
+            local: self.local.to_owned(),
+            attributes: self
+                .attributes
+                .iter()
+                .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+            color_scheme_dark: self.color_scheme_dark,
+            quirks_mode: self.quirks_mode,
+        }
+    }
+
+    fn matches(&self, inputs: &StartInputs) -> bool {
+        self.color_scheme_dark == inputs.color_scheme_dark
+            && self.quirks_mode == inputs.quirks_mode
+            && self.local == inputs.local
+            && self.ns == inputs.ns
+            && self.attributes.len() == inputs.attributes.len()
+            && self.attributes.iter().zip(&inputs.attributes).all(
+                |(&(name, value), (kept_name, kept_value))| {
+                    name == kept_name && value == kept_value
+                },
+            )
+    }
 }
 
 impl StyleShareCache {
@@ -4267,14 +4340,36 @@ impl StyleShareCache {
         self.entries
             .get(&key.hash())?
             .iter()
-            .find(|entry| entry.key == *key && entry.input == *input)
+            .find(|entry| {
+                entry.key == *key
+                    && matches!(&entry.input, ShareInput::Style(style) if style == input)
+            })
+            .map(|entry| (entry.output.clone(), entry.props.clone()))
+    }
+
+    /// `get` for an element whose starting style is made of `start`.
+    fn get_by_start(
+        &self,
+        key: &StyleShareKey,
+        start: &StartInputsRef<'_>,
+    ) -> Option<(
+        crate::LayoutStyle,
+        Option<std::rc::Rc<HashMap<String, String>>>,
+    )> {
+        self.entries
+            .get(&key.hash())?
+            .iter()
+            .find(|entry| {
+                entry.key == *key
+                    && matches!(&entry.input, ShareInput::Start(inputs) if start.matches(inputs))
+            })
             .map(|entry| (entry.output.clone(), entry.props.clone()))
     }
 
     fn insert(
         &mut self,
         key: StyleShareKey,
-        input: crate::LayoutStyle,
+        input: ShareInput,
         output: crate::LayoutStyle,
         props: Option<std::rc::Rc<HashMap<String, String>>>,
     ) {
@@ -4351,10 +4446,40 @@ fn cascade_node_style(
     let mut this_props = parent_props.clone();
     let mut descendant_cell_padding = inherited_cell_padding;
     let mut descendant_color_scheme_dark = inherited_color_scheme_dark;
+    // A pruneable element under a parent that kept its retained style has
+    // the inputs it had then (see `RetainedStylePlan::Reuse::pruneable`), so
+    // it keeps its style too, as the signature check would find after
+    // matching. Not for what that check does not cover: animations and
+    // container queries.
+    let pruned = is_element
+        && cx.as_deref().is_some_and(|cx| {
+            !cx.context_changed
+                && cx.pruneable.contains(&id)
+                && cx.signatures.contains_key(&id)
+                && tree
+                    .with_node(id, |node| node.parent)
+                    .flatten()
+                    .is_some_and(|parent| cx.kept.contains(&parent))
+        })
+        && container_evaluator.is_none()
+        && styles
+            .get(&id)
+            .is_some_and(|style| style.animation_name.is_none())
+        && animation_timeline
+            .waapi_for_node(id, animation_sample.time)
+            .next()
+            .is_none();
     let reuse_style = is_element
-        && fresh_styles.is_some_and(|fresh| !fresh.contains(&id))
+        && (pruned || fresh_styles.is_some_and(|fresh| !fresh.contains(&id)))
         && styles.contains_key(&id)
         && custom_properties.contains_key(&id);
+    if pruned && reuse_style {
+        if let Some(cx) = cx.as_deref_mut() {
+            cx.reverted.push(id);
+            cx.kept.insert(id);
+        }
+        crate::prof::count(crate::prof::STYLE_UNCHANGED);
+    }
     if reuse_style {
         this_props = custom_properties
             .get(&id)
@@ -4558,7 +4683,7 @@ fn cascade_node_style(
         let node_id = node.get_attribute("id");
         let classes: Vec<&str> = node
             .get_attribute("class")
-            .map(|c| c.split_whitespace().collect())
+            .map(|c| obscura_dom::selector::class_tokens(c).collect())
             .unwrap_or_default();
         let shadow_host_sheet = tree
             .shadow_root(id)
@@ -4653,10 +4778,10 @@ fn cascade_node_style(
                 && node.parent.is_some_and(|parent| {
                     element_local_name(tree, parent).as_deref() == Some("picture")
                 }));
-            let signature = context_free.then(|| {
-                use std::hash::BuildHasher;
-                let attributes = node
-                    .attrs()
+            // The attributes the starting style can read (presentational
+            // hints, `hidden`, `type`, `href`): every one but these three.
+            let attributes = context_free.then(|| {
+                node.attrs()
                     .map(|attributes| {
                         attributes
                             .iter()
@@ -4668,7 +4793,10 @@ fn cascade_node_style(
                             })
                             .collect::<Vec<_>>()
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_default()
+            });
+            let signature = attributes.as_ref().map(|attributes| {
+                use std::hash::BuildHasher;
                 foldhash::fast::FixedState::default().hash_one((
                     sheet as *const crate::css::Stylesheet as usize,
                     &matched,
@@ -4706,6 +4834,7 @@ fn cascade_node_style(
                     this_props = props.clone();
                     animation_timeline.clear_animation(id, animation_sample);
                     cx.reverted.push(id);
+                    cx.kept.insert(id);
                     cx.changed = false;
                     crate::prof::count(crate::prof::STYLE_UNCHANGED);
                     return Some((
@@ -4716,7 +4845,6 @@ fn cascade_node_style(
                     ));
                 }
             }
-            style = starting_style();
             match signature {
                 Some(signature) => {
                     cx.signatures.insert(id, signature);
@@ -4734,7 +4862,38 @@ fn cascade_node_style(
                 parent_props: parent_props.clone(),
                 ancestor_display_none,
             };
-            match shareable.then(|| share.get(&key, &style)).flatten() {
+            // A context-free element's starting style is a function of
+            // these: compare them instead of making and comparing the style.
+            // Kept only for short attribute values: an entry keeps a copy.
+            let short = |attributes: &&[(&str, &str)]| {
+                attributes
+                    .iter()
+                    .map(|(name, value)| name.len() + value.len())
+                    .sum::<usize>()
+                    <= 512
+            };
+            let start = attributes
+                .as_deref()
+                .filter(short)
+                .map(|attributes| StartInputsRef {
+                    ns: elem.ns.as_ref(),
+                    local,
+                    attributes,
+                    color_scheme_dark: inherited_color_scheme_dark,
+                    quirks_mode,
+                });
+            let mut built = None;
+            let found = if !shareable {
+                None
+            } else if let Some(start) = &start {
+                share.get_by_start(&key, start)
+            } else {
+                let starting = starting_style();
+                let found = share.get(&key, &starting);
+                built = Some(starting);
+                found
+            };
+            match found {
                 Some((shared, props)) => {
                     crate::prof::count(crate::prof::STYLE_SHARE_HIT);
                     style = shared;
@@ -4747,7 +4906,11 @@ fn cascade_node_style(
                 }
                 None => {
                     crate::prof::count(crate::prof::STYLE_SHARE_MISS);
-                    let input = shareable.then(|| style.clone());
+                    style = built.unwrap_or_else(starting_style);
+                    let input = shareable.then(|| match &start {
+                        Some(start) => ShareInput::Start(start.to_owned()),
+                        None => ShareInput::Style(style.clone()),
+                    });
                     let effective_props = sheet.apply_matched_rules_without_scopes(
                         id,
                         &mut style,
@@ -5492,6 +5655,11 @@ enum RetainedStylePlan {
     Reuse {
         dirty: HashSet<NodeId>,
         has_animation_damage: bool,
+        /// Nodes of `dirty` named only as descendants of an element whose
+        /// structural state changed in a way only its own match reads: the
+        /// cascade keeps their retained styles while that element and their
+        /// ancestors below it keep theirs (`CascadeCx::pruneable`).
+        pruneable: HashSet<NodeId>,
     },
     Full,
 }
@@ -6017,15 +6185,18 @@ fn element_local_name(tree: &DomTree, node: NodeId) -> Option<String> {
 /// used left of a sibling combinator additionally reaches following siblings.
 fn add_structural_candidate_scope(
     tree: &DomTree,
-    map: &crate::css::InvalidationMap,
-    state: &str,
+    invalidations: &[&crate::css::StructuralInvalidation],
     candidate: NodeId,
     parent: NodeId,
     dirty: &mut HashSet<NodeId>,
+    conditional: Option<&mut Vec<NodeId>>,
 ) {
-    let invalidations = map
-        .structural_invalidations(state)
-        .into_iter()
+    if invalidations.is_empty() {
+        return;
+    }
+    let invalidations = invalidations
+        .iter()
+        .copied()
         .filter(|invalidation| {
             !invalidation.inside_relational && invalidation.subject_may_match(tree, candidate)
         })
@@ -6039,6 +6210,23 @@ fn add_structural_candidate_scope(
             .contains(crate::css::InvalidationReaches::CONSERVATIVE)
     }) {
         add_style_subtree(tree, parent, dirty);
+        return;
+    }
+    // A state only the subject compound reads changes what the candidate
+    // matches and nothing else: its descendants change only when its own
+    // style does. They are named apart (`conditional`), and the cascade keeps
+    // their retained styles when the candidate keeps its own.
+    if let Some(conditional) = conditional.filter(|_| {
+        invalidations.iter().all(|invalidation| {
+            let reaches = invalidation.reaches;
+            !reaches.contains(crate::css::InvalidationReaches::DESCENDANTS)
+                && !reaches.contains(crate::css::InvalidationReaches::SIBLINGS)
+                && !reaches.contains(crate::css::InvalidationReaches::RELATIONAL)
+        })
+    }) {
+        dirty.insert(candidate);
+        dirty.extend(tree.ancestors(candidate));
+        conditional.push(candidate);
         return;
     }
     add_style_subtree(tree, candidate, dirty);
@@ -6059,6 +6247,7 @@ fn add_inserted_structural_scopes(
     insertion_count: usize,
     dirty: &mut HashSet<NodeId>,
     batched_parents: &mut HashSet<NodeId>,
+    conditional: &mut Vec<NodeId>,
 ) {
     if batched_parents.contains(&parent) {
         return;
@@ -6068,8 +6257,16 @@ fn add_inserted_structural_scopes(
         return;
     };
     let mut add = |state: &str, candidates: &[NodeId]| {
+        let invalidations = map.structural_invalidations(state);
         for candidate in candidates.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(
+                tree,
+                &invalidations,
+                candidate,
+                parent,
+                dirty,
+                Some(&mut *conditional),
+            );
         }
     };
 
@@ -6146,19 +6343,41 @@ fn add_removed_structural_scopes(
 ) {
     let siblings = element_children(tree, parent);
     if let Some(first) = siblings.first().copied() {
-        add_structural_candidate_scope(tree, map, "first-child", first, parent, dirty);
+        add_structural_candidate_scope(
+            tree,
+            &map.structural_invalidations("first-child"),
+            first,
+            parent,
+            dirty,
+            None,
+        );
     }
     if let Some(last) = siblings.last().copied() {
-        add_structural_candidate_scope(tree, map, "last-child", last, parent, dirty);
+        add_structural_candidate_scope(
+            tree,
+            &map.structural_invalidations("last-child"),
+            last,
+            parent,
+            dirty,
+            None,
+        );
     }
     if siblings.len() <= 1 {
         for candidate in siblings.iter().copied() {
-            add_structural_candidate_scope(tree, map, "only-child", candidate, parent, dirty);
+            add_structural_candidate_scope(
+                tree,
+                &map.structural_invalidations("only-child"),
+                candidate,
+                parent,
+                dirty,
+                None,
+            );
         }
     }
     for state in ["nth-child", "nth-last-child"] {
+        let invalidations = map.structural_invalidations(state);
         for candidate in siblings.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &invalidations, candidate, parent, dirty, None);
         }
     }
 
@@ -6171,19 +6390,41 @@ fn add_removed_structural_scopes(
         .filter(|candidate| element_local_name(tree, *candidate).as_deref() == Some(&local))
         .collect::<Vec<_>>();
     if let Some(first) = same_type.first().copied() {
-        add_structural_candidate_scope(tree, map, "first-of-type", first, parent, dirty);
+        add_structural_candidate_scope(
+            tree,
+            &map.structural_invalidations("first-of-type"),
+            first,
+            parent,
+            dirty,
+            None,
+        );
     }
     if let Some(last) = same_type.last().copied() {
-        add_structural_candidate_scope(tree, map, "last-of-type", last, parent, dirty);
+        add_structural_candidate_scope(
+            tree,
+            &map.structural_invalidations("last-of-type"),
+            last,
+            parent,
+            dirty,
+            None,
+        );
     }
     if same_type.len() <= 1 {
         for candidate in same_type.iter().copied() {
-            add_structural_candidate_scope(tree, map, "only-of-type", candidate, parent, dirty);
+            add_structural_candidate_scope(
+                tree,
+                &map.structural_invalidations("only-of-type"),
+                candidate,
+                parent,
+                dirty,
+                None,
+            );
         }
     }
     for state in ["nth-of-type", "nth-last-of-type"] {
+        let invalidations = map.structural_invalidations(state);
         for candidate in same_type.iter().copied() {
-            add_structural_candidate_scope(tree, map, state, candidate, parent, dirty);
+            add_structural_candidate_scope(tree, &invalidations, candidate, parent, dirty, None);
         }
     }
 }
@@ -6410,6 +6651,7 @@ fn retained_style_plan_for_sheet(
     let mut batched_insert_parents = HashSet::default();
     let mut checked_empty_parents = HashSet::default();
     let mut insertion_counts = HashMap::default();
+    let mut conditional_roots = Vec::new();
     for mutation in mutations {
         if let RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
             node, new_parent, ..
@@ -6587,6 +6829,7 @@ fn retained_style_plan_for_sheet(
                         insertion_counts.get(&new_parent).copied().unwrap_or(0),
                         &mut dirty,
                         &mut batched_insert_parents,
+                        &mut conditional_roots,
                     );
                     add_inserted_sibling_scopes(tree, map, node, new_parent, &mut dirty);
                     add_empty_parent_scope(
@@ -6837,9 +7080,25 @@ fn retained_style_plan_for_sheet(
             );
         }
     }
+    // The descendants of the elements only whose own match changed, unless
+    // something else restyles them: dirty too (every reader of the plan sees
+    // the whole subtree), and pruneable.
+    let mut pruneable = HashSet::default();
+    for root in conditional_roots {
+        for descendant in tree.descendants(root) {
+            if !dirty.contains(&descendant) {
+                pruneable.insert(descendant);
+            }
+        }
+    }
+    dirty.extend(pruneable.iter().copied());
+    if tree.has_shadow_roots() {
+        pruneable.clear();
+    }
     RetainedStylePlan::Reuse {
         dirty,
         has_animation_damage,
+        pruneable,
     }
 }
 
@@ -6880,6 +7139,7 @@ pub(crate) fn can_retain_layout_for_metadata(
             RetainedStylePlan::Reuse {
                 dirty,
                 has_animation_damage: false,
+                ..
             } if dirty.is_empty()
         )
 }
@@ -6918,6 +7178,7 @@ pub(crate) fn retained_selector_dirty_set(
         RetainedStylePlan::Reuse {
             dirty,
             has_animation_damage: false,
+            ..
         } => Some(dirty),
         _ => None,
     }
@@ -7874,7 +8135,11 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             RetainedStylePlan::Reuse {
                 mut dirty,
                 has_animation_damage,
+                mut pruneable,
             } => {
+                // What the steps below add is restyled whatever happens:
+                // pruneable is what stays named only by the plan.
+                dirty.retain(|node| !pruneable.contains(node));
                 if let Some(keys) = appended_keys.as_ref().filter(|keys| !keys.is_empty()) {
                     let before = dirty.len();
                     for &node in connected.iter().flatten() {
@@ -7918,6 +8183,8 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                         &mut dirty,
                     );
                 }
+                pruneable.retain(|node| !dirty.contains(node));
+                dirty.extend(pruneable.iter().copied());
                 // Once animation damage reaches at least half of the retained
                 // style graph, sparse HashMap reuse no longer offsets dirty-set
                 // bookkeeping and branch checks. This is a document-relative
@@ -7947,6 +8214,13 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 {
                     layout_tree.damage = damage;
                 }
+                let _ = PRUNEABLE.try_with(|slot| {
+                    *slot.borrow_mut() = (
+                        tree as *const DomTree as usize,
+                        tree.mutation_generation(),
+                        pruneable,
+                    )
+                });
                 Some((retained, dirty))
             }
             RetainedStylePlan::Full => {
@@ -8314,9 +8588,22 @@ fn layout_dom_once(
     let fresh_ancestors = fresh_styles
         .as_ref()
         .map(|fresh| fresh_style_ancestors(tree, fresh));
+    let pruneable = PRUNEABLE
+        .try_with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+        .ok()
+        .filter(|(address, generation, _)| {
+            *address == tree as *const DomTree as usize && *generation == tree.mutation_generation()
+        })
+        .map(|(_, _, pruneable)| pruneable)
+        .unwrap_or_default();
     let mut cascade_cx = CascadeCx {
         signatures,
         share,
+        pruneable: if fresh_styles.is_some() {
+            pruneable
+        } else {
+            HashSet::default()
+        },
         ..CascadeCx::default()
     };
     cascade_walk(
@@ -8537,7 +8824,7 @@ fn layout_dom_once(
         HashMap<NodeId, taffy::NodeId>,
     )> = None;
 
-    let mut rects = HashMap::default();
+    let mut rects = crate::NodeMap::default();
     let mut grid_overflow = HashMap::default();
     let mut grid_tracks = HashMap::default();
     let mut used_auto_margins = HashMap::default();
@@ -11988,7 +12275,7 @@ fn layout_dom_once(
                     tree,
                     ElementKind::ROW_OR_SECTION | ElementKind::CELL | ElementKind::TABLE,
                 );
-                let mut fractional_cells: HashMap<NodeId, Rect> = parts
+                let mut fractional_cells: crate::NodeMap<Rect> = parts
                     .iter()
                     .filter_map(|id| {
                         fractional_rects
@@ -12444,7 +12731,7 @@ fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) 
 fn place_inline_content(
     collected: &collect::Collected,
     ifc_items: &mut IfcRegistry,
-    rects: &mut HashMap<NodeId, Rect>,
+    rects: &mut crate::NodeMap<Rect>,
     text_runs: &mut HashMap<NodeId, Vec<(Rect, std::sync::Arc<str>)>>,
     generated_rects: &mut Vec<Option<Rect>>,
 ) -> HashMap<NodeId, Vec<Rect>> {
@@ -12555,7 +12842,7 @@ fn store_node(store: &crate::ifc::IfcStore, index: usize) -> Option<taffy::NodeI
 #[cfg(feature = "paint")]
 fn shaped_item_clip(
     owner: NodeId,
-    rects: &HashMap<NodeId, Rect>,
+    rects: &crate::NodeMap<Rect>,
     styles: &crate::StyleTable,
     clip_rects: &HashMap<NodeId, Option<OverflowClip>>,
     translates: &HashMap<NodeId, (f32, f32)>,
@@ -13871,16 +14158,19 @@ fn reparent_indexed_positioned_nodes(
     // passes the root on, as the full walk does.
     // Memoized by ancestor (and `fixed`): what it gives its descendants, so
     // each ancestor chain is walked once for all the elements under it.
-    let mut given: HashMap<(NodeId, bool), taffy::NodeId> = HashMap::default();
+    // By node index, for absolute and for fixed descendants.
+    let slots = tree.node_slot_count();
+    let mut given: [Vec<Option<taffy::NodeId>>; 2] = [vec![None; slots], vec![None; slots]];
     let mut containing_block = |id: NodeId, fixed: bool| {
+        let given = &mut given[usize::from(fixed)];
         let mut chain = Vec::new();
         let mut current = rendered_parent(tree, id);
         let found = loop {
             let Some(ancestor) = current else {
                 break taffy_root;
             };
-            if let Some(&known) = given.get(&(ancestor, fixed)) {
-                break known;
+            if let Some(Some(known)) = given.get(ancestor.index()) {
+                break *known;
             }
             let Some(style) = styles.get(&ancestor) else {
                 // An ancestor without a style gives the root, as do all its
@@ -13896,7 +14186,9 @@ fn reparent_indexed_positioned_nodes(
             };
             if captures {
                 if let Some(&own) = reverse.get(&ancestor) {
-                    given.insert((ancestor, fixed), own);
+                    if let Some(slot) = given.get_mut(ancestor.index()) {
+                        *slot = Some(own);
+                    }
                     break own;
                 }
             }
@@ -13904,7 +14196,9 @@ fn reparent_indexed_positioned_nodes(
             current = rendered_parent(tree, ancestor);
         };
         for ancestor in chain {
-            given.insert((ancestor, fixed), found);
+            if let Some(slot) = given.get_mut(ancestor.index()) {
+                *slot = Some(found);
+            }
         }
         found
     };
@@ -15440,6 +15734,8 @@ pub(crate) struct FlatTree {
     /// How this tree differs from the one of generation `.0` it was spliced
     /// from (`splice_flat_walk`), for `rendered_tree_changes`.
     spliced_from: Option<(u64, RenderedTreeChanges)>,
+    /// The nodes of the walk with a kind, in walk order, made on first use.
+    kinded: std::cell::OnceCell<std::rc::Rc<Vec<NodeId>>>,
 }
 
 /// Elements a few layout passes look for, as bits (see `FlatTree::kinds`).
@@ -15481,7 +15777,20 @@ pub(crate) fn rendered_nodes_of_kind(tree: &DomTree, kinds: u8) -> Vec<NodeId> {
     if flat.kinds_present & kinds == 0 {
         return Vec::new();
     }
-    flat.walk
+    let kinded = flat.kinded.get_or_init(|| {
+        std::rc::Rc::new(
+            flat.walk
+                .iter()
+                .copied()
+                .filter(|id| {
+                    flat.kinds
+                        .get(id.index())
+                        .is_some_and(|&kind| kind != 0 && kind != ElementKind::UNKNOWN)
+                })
+                .collect(),
+        )
+    });
+    kinded
         .iter()
         .copied()
         .filter(|id| {
@@ -15730,6 +16039,7 @@ pub(crate) fn patch_flat_tree(
             kinds,
             kinds_present: previous.kinds_present,
             spliced_from: None,
+            kinded: previous.kinded.clone(),
         });
         if layout_verify_enabled() {
             verify_flat_tree(tree, &flat);
@@ -15815,6 +16125,7 @@ pub(crate) fn patch_flat_tree(
                 kinds,
                 kinds_present,
                 spliced_from: Some((previous.generation, changes)),
+                kinded: Default::default(),
             });
             if layout_verify_enabled() {
                 verify_flat_tree(tree, &flat);
@@ -15889,6 +16200,7 @@ pub(crate) fn patch_flat_tree(
         kinds,
         kinds_present,
         spliced_from: None,
+        kinded: Default::default(),
     });
     if layout_verify_enabled() {
         verify_flat_tree(tree, &flat);
@@ -16127,6 +16439,7 @@ fn build_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
         kinds,
         kinds_present,
         spliced_from: None,
+        kinded: Default::default(),
     })
 }
 
@@ -16755,7 +17068,7 @@ fn synthesize_column_rects(
     taffy_tree: &TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     ifc_items: &IfcRegistry,
-    rects: &mut HashMap<NodeId, Rect>,
+    rects: &mut crate::NodeMap<Rect>,
 ) {
     let length_of = |value: taffy::CompactLength| {
         (value.tag() == taffy::CompactLength::LENGTH_TAG).then(|| value.value())
@@ -16850,7 +17163,7 @@ fn synthesize_column_rects(
 fn synthesize_row_rects(
     tree: &DomTree,
     styles: &crate::StyleTable,
-    rects: &mut HashMap<NodeId, Rect>,
+    rects: &mut crate::NodeMap<Rect>,
 ) {
     let mut rows = Vec::new();
     let mut sections = Vec::new();
@@ -16994,7 +17307,7 @@ fn synthesize_row_rects(
         false
     };
     let place_empty =
-        |id: NodeId, previous: Option<Rect>, row_gap: bool, rects: &HashMap<NodeId, Rect>| {
+        |id: NodeId, previous: Option<Rect>, row_gap: bool, rects: &crate::NodeMap<Rect>| {
             if hidden(id) {
                 return None;
             }
@@ -19717,14 +20030,47 @@ fn defer_cyclic_flex_inline_sizes(
 ) -> Vec<DeferredCyclicInlineSize> {
     let mut previous = std::mem::take(memo);
     let incremental = affected.is_some() && !previous.candidates.is_empty();
+    // The previous decisions stay in their map: a kept decision is not moved.
+    // The entries of the nodes written since are set aside (their slots are
+    // found again) and those of nodes without a style are dropped, so the map
+    // holds this layout's candidates only, as one made afresh would.
+    let mut outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> = if incremental {
+        std::mem::take(&mut previous.outcomes)
+    } else {
+        HashMap::default()
+    };
+    let mut written_outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
+        HashMap::default();
     let candidates: Vec<(NodeId, usize, DeferredCyclicInlineSource)> = match affected {
         Some((_, written)) if incremental => {
-            let written: HashSet<NodeId> = written.iter().copied().collect();
+            let mut is_written = vec![false; tree.node_slot_count()];
+            for &id in written {
+                if let Some(seen) = is_written.get_mut(id.index()) {
+                    *seen = true;
+                }
+            }
+            let is_written = |id: NodeId| is_written.get(id.index()).copied().unwrap_or(true);
             let mut candidates: Vec<_> = std::mem::take(&mut previous.candidates)
                 .into_iter()
-                .filter(|(id, _, _)| !written.contains(id) && styles.contains_key(id))
+                .filter(|&(id, slot, _)| {
+                    if is_written(id) {
+                        if let Some(outcome) = outcomes.remove(&(id, slot)) {
+                            written_outcomes.insert((id, slot), outcome);
+                        }
+                        false
+                    } else if !styles.contains_key(&id) {
+                        outcomes.remove(&(id, slot));
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .collect();
-            for &id in &written {
+            let mut found = HashSet::default();
+            for &id in written {
+                if !found.insert(id) {
+                    continue;
+                }
                 if let Some(style) = styles.get(&id) {
                     candidates.extend(deferral_candidate_slots(id, style));
                 }
@@ -19742,12 +20088,16 @@ fn defer_cyclic_flex_inline_sizes(
             .is_none_or(|(affected, _)| affected.get(id.index()).copied().unwrap_or(true))
     };
     let mut deferred = Vec::new();
-    let mut outcomes: HashMap<(NodeId, usize), Option<DeferredCyclicInlineSize>> =
-        HashMap::default();
 
     for &(id, slot, ref source) in &candidates {
         if !affected_at(id) {
-            if let Some(outcome) = previous.outcomes.remove(&(id, slot)) {
+            if let Some(outcome) = outcomes.get(&(id, slot)) {
+                if let Some(entry) = outcome {
+                    deferred.push(entry.clone());
+                }
+                continue;
+            }
+            if let Some(outcome) = written_outcomes.remove(&(id, slot)) {
                 if let Some(entry) = &outcome {
                     deferred.push(entry.clone());
                 }
@@ -23391,6 +23741,7 @@ mod tests {
         let RetainedStylePlan::Reuse {
             dirty,
             has_animation_damage,
+            ..
         } = retained_style_plan(
             &tree,
             &sheet,

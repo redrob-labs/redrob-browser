@@ -57,6 +57,35 @@ impl PrecomputedHash for CssString {
     }
 }
 
+/// The classes of a `class` attribute, split on whitespace the way class
+/// matching splits them (Unicode whitespace), with the faster ASCII split for
+/// the usual all-ASCII attribute (the same tokens there).
+pub fn class_tokens(value: &str) -> ClassTokens<'_> {
+    if value.is_ascii() {
+        ClassTokens::Ascii(value.split_ascii_whitespace())
+    } else {
+        ClassTokens::Unicode(value.split_whitespace())
+    }
+}
+
+/// See `class_tokens`.
+pub enum ClassTokens<'a> {
+    Ascii(std::str::SplitAsciiWhitespace<'a>),
+    Unicode(std::str::SplitWhitespace<'a>),
+}
+
+impl<'a> Iterator for ClassTokens<'a> {
+    type Item = &'a str;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a str> {
+        match self {
+            Self::Ascii(tokens) => tokens.next(),
+            Self::Unicode(tokens) => tokens.next(),
+        }
+    }
+}
+
 /// `CssString::precomputed_hash` of a borrowed string.
 fn css_string_hash(value: &str) -> u32 {
     let mut h: u32 = 5381;
@@ -574,23 +603,38 @@ impl<'a> Element for DomElement<'a> {
                             // A class is an occurrence bounded by ASCII
                             // whitespace (the separators `split_whitespace`
                             // also splits on) or the ends: no split.
-                            let needle = name.0.as_str();
-                            if needle.is_empty() || needle.chars().any(char::is_whitespace) {
+                            let needle = name.0.as_bytes();
+                            if needle.is_empty() {
                                 return false;
                             }
                             if !class_attr.is_ascii() {
-                                return class_attr.split_whitespace().any(|class| class == needle);
+                                return class_attr
+                                    .split_whitespace()
+                                    .any(|class| class.as_bytes() == needle);
                             }
-                            let bytes = class_attr.as_bytes();
                             // The ASCII characters `char::is_whitespace` holds.
+                            // A token holds none of them, so a needle with
+                            // whitespace (or any non-ASCII one) never equals
+                            // one; a scan of the tokens builds no searcher.
                             let separator = |byte: u8| {
                                 matches!(byte, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
                             };
-                            return class_attr.match_indices(needle).any(|(start, _)| {
-                                let end = start + needle.len();
-                                (start == 0 || separator(bytes[start - 1]))
-                                    && (end == bytes.len() || separator(bytes[end]))
-                            });
+                            let bytes = class_attr.as_bytes();
+                            let mut at = 0;
+                            while at < bytes.len() {
+                                if separator(bytes[at]) {
+                                    at += 1;
+                                    continue;
+                                }
+                                let start = at;
+                                while at < bytes.len() && !separator(bytes[at]) {
+                                    at += 1;
+                                }
+                                if &bytes[start..at] == needle {
+                                    return true;
+                                }
+                            }
+                            return false;
                         }
                         let name = name.0.as_bytes();
                         class_attr
@@ -1088,7 +1132,7 @@ impl AncestorFilter {
                     push_hash(hashes, filter, css_string_hash(id));
                 }
                 if let Some(class) = node.get_attribute("class") {
-                    for c in class.split_whitespace() {
+                    for c in class_tokens(class) {
                         push_hash(hashes, filter, css_string_hash(c));
                     }
                 }

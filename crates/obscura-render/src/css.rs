@@ -349,11 +349,16 @@ pub(crate) struct RelationalKeySummary {
 impl RelationalKeySummary {
     pub(crate) fn of(tree: &DomTree, nodes: &[NodeId]) -> Self {
         let quirks = tree.is_quirks();
-        let fold = |value: &str| {
-            if quirks {
-                value.to_ascii_lowercase()
-            } else {
-                value.to_owned()
+        // Insert `value` (lowercased in quirks mode), copying it only when
+        // the set does not hold it yet.
+        let add = |set: &mut crate::HashSet<String>, value: &str, lower: bool| {
+            if lower && value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                let value = value.to_ascii_lowercase();
+                if !set.contains(&value) {
+                    set.insert(value);
+                }
+            } else if !set.contains(value) {
+                set.insert(value.to_owned());
             }
         };
         let mut summary = Self {
@@ -370,22 +375,22 @@ impl RelationalKeySummary {
             let Some(element) = dom_node.as_element() else {
                 continue;
             };
-            summary
-                .locals
-                .insert(element.local.as_ref().to_ascii_lowercase());
+            add(&mut summary.locals, element.local.as_ref(), true);
             if let Some(id) = dom_node.get_attribute("id") {
-                summary.ids.insert(fold(id));
+                add(&mut summary.ids, id, quirks);
             }
             if let Some(classes) = dom_node.get_attribute("class") {
-                summary.classes.extend(classes.split_whitespace().map(fold));
+                for class in classes.split_whitespace() {
+                    add(&mut summary.classes, class, quirks);
+                }
             }
             if let Some(attributes) = dom_node.attrs() {
                 for attribute in attributes {
-                    if !summary.attributes.contains(attribute.name.local.as_ref()) {
-                        summary
-                            .attributes
-                            .insert(attribute.name.local.as_ref().to_owned());
-                    }
+                    add(
+                        &mut summary.attributes,
+                        attribute.name.local.as_ref(),
+                        false,
+                    );
                 }
             }
         }
@@ -2174,7 +2179,9 @@ struct PseudoRuleMap {
 }
 
 impl PseudoRuleMap {
-    fn push(&mut self, mut rule: PseudoRule) {
+    /// Add `rule`; returns the attributes its selector reads when it is
+    /// context-free.
+    fn push(&mut self, mut rule: PseudoRule) -> Vec<String> {
         let index = self.rules.len();
         let mut attributes = Vec::new();
         let context_free = rule.sel.context_free(&mut attributes)
@@ -2185,7 +2192,7 @@ impl PseudoRuleMap {
                 self.contextual.add(key, index);
             }
         }
-        self.match_attributes.extend(attributes);
+        self.match_attributes.extend(attributes.iter().cloned());
         if rule.sel.candidate_keys().len() > 1 {
             rule.candidate_slot = u32::try_from(self.candidate_slot_count)
                 .expect("pseudo selector candidate slot count exceeds u32");
@@ -2210,6 +2217,7 @@ impl PseudoRuleMap {
             }
         }
         self.rules.push(rule);
+        attributes
     }
 
     fn bucket_matches_container_query_rule(
@@ -3643,7 +3651,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.before_rules.push(PseudoRule {
+                        let attributes = sheet.before_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3655,6 +3663,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         // Keep correctness metadata for relative/structural
                         // syntax that the current selector matcher cannot yet
@@ -3678,7 +3688,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.after_rules.push(PseudoRule {
+                        let attributes = sheet.after_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3690,6 +3700,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         note_selector_for_invalidation(&mut sheet.invalidation_map, base, order);
                     }
@@ -3709,7 +3721,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.placeholder_rules.push(PseudoRule {
+                        let attributes = sheet.placeholder_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3721,6 +3733,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         note_selector_for_invalidation(&mut sheet.invalidation_map, base, order);
                     }
@@ -3886,7 +3900,7 @@ impl Stylesheet {
             node.as_ref()
                 .and_then(|node| node.get_attribute("class"))
                 .into_iter()
-                .flat_map(str::split_whitespace),
+                .flat_map(obscura_dom::selector::class_tokens),
         );
         self.pseudo_matches_part(tree, matcher, nid, &classes, evaluator, MatchPart::All)
     }
@@ -4968,10 +4982,8 @@ impl Stylesheet {
                     } else {
                         name
                     };
+                    // Holds the pseudo-element maps' attributes too.
                     self.match_attributes.contains(name)
-                        || self.before_rules.match_attributes.contains(name)
-                        || self.after_rules.match_attributes.contains(name)
-                        || self.placeholder_rules.match_attributes.contains(name)
                 };
                 if tracked {
                     attribute.name.ns.as_ref().hash(&mut hasher);
