@@ -3018,6 +3018,12 @@ impl StylesheetCache {
         Some(Arc::clone(&entry.sheet))
     }
 
+    /// Forget which document state the entry was read from, so
+    /// `sheet_for_unchanged_tree` answers `None` until the next parse.
+    pub(crate) fn forget_tree_token(&mut self) {
+        self.tree_token = None;
+    }
+
     /// How the sheet of the latest `get_or_parse` miss continued an earlier
     /// parse (`None` after a hit or a parse from scratch).
     pub(crate) fn take_resume(&mut self) -> Option<SheetResume> {

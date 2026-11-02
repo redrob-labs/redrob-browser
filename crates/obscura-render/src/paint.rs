@@ -347,6 +347,13 @@ impl RenderResourceCache {
         }
     }
 
+    /// Drop the image and font collections kept for patching (see
+    /// `patch_image_intrinsics`), so the next layout collects again.
+    pub(crate) fn forget_collection_memos(&mut self) {
+        self.image_memo = None;
+        self.web_fonts_memo = None;
+    }
+
     /// Record that the viewport's bottom edge has reached document y
     /// `bottom` (root scroll offset plus viewport height). Returns true when
     /// a deferred lazy image is now within the lazy-load distance, so the
@@ -4072,6 +4079,10 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             || (forward_document_sample
                 && previous.advance_inactive_animation_sample_time(animation_sample.time)))
     {
+        // The collections of the next layout cannot be patched from the
+        // last ones past mutations this layout never saw.
+        resources.forget_collection_memos();
+        stylesheet_cache.forget_tree_token();
         return Some(previous);
     }
     if previous.viewport == viewport
@@ -4159,6 +4170,8 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
                         previous.selected_images.insert(id, selected);
                     }
                     previous.paint_epoch = next_paint_epoch();
+                    resources.forget_collection_memos();
+                    stylesheet_cache.forget_tree_token();
                     return Some(previous);
                 }
             }
@@ -13063,9 +13076,9 @@ fn collect_image_intrinsics(
 ) {
     let mut out = crate::HashMap::default();
     let mut selected = HashMap::default();
-    let mut has_video = false;
+    let mut videos = Vec::new();
     for nid in crate::dom::rendered_descendants(tree, tree.document()) {
-        has_video |= collect_image_intrinsic_of(
+        if collect_image_intrinsic_of(
             tree,
             nid,
             viewport,
@@ -13073,22 +13086,27 @@ fn collect_image_intrinsics(
             cache,
             &mut out,
             &mut selected,
-        );
+        ) {
+            videos.push(nid);
+        }
     }
-    cache.image_memo = (!has_video).then(|| ImageMemo {
+    cache.image_memo = Some(ImageMemo {
         key: ImageMemoKey::new(tree, viewport, base_url),
         intrinsic: out.clone(),
         selected: selected.clone(),
+        videos,
     });
     (out, selected)
 }
 
-/// The image intrinsics of the last full collection of a document without
-/// videos (whose frames change with playback time).
+/// The image intrinsics of the last collection of a document.
 struct ImageMemo {
     key: ImageMemoKey,
     intrinsic: HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     selected: HashMap<obscura_dom::tree::NodeId, SelectedImage>,
+    /// Rendered `<video>` elements: their frame changes with playback time,
+    /// so every collection reads them again.
+    videos: Vec<obscura_dom::tree::NodeId>,
 }
 
 #[derive(PartialEq)]
@@ -13112,7 +13130,7 @@ impl ImageMemoKey {
 /// only inserted and removed subtrees are visited. `None` when a mutation
 /// can change an image elsewhere (an attribute of an image, a `<source>` or
 /// `<picture>`, a `<details>` opening, a loaded resource) or the document
-/// has shadow roots or videos.
+/// has shadow roots. Videos are read again every time.
 fn patch_image_intrinsics(
     tree: &DomTree,
     viewport: (f32, f32),
@@ -13166,6 +13184,7 @@ fn patch_image_intrinsics(
     }
     let mut out = memo.intrinsic.clone();
     let mut selected = memo.selected.clone();
+    let mut videos = memo.videos.clone();
     let document = tree.document();
     // On the rendered tree: every step up is a rendered child of its parent
     // (a closed `<details>` renders only its summary).
@@ -13184,29 +13203,38 @@ fn patch_image_intrinsics(
     };
     for mutation in mutations {
         match mutation {
-            RetainedStyleMutation::Tree(TreeStyleMutation::Remove { node, .. }) => {
+            RetainedStyleMutation::Tree(
+                TreeStyleMutation::Remove { node, .. } | TreeStyleMutation::Insert { node, .. },
+            ) => {
                 for id in std::iter::once(*node).chain(tree.descendants(*node)) {
                     out.remove(&id);
                     selected.remove(&id);
-                }
-            }
-            RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. }) => {
-                for id in std::iter::once(*node).chain(tree.descendants(*node)) {
-                    out.remove(&id);
-                    selected.remove(&id);
+                    videos.retain(|video| *video != id);
                 }
             }
             _ => {}
         }
     }
-    let mut has_video = false;
+    for &video in &videos {
+        out.remove(&video);
+        selected.remove(&video);
+        collect_image_intrinsic_of(
+            tree,
+            video,
+            viewport,
+            base_url,
+            cache,
+            &mut out,
+            &mut selected,
+        );
+    }
     for mutation in mutations {
         if let RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. }) = mutation {
             if !rendered(*node) {
                 continue;
             }
             for id in std::iter::once(*node).chain(crate::dom::rendered_descendants(tree, *node)) {
-                has_video |= collect_image_intrinsic_of(
+                if collect_image_intrinsic_of(
                     tree,
                     id,
                     viewport,
@@ -13214,17 +13242,18 @@ fn patch_image_intrinsics(
                     cache,
                     &mut out,
                     &mut selected,
-                );
+                ) && !videos.contains(&id)
+                {
+                    videos.push(id);
+                }
             }
         }
-    }
-    if has_video {
-        return None;
     }
     cache.image_memo = Some(ImageMemo {
         key: ImageMemoKey::new(tree, viewport, base_url),
         intrinsic: out.clone(),
         selected: selected.clone(),
+        videos,
     });
     Some((out, selected))
 }
