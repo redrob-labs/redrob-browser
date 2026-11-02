@@ -2532,7 +2532,7 @@ impl Window {
         }
         self.native_tries += 1;
         if self.native.is_none() {
-            if self.native_tries % 50 == 0 {
+            if self.native_tries.is_multiple_of(50) {
                 // The title may not have reached the window: set it again.
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.native_token.clone()));
             }

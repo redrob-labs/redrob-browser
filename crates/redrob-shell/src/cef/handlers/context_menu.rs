@@ -240,8 +240,9 @@ pub fn inspect(browser: &Browser, at: Option<(i32, i32)>) {
     );
 }
 
-fn flag(bits: u32, f: u32) -> bool {
-    bits & f != 0
+/// Whether flag `f` is set in `bits` (CEF's flags are u32, i32 on Windows).
+fn flag<T: std::ops::BitAnd<Output = T> + PartialEq + Default + Copy>(bits: T, f: T) -> bool {
+    bits & f != T::default()
 }
 
 wrap_context_menu_handler! {
@@ -266,8 +267,8 @@ wrap_context_menu_handler! {
                 callback.cancel();
                 return 1;
             }
-            let types: u32 = params.type_flags().as_ref().0;
-            let edit: u32 = params.edit_state_flags().as_ref().0;
+            let types = params.type_flags().as_ref().0;
+            let edit = params.edit_state_flags().as_ref().0;
             let image = params.media_type() == ContextMenuMediaType::IMAGE
                 && params.has_image_contents() != 0;
             let target = Target {

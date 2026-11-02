@@ -57,7 +57,7 @@ pub fn child_info(place: Place, shown: bool) -> WindowInfo {
         runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into(),
         ..Default::default()
     }
-    .set_as_child(place.parent.0 as _, &bounds);
+    .set_as_child(raw_handle(place.parent), &bounds);
     #[cfg(windows)]
     let info = {
         use windows_sys::Win32::UI::WindowsAndMessaging::WS_VISIBLE;
@@ -75,11 +75,27 @@ pub fn child_info(place: Place, shown: bool) -> WindowInfo {
     info
 }
 
+#[cfg(windows)]
+fn raw_handle(h: Handle) -> cef::sys::cef_window_handle_t {
+    cef::sys::HWND(h.0 as _)
+}
+#[cfg(windows)]
+fn handle_value(h: cef::sys::cef_window_handle_t) -> usize {
+    h.0 as usize
+}
+#[cfg(not(windows))]
+fn raw_handle(h: Handle) -> cef::sys::cef_window_handle_t {
+    h.0 as _
+}
+#[cfg(not(windows))]
+fn handle_value(h: cef::sys::cef_window_handle_t) -> usize {
+    h as usize
+}
+
 /// The native window of a browser's page.
 pub fn of(browser: &cef::Browser) -> Option<Handle> {
     use cef::{ImplBrowser, ImplBrowserHost};
-    let h = browser.host()?.window_handle();
-    let h = h as usize;
+    let h = handle_value(browser.host()?.window_handle());
     (h != 0).then_some(Handle(h))
 }
 

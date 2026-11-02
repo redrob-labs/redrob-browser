@@ -27,13 +27,20 @@ struct GPollFd {
 
 type Ctx = *mut c_void;
 
+type DefaultFn = unsafe extern "C" fn() -> Ctx;
+type AcquireFn = unsafe extern "C" fn(Ctx) -> c_int;
+type ReleaseFn = unsafe extern "C" fn(Ctx);
+type PrepareFn = unsafe extern "C" fn(Ctx, *mut c_int) -> c_int;
+type QueryFn = unsafe extern "C" fn(Ctx, c_int, *mut c_int, *mut GPollFd, c_int) -> c_int;
+type CheckFn = unsafe extern "C" fn(Ctx, c_int, *mut GPollFd, c_int) -> c_int;
+
 struct Glib {
-    default: unsafe extern "C" fn() -> Ctx,
-    acquire: unsafe extern "C" fn(Ctx) -> c_int,
-    release: unsafe extern "C" fn(Ctx),
-    prepare: unsafe extern "C" fn(Ctx, *mut c_int) -> c_int,
-    query: unsafe extern "C" fn(Ctx, c_int, *mut c_int, *mut GPollFd, c_int) -> c_int,
-    check: unsafe extern "C" fn(Ctx, c_int, *mut GPollFd, c_int) -> c_int,
+    default: DefaultFn,
+    acquire: AcquireFn,
+    release: ReleaseFn,
+    prepare: PrepareFn,
+    query: QueryFn,
+    check: CheckFn,
 }
 
 fn glib() -> Option<&'static Glib> {
@@ -49,12 +56,20 @@ fn glib() -> Option<&'static Glib> {
         // signature glib documents.
         unsafe {
             Some(Glib {
-                default: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_default")?),
-                acquire: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_acquire")?),
-                release: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_release")?),
-                prepare: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_prepare")?),
-                query: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_query")?),
-                check: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_check")?),
+                default: std::mem::transmute::<*mut c_void, DefaultFn>(sym(
+                    "g_main_context_default",
+                )?),
+                acquire: std::mem::transmute::<*mut c_void, AcquireFn>(sym(
+                    "g_main_context_acquire",
+                )?),
+                release: std::mem::transmute::<*mut c_void, ReleaseFn>(sym(
+                    "g_main_context_release",
+                )?),
+                prepare: std::mem::transmute::<*mut c_void, PrepareFn>(sym(
+                    "g_main_context_prepare",
+                )?),
+                query: std::mem::transmute::<*mut c_void, QueryFn>(sym("g_main_context_query")?),
+                check: std::mem::transmute::<*mut c_void, CheckFn>(sym("g_main_context_check")?),
             })
         }
     })

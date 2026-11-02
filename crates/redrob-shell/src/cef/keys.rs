@@ -164,6 +164,14 @@ pub fn from_egui(ctx: &egui::Context) -> Vec<Shortcut> {
     out
 }
 
+/// The platform's own key event, as CEF passes it.
+#[cfg(target_os = "linux")]
+type OsEvent<'a> = Option<&'a mut cef::sys::XEvent>;
+#[cfg(windows)]
+type OsEvent<'a> = Option<&'a mut cef::sys::MSG>;
+#[cfg(target_os = "macos")]
+type OsEvent<'a> = *mut u8;
+
 wrap_keyboard_handler! {
     struct Keys {
         sink: Sink,
@@ -174,7 +182,7 @@ wrap_keyboard_handler! {
             &self,
             browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
-            _os_event: Option<&mut cef::sys::XEvent>,
+            _os_event: OsEvent<'_>,
             _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
             let (Some(browser), Some(e)) = (browser, event) else {

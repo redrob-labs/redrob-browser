@@ -409,8 +409,10 @@ fn korean_key(x: &X, code: u8, release: bool) {
 fn decode(x: &X, kind: u32, v: &[u8]) -> String {
     let s = if kind == atom(x, "text/x-moz-url") {
         let u: Vec<u16> = v
-            .chunks_exact(2)
-            .map(|c| u16::from_ne_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_ne_bytes(*c))
             .collect();
         String::from_utf16_lossy(&u)
     } else {
