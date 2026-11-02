@@ -387,11 +387,20 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
         t("Redrob Code"),
         t("Prompts typed after / in the address bar go here. Only this computer is allowed."),
         |ui| {
+            // Empty (or the old default address) means: find the shared
+            // Redrob Code server on this computer, and start it when needed.
             let saved = profile
                 .and_then(|p| p.setting("agent_server"))
-                .unwrap_or_else(|| crate::agent_bridge::DEFAULT_SERVER.to_string());
+                .filter(|v| v.trim().trim_end_matches('/') != crate::agent_bridge::DEFAULT_SERVER)
+                .unwrap_or_default();
             let input = s.server_input.get_or_insert(saved);
-            let r = theme::text_field(ui, input, t("Server address"), 320.0, None);
+            let r = theme::text_field(ui, input, t("Automatic"), 320.0, None);
+            ui.label(
+                egui::RichText::new(t(
+                    "Leave it empty to use Redrob Code on this computer. It starts when needed.",
+                ))
+                .color(theme::palette(ui).ink_secondary),
+            );
             if r.lost_focus() {
                 if let Some(p) = profile {
                     let _ = p.set_setting("agent_server", input.trim());
@@ -408,6 +417,17 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
             );
         });
     }
+    theme::card(ui, t("Logs"), "", |ui| {
+        let dir = crate::startup::log_dir();
+        ui.label(
+            egui::RichText::new(dir.display().to_string())
+                .monospace()
+                .color(theme::palette(ui).ink_secondary),
+        );
+        if theme::button(ui, t("Open logs folder"), false).clicked() {
+            crate::startup::open_log_dir();
+        }
+    });
     about(ui, act);
 }
 
