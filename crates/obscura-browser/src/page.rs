@@ -11442,6 +11442,9 @@ mod tests {
         let mut page = super::Page::new("dynamic-render-warmup".to_string(), context);
         let page_url = format!("http://{address}/page");
         page.navigate(&page_url).await.unwrap();
+        // Navigation only starts the dynamic loads (the page is not held after
+        // its load event); a capture path waits for them, as screenshots do.
+        let _ = page.prepare_screenshot_resources(2000).await;
 
         let mut paths = (0..3)
             .map(|_| {
