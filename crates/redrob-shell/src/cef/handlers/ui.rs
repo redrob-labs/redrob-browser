@@ -369,7 +369,11 @@ impl Prompts {
                                 let b = egui::Button::new(tr(command.label()))
                                     .frame(false)
                                     .min_size(egui::vec2(ui.available_width(), 0.0));
-                                if ui.add_enabled(*enabled, b).clicked() {
+                                let r = ui.add_enabled(*enabled, b);
+                                if std::env::var_os("REDROB_TRACE_UI").is_some() {
+                                    eprintln!("TRACE menu {:?} at {:?}", command, r.rect.center());
+                                }
+                                if r.clicked() {
                                     chosen = Some(*command);
                                 }
                             }
@@ -438,6 +442,9 @@ impl Prompts {
                         } else {
                             ui.weak(format!("{}/{}", f.active, f.count));
                         }
+                    }
+                    if std::env::var_os("REDROB_TRACE_UI").is_some() {
+                        eprintln!("TRACE find {:?} {}/{} enter={enter}", f.text, f.active, f.count);
                     }
                     let any = !f.text.is_empty();
                     if ui.add_enabled(any, egui::Button::new("⏶")).on_hover_text(tr("Previous")).clicked() {

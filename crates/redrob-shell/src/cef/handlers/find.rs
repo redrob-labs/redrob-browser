@@ -16,12 +16,13 @@ pub fn find(browser: &Browser, text: &str, forward: bool, match_case: bool, next
         host.stop_finding(1);
         return;
     }
-    host.find(
-        Some(&CefString::from(text)),
-        forward as i32,
-        match_case as i32,
-        next as i32,
-    );
+    let text = CefString::from(text);
+    host.find(Some(&text), forward as i32, match_case as i32, next as i32);
+    if !next {
+        // A new search counts the matches but selects none; Chrome's find
+        // bar selects the first one ("1/3"), so step onto it.
+        host.find(Some(&text), forward as i32, match_case as i32, 1);
+    }
 }
 
 /// Close find: drop the highlight, keep what is selected.
@@ -46,6 +47,9 @@ wrap_find_handler! {
             active_match_ordinal: ::std::os::raw::c_int,
             _final_update: ::std::os::raw::c_int,
         ) {
+            if std::env::var_os("REDROB_TRACE_UI").is_some() {
+                eprintln!("TRACE found count={count} active={active_match_ordinal} final={_final_update}");
+            }
             if let Some(b) = browser {
                 self.sink.send(
                     b.identifier(),

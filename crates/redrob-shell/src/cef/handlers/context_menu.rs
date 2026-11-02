@@ -188,6 +188,10 @@ fn run(sink: &Sink, browser: &Browser, frame: Option<&Frame>, t: &Target, at: (i
         Command::CopyImageAddress => sink.send(id, Event::Clipboard(t.image.clone())),
         Command::Undo => edit(|f| f.undo()),
         Command::Redo => edit(|f| f.redo()),
+        // Linux: the window's clipboard, not Chromium's (clipboard.rs).
+        Command::Cut if super::clipboard::OWN => super::clipboard::copy(sink, browser, true),
+        Command::Copy if super::clipboard::OWN => super::clipboard::copy(sink, browser, false),
+        Command::Paste if super::clipboard::OWN => super::clipboard::paste(browser),
         Command::Cut => edit(|f| f.cut()),
         Command::Copy => edit(|f| f.copy()),
         Command::Paste => edit(|f| f.paste()),
