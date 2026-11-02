@@ -492,9 +492,6 @@ pub fn pump() {
     IN_PUMP.set(true);
     PUMPS.fetch_add(1, Ordering::Relaxed);
     *PUMP_DUE.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    if PUMPS.load(Ordering::Relaxed) % 50 == 0 {
-        crate::cdp::trace(format_args!("pump {}", PUMPS.load(Ordering::Relaxed)));
-    }
     cef::do_message_loop_work();
     #[cfg(target_os = "linux")]
     wake::after_pump();

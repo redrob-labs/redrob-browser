@@ -93,10 +93,6 @@ fn is_open(ctx: &Context, id: Id) -> bool {
 }
 
 fn set_open(ctx: &Context, id: Option<Id>) {
-    crate::cdp::trace(format_args!(
-        "menu {}",
-        if id.is_some() { "opens" } else { "closes" }
-    ));
     ctx.data_mut(|d| match id {
         Some(id) => {
             d.insert_temp(open_id(), id);

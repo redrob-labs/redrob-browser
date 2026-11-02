@@ -910,22 +910,6 @@ impl eframe::App for App {
 impl Browser {
     /// What every pass does after drawing its window.
     fn after(&mut self, ctx: &egui::Context) {
-        if std::env::var_os("REDROB_TRACE").is_some() {
-            thread_local! {
-                static PASSES: std::cell::Cell<(u32, Option<Instant>)> = const { std::cell::Cell::new((0, None)) };
-            }
-            let (n, since) = PASSES.get();
-            let since = since.unwrap_or_else(Instant::now);
-            if since.elapsed() > Duration::from_secs(2) {
-                cdp::trace(format_args!(
-                    "{n} passes in 2 s; repaint causes: {:?}",
-                    ctx.repaint_causes()
-                ));
-                PASSES.set((0, Some(Instant::now())));
-            } else {
-                PASSES.set((n + 1, Some(since)));
-            }
-        }
         self.sync_minimized(ctx);
         let windows = self.windows.len();
         self.handle_requests(ctx);

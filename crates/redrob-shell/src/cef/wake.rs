@@ -216,14 +216,6 @@ fn watch(nudge: c_int) {
             while unsafe { libc::read(nudge, buf.as_mut_ptr().cast(), buf.len()) } > 0 {}
         }
         if fds[..last].iter().any(|f| f.revents != 0) {
-            crate::cdp::trace(format_args!(
-                "glib wake: {:?}",
-                fds[..last]
-                    .iter()
-                    .filter(|f| f.revents != 0)
-                    .map(|f| (f.fd, f.revents))
-                    .collect::<Vec<_>>()
-            ));
             LAST_WORK.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
             super::schedule(Duration::ZERO);
             // Until the window has pumped: what woke us is Chromium's to read.
