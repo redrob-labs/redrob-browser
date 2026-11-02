@@ -2988,14 +2988,41 @@ fn resolve_inline_percentage_heights(
     if acting.is_empty() {
         return false;
     }
-    let parents: Vec<taffy::NodeId> = acting.iter().map(|&(_, parent, _)| parent).collect();
-    place(taffy_tree, &parents, false);
+    // A parent box whose style fixes its content height in whole pixels has
+    // that height in its layout too: read it from the style, without placing
+    // the boxes above it (an atomic inline's IFC would be laid out again).
+    static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let check = *CHECK.get_or_init(|| std::env::var_os("OBSCURA_PCTH_CHECK").is_some());
+    let from_style: Vec<Option<f32>> = acting
+        .iter()
+        .map(|&(_, parent_box, _)| fixed_content_height(taffy_tree, parent_box))
+        .collect();
+    let parents: Vec<taffy::NodeId> = acting
+        .iter()
+        .zip(&from_style)
+        .filter(|(_, height)| check || height.is_none())
+        .map(|(&(_, parent, _), _)| parent)
+        .collect();
+    if !parents.is_empty() {
+        place(taffy_tree, &parents, false);
+    }
     let mut changed = false;
-    for (node, parent_box, percent) in acting {
-        let Ok(layout) = taffy_tree.layout(parent_box) else {
-            continue;
+    for ((node, parent_box, percent), from_style) in acting.into_iter().zip(from_style) {
+        let containing_block_height = match from_style {
+            Some(height) if !check => height,
+            _ => {
+                let Ok(layout) = taffy_tree.layout(parent_box) else {
+                    continue;
+                };
+                let height = layout.content_box_height().max(0.0);
+                if let Some(expected) = from_style.filter(|expected| *expected != height) {
+                    eprintln!(
+                        "[pcth-check] parent box {parent_box:?}: style height {expected}, layout {height}"
+                    );
+                }
+                height
+            }
         };
-        let containing_block_height = layout.content_box_height().max(0.0);
         if !containing_block_height.is_finite() {
             continue;
         }
@@ -3009,6 +3036,38 @@ fn resolve_inline_percentage_heights(
         }
     }
     changed
+}
+
+/// The content-box height a box's layout has whatever its position, when its
+/// style fixes it: a whole-pixel height with whole-pixel vertical padding
+/// and borders and no minimum or maximum, in a block or inline formatting
+/// context (which do not stretch or shrink it). Whole pixels: rounding the
+/// layout keeps them.
+fn fixed_content_height(taffy_tree: &TaffyTree<usize>, node: taffy::NodeId) -> Option<f32> {
+    let length = |raw: taffy::CompactLength| {
+        (raw.tag() == taffy::CompactLength::LENGTH_TAG && raw.value().fract() == 0.0)
+            .then(|| raw.value())
+    };
+    let style = taffy_tree.style(node).ok()?;
+    let parent = taffy_tree.parent(node)?;
+    let parent_style = taffy_tree.style(parent).ok()?;
+    if !(taffy_tree.is_inline_root(parent) || parent_style.display == taffy::Display::Block)
+        || style.display == taffy::Display::None
+        || !style.min_size.height.is_auto()
+        || !style.max_size.height.is_auto()
+    {
+        return None;
+    }
+    let height = length(style.size.height.into_raw())?;
+    let edges = length(style.padding.top.into_raw())?
+        + length(style.padding.bottom.into_raw())?
+        + length(style.border.top.into_raw())?
+        + length(style.border.bottom.into_raw())?;
+    let content = match style.box_sizing {
+        taffy::BoxSizing::BorderBox => height - edges,
+        taffy::BoxSizing::ContentBox => height,
+    };
+    (content >= 0.0 && height >= 0.0).then_some(content)
 }
 
 /// The percentage `resolve_inline_percentage_heights` resolves a box's height
