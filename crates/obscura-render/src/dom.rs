@@ -301,6 +301,9 @@ pub struct DomLayout {
     /// height (computed from styles alone), kept so a retained layout can
     /// skip walking subtrees whose styles all stayed.
     pub(crate) definite_heights: HashSet<NodeId>,
+    /// The rendered tree this layout was made from, so the next retained
+    /// layout can tell what its mutations took off it.
+    pub(crate) rendered_tree: Option<std::rc::Rc<FlatTree>>,
     /// The per-axis clip inherited from ancestor non-visible overflow, keyed
     /// per node, in SCREEN space (the clip owner's box shifted by the owner's
     /// accumulated translate; see `resolve_clip_rects`). `None` means
@@ -791,7 +794,7 @@ fn seed_from_retained_taffy(
                 crate::ifc::build::take_previous_laid(template),
                 ifc_store.get_mut(ctx & !crate::ifc::IFC_CONTEXT_BIT),
             ) {
-                ifc.adopt_layout_of(&laid);
+                ifc.adopt_layout_of(laid);
             }
         }
     }
@@ -1125,6 +1128,8 @@ pub(crate) struct RetainedStyleMaps {
     /// in the layout these styles come from (`DomLayout::definite_heights`).
     /// `None`: unknown, every retained element is walked again.
     pub definite_heights: Option<HashSet<NodeId>>,
+    /// The rendered tree of the layout these styles come from.
+    pub(crate) previous_rendered: Option<std::rc::Rc<FlatTree>>,
 }
 
 /// Dense identifier for one scrolling area in a prepared render. Index zero
@@ -4711,6 +4716,34 @@ fn subtree_contains_style_element(tree: &DomTree, root: NodeId) -> bool {
         })
 }
 
+/// How the rendered tree changed with a retained layout's mutations (see
+/// `rendered_tree_patch`).
+struct RenderedTreePatch {
+    /// Nodes the previous layout rendered that are not rendered now.
+    disconnected: Vec<NodeId>,
+    /// Inserted nodes, with their rendered subtrees, that are rendered.
+    connected: Vec<NodeId>,
+}
+
+/// The rendered nodes `mutations` removed and added, from the rendered tree
+/// of the layout before them (see `mutated_subtrees`).
+fn rendered_tree_patch(
+    tree: &DomTree,
+    mutations: &[RetainedStyleMutation],
+    previous: Option<&FlatTree>,
+) -> Option<RenderedTreePatch> {
+    let subtrees = mutated_subtrees(tree, mutations, previous)?;
+    let current = current_flat_tree(tree);
+    Some(RenderedTreePatch {
+        disconnected: subtrees
+            .old
+            .into_iter()
+            .filter(|node| !current.contains(*node))
+            .collect(),
+        connected: subtrees.new,
+    })
+}
+
 /// Whether `node` is a `<style>` or `<link>` element, or holds one.
 fn subtree_contains_sheet_owner(tree: &DomTree, root: NodeId) -> bool {
     std::iter::once(root)
@@ -4725,11 +4758,25 @@ fn subtree_contains_sheet_owner(tree: &DomTree, root: NodeId) -> bool {
 
 /// Whether the document's stylesheet sources are the same after `mutations`
 /// as before them: none adds, removes or edits a `<style>` or `<link>`
-/// element, its attributes or its text.
+/// element, its attributes or its text. `previous` is the rendered tree of
+/// the layout before them: what a removed subtree held then.
 pub(crate) fn mutations_keep_document_stylesheets(
     tree: &DomTree,
     mutations: &[RetainedStyleMutation],
+    previous: Option<&FlatTree>,
 ) -> bool {
+    let Some(subtrees) = mutated_subtrees(tree, mutations, previous) else {
+        return false;
+    };
+    let sheet_owner_or_gone = |node: NodeId| {
+        tree.borrow_node(node).is_none_or(|node| {
+            node.as_element()
+                .is_some_and(|element| matches!(element.local.as_ref(), "style" | "link"))
+        })
+    };
+    if subtrees.old.iter().any(|node| sheet_owner_or_gone(*node)) {
+        return false;
+    }
     let is_sheet_owner = |node: NodeId| {
         tree.borrow_node(node).is_some_and(|node| {
             node.as_element()
@@ -5327,10 +5374,45 @@ fn add_removed_sibling_scopes(
     }
 }
 
+/// How many of `mutations` change each parent's child list or text: an
+/// insertion counts for its new and old parent, a removal for its old one, a
+/// text edit for its parent.
+fn empty_boundary_mutation_counts(mutations: &[RetainedStyleMutation]) -> HashMap<NodeId, usize> {
+    let mut counts: HashMap<NodeId, usize> = HashMap::default();
+    for mutation in mutations {
+        let RetainedStyleMutation::Tree(mutation) = mutation else {
+            continue;
+        };
+        match *mutation {
+            TreeStyleMutation::Insert {
+                old_parent,
+                new_parent,
+                ..
+            } => {
+                *counts.entry(new_parent).or_default() += 1;
+                if let Some(old_parent) = old_parent.filter(|old| *old != new_parent) {
+                    *counts.entry(old_parent).or_default() += 1;
+                }
+            }
+            TreeStyleMutation::Remove { old_parent, .. } => {
+                *counts.entry(old_parent).or_default() += 1;
+            }
+            TreeStyleMutation::Text {
+                parent: Some(parent),
+                ..
+            } => {
+                *counts.entry(parent).or_default() += 1;
+            }
+            TreeStyleMutation::Text { parent: None, .. } => {}
+        }
+    }
+    counts
+}
+
 fn empty_state_may_have_changed(
     tree: &DomTree,
     parent: NodeId,
-    mutations: &[RetainedStyleMutation],
+    boundary_counts: &HashMap<NodeId, usize>,
 ) -> bool {
     let relevant_children = tree
         .children(parent)
@@ -5344,27 +5426,7 @@ fn empty_state_may_have_changed(
                 })
         })
         .count();
-    let boundary_mutations = mutations
-        .iter()
-        .filter(|mutation| match mutation {
-            RetainedStyleMutation::Attribute(_) => false,
-            RetainedStyleMutation::Animation { .. } => false,
-            RetainedStyleMutation::WaapiAnimation { .. } => false,
-            RetainedStyleMutation::Resource | RetainedStyleMutation::Stylesheet => false,
-            RetainedStyleMutation::Tree(TreeStyleMutation::Insert {
-                old_parent,
-                new_parent,
-                ..
-            }) => *new_parent == parent || *old_parent == Some(parent),
-            RetainedStyleMutation::Tree(TreeStyleMutation::Remove { old_parent, .. }) => {
-                *old_parent == parent
-            }
-            RetainedStyleMutation::Tree(TreeStyleMutation::Text {
-                parent: text_parent,
-                ..
-            }) => *text_parent == Some(parent),
-        })
-        .count();
+    let boundary_mutations = boundary_counts.get(&parent).copied().unwrap_or(0);
     // At least one relevant child untouched by this mutation batch proves the
     // parent was non-empty before and after every queued boundary operation.
     relevant_children <= boundary_mutations
@@ -5374,7 +5436,7 @@ fn add_empty_parent_scope(
     tree: &DomTree,
     map: &crate::css::InvalidationMap,
     parent: NodeId,
-    mutations: &[RetainedStyleMutation],
+    boundary_counts: &HashMap<NodeId, usize>,
     dirty: &mut HashSet<NodeId>,
     checked_parents: &mut HashSet<NodeId>,
 ) {
@@ -5388,7 +5450,7 @@ fn add_empty_parent_scope(
             !invalidation.inside_relational && invalidation.subject_may_match(tree, parent)
         })
         .collect::<Vec<_>>();
-    if invalidations.is_empty() || !empty_state_may_have_changed(tree, parent, mutations) {
+    if invalidations.is_empty() || !empty_state_may_have_changed(tree, parent, boundary_counts) {
         return;
     }
     add_style_subtree(tree, parent, dirty);
@@ -5454,6 +5516,31 @@ fn retained_style_plan_for_sheet(
             }
         }
     }
+    // Nodes the batch inserted that are connected now. Every one of them is
+    // restyled with its whole subtree, which then covers every tree mutation
+    // inside it: its own scopes, siblings and parent are in that subtree, its
+    // `<style>` check reads the whole subtree, and its relational anchors are
+    // the inserted root's (whose checks read as deep as a relative selector
+    // reaches). Template stamping inserts hundreds of nodes into a detached
+    // root and then the root, so most of a batch is covered.
+    let inserted_roots: HashSet<NodeId> = mutations
+        .iter()
+        .filter_map(|mutation| match mutation {
+            RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. })
+                if tree.is_connected(*node) =>
+            {
+                Some(*node)
+            }
+            _ => None,
+        })
+        .collect();
+    let covered = |parent: NodeId| {
+        !inserted_roots.is_empty()
+            && std::iter::once(parent)
+                .chain(tree.ancestors(parent))
+                .any(|node| inserted_roots.contains(&node))
+    };
+    let boundary_counts = empty_boundary_mutation_counts(mutations);
     let mut has_animation_damage = false;
     let report_damage = std::env::var_os("OBSCURA_RENDER_TIMING").is_some();
     let mut previous_damage: Option<(usize, &RetainedStyleMutation)> = None;
@@ -5510,6 +5597,41 @@ fn retained_style_plan_for_sheet(
                     node,
                     old_parent,
                     new_parent,
+                } if covered(new_parent) => {
+                    // Only the old place remains to invalidate.
+                    if let Some(parent) =
+                        old_parent.filter(|parent| tree.is_connected(*parent) && !covered(*parent))
+                    {
+                        if !sheet_appended && node_is_style_text(tree, node, Some(parent)) {
+                            return RetainedStylePlan::Full;
+                        }
+                        let removal = TreeStyleMutation::Remove {
+                            node,
+                            old_parent: parent,
+                            old_next_sibling: None,
+                        };
+                        if !add_relational_tree_invalidation(tree, map, &removal, &mut dirty) {
+                            return RetainedStylePlan::Full;
+                        }
+                        add_style_context_chain(tree, parent, &mut dirty);
+                        add_table_row_child_scope(tree, parent, &mut dirty);
+                        add_removed_structural_scopes(tree, map, node, parent, &mut dirty);
+                        add_removed_sibling_scopes(tree, map, parent, None, &mut dirty);
+                        add_empty_parent_scope(
+                            tree,
+                            map,
+                            parent,
+                            &boundary_counts,
+                            &mut dirty,
+                            &mut checked_empty_parents,
+                        );
+                    }
+                }
+                TreeStyleMutation::Remove { old_parent, .. } if covered(old_parent) => {}
+                TreeStyleMutation::Insert {
+                    node,
+                    old_parent,
+                    new_parent,
                 } => {
                     // Inserting or moving a style subtree changes the ordered
                     // author stylesheet, so parsing/index reuse is forbidden.
@@ -5543,7 +5665,7 @@ fn retained_style_plan_for_sheet(
                             tree,
                             map,
                             parent,
-                            mutations,
+                            &boundary_counts,
                             &mut dirty,
                             &mut checked_empty_parents,
                         );
@@ -5564,7 +5686,7 @@ fn retained_style_plan_for_sheet(
                         tree,
                         map,
                         new_parent,
-                        mutations,
+                        &boundary_counts,
                         &mut dirty,
                         &mut checked_empty_parents,
                     );
@@ -5606,7 +5728,7 @@ fn retained_style_plan_for_sheet(
                         tree,
                         map,
                         old_parent,
-                        mutations,
+                        &boundary_counts,
                         &mut dirty,
                         &mut checked_empty_parents,
                     );
@@ -5636,7 +5758,7 @@ fn retained_style_plan_for_sheet(
                             tree,
                             map,
                             parent,
-                            mutations,
+                            &boundary_counts,
                             &mut dirty,
                             &mut checked_empty_parents,
                         );
@@ -6694,7 +6816,13 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     // `<link>` alone has the sources the cached sheet was read from.
     let unchanged_sheet = match stylesheet_cache.as_deref_mut() {
         Some(cache)
-            if retained.is_some() && mutations_keep_document_stylesheets(tree, mutations) =>
+            if retained.as_ref().is_some_and(|retained| {
+                mutations_keep_document_stylesheets(
+                    tree,
+                    mutations,
+                    retained.previous_rendered.as_deref(),
+                )
+            }) =>
         {
             cache.sheet_for_unchanged_tree(tree, viewport, media_type)
         }
@@ -6765,23 +6893,49 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             }
             return None;
         }
-        let active_containers = retained
-            .styles
-            .iter()
-            .filter_map(|(node, style)| {
-                (style.container_type != crate::ContainerType::Normal).then_some(*node)
+        let active_containers = sheet
+            .has_container_queries()
+            .then(|| {
+                retained
+                    .styles
+                    .iter()
+                    .filter_map(|(node, style)| {
+                        (style.container_type != crate::ContainerType::Normal).then_some(*node)
+                    })
+                    .collect::<HashSet<_>>()
             })
-            .collect::<HashSet<_>>();
-        let connected = std::iter::once(tree.document())
-            .chain(rendered_descendants(tree, tree.document()))
-            .collect::<HashSet<_>>();
-        retained.styles.retain(|node, _| connected.contains(node));
-        retained
-            .custom_properties
-            .retain(|node, _| connected.contains(node));
-        retained
-            .signatures
-            .retain(|node, _| connected.contains(node));
+            .unwrap_or_default();
+        // The rendered tree changed only where the mutations inserted and
+        // removed subtrees, unless an attribute moved slotted or <details>
+        // content: then (and for a sheet that gained rules, which reads every
+        // rendered node) the whole rendered tree is collected again.
+        let patch = rendered_tree_patch(tree, mutations, retained.previous_rendered.as_deref());
+        let connected = (patch.is_none()
+            || appended_keys.as_ref().is_some_and(|keys| !keys.is_empty()))
+        .then(|| {
+            std::iter::once(tree.document())
+                .chain(rendered_descendants(tree, tree.document()))
+                .collect::<HashSet<_>>()
+        });
+        match (&patch, &connected) {
+            (_, Some(connected)) => {
+                retained.styles.retain(|node, _| connected.contains(node));
+                retained
+                    .custom_properties
+                    .retain(|node, _| connected.contains(node));
+                retained
+                    .signatures
+                    .retain(|node, _| connected.contains(node));
+            }
+            (Some(patch), None) => {
+                for node in &patch.disconnected {
+                    retained.styles.remove(node);
+                    retained.custom_properties.remove(node);
+                    retained.signatures.remove(node);
+                }
+            }
+            (None, None) => unreachable!("collected when not patched"),
+        }
         // An inserted or moved node (or a new node reusing a removed one's
         // id) has a new place in the tree: its old inputs say nothing.
         for mutation in mutations {
@@ -6802,7 +6956,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
             } => {
                 if let Some(keys) = appended_keys.as_ref().filter(|keys| !keys.is_empty()) {
                     let before = dirty.len();
-                    for &node in &connected {
+                    for &node in connected.iter().flatten() {
                         if !dirty.contains(&node) && keys.may_match(tree, node) {
                             add_style_subtree(tree, node, &mut dirty);
                         }
@@ -6817,7 +6971,12 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                 // A connected element without a retained style or property
                 // map is cascaded fresh anyway; naming it lets the cascade
                 // skip every subtree that holds no fresh node.
-                for &node in &connected {
+                let candidates: Box<dyn Iterator<Item = NodeId>> = match (&connected, &patch) {
+                    (Some(connected), _) => Box::new(connected.iter().copied()),
+                    (None, Some(patch)) => Box::new(patch.connected.iter().copied()),
+                    (None, None) => Box::new(std::iter::empty()),
+                };
+                for node in candidates {
                     if (!retained.styles.contains_key(&node)
                         || !retained.custom_properties.contains_key(&node))
                         && tree.with_node(node, |node| node.is_element()).unwrap_or(false)
@@ -7045,6 +7204,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
                     custom_properties: std::mem::take(&mut laid.custom_properties),
                     signatures: std::mem::take(&mut laid.cascade_signatures),
                     definite_heights: None,
+                    previous_rendered: None,
                 });
             }
         }
@@ -7261,7 +7421,18 @@ fn layout_dom_once(
 
     // The leaf context is the index of a cosmic-text inline formatting
     // context in `engine`; leaves without text carry no context.
-    let mut taffy_tree: TaffyTree<usize> = crate::new_taffy_tree();
+    // Room for as many boxes as the last layout of this thread built.
+    let capacity = RETAINED_TAFFY
+        .try_with(|slot| {
+            slot.borrow()
+                .as_ref()
+                .map(|retained| retained.tree.total_node_count())
+        })
+        .ok()
+        .flatten()
+        .unwrap_or(16);
+    let mut taffy_tree: TaffyTree<usize> =
+        crate::new_taffy_tree_with_capacity(capacity + capacity / 8);
     if subtree_keys_enabled() {
         taffy_tree.enable_subtree_keys();
     }
@@ -10559,6 +10730,7 @@ fn layout_dom_once(
             custom_properties,
             cascade_signatures,
             definite_heights: definite_height_nodes,
+            rendered_tree: Some(current_flat_tree(tree)),
             clip_rects,
             translates,
             transforms,
@@ -13327,7 +13499,7 @@ pub(crate) fn rendered_children(tree: &DomTree, id: NodeId) -> Vec<NodeId> {
 /// for every node on it (and the document), its rendered children and parent.
 /// A layout walks the tree a dozen times; each walk then reads these instead
 /// of the DOM's shadow, slot and `<details>` state again.
-struct FlatTree {
+pub(crate) struct FlatTree {
     generation: u64,
     walk: std::rc::Rc<Vec<NodeId>>,
     /// (start, len) into `kids` by node index; `start == u32::MAX`: not recorded.
@@ -13346,6 +13518,121 @@ impl FlatTree {
     fn parent(&self, id: NodeId) -> Option<Option<NodeId>> {
         self.parents.get(id.index()).copied().flatten().map(Some)
     }
+
+    /// Whether `id` is on this rendered tree (the document is not recorded).
+    fn contains(&self, id: NodeId) -> bool {
+        self.parents.get(id.index()).copied().flatten().is_some()
+    }
+
+    /// `root` and its rendered descendants on this tree, or nothing when
+    /// `root` is not on it.
+    fn subtree(&self, root: NodeId) -> Vec<NodeId> {
+        if !self.contains(root) {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            out.push(id);
+            if let Some(children) = self.children(id) {
+                stack.extend(children.iter().rev().copied());
+            }
+        }
+        out
+    }
+}
+
+/// The flat tree of `tree`'s current state, built if needed.
+fn current_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
+    if let Some(flat) = FLAT_TREE
+        .try_with(|slot| slot.borrow().clone())
+        .ok()
+        .flatten()
+        .filter(|flat| flat.generation == tree.mutation_generation())
+    {
+        return flat;
+    }
+    let flat = build_flat_tree(tree);
+    let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat.clone()));
+    flat
+}
+
+/// The nodes a retained layout's tree mutations took off and put on the
+/// rendered tree (see `mutated_subtrees`).
+pub(crate) struct MutatedSubtrees {
+    /// Every node the previous layout rendered under a node a mutation
+    /// inserted or removed: a subtree detached while it was changed shows its
+    /// old content only there.
+    pub(crate) old: Vec<NodeId>,
+    /// Every node rendered now under an inserted node.
+    pub(crate) new: Vec<NodeId>,
+}
+
+/// Where `mutations` changed the rendered tree, from `previous`, the rendered
+/// tree of the layout before them. `None` when an attribute may have moved
+/// slotted or `<details>` content, the document has shadow roots, or the
+/// previous rendered tree is unknown.
+pub(crate) fn mutated_subtrees(
+    tree: &DomTree,
+    mutations: &[RetainedStyleMutation],
+    previous: Option<&FlatTree>,
+) -> Option<MutatedSubtrees> {
+    if tree.has_shadow_roots()
+        || mutations.iter().any(|mutation| {
+            matches!(mutation, RetainedStyleMutation::Attribute(attribute)
+                if matches!(attribute.name.to_ascii_lowercase().as_str(), "open" | "slot" | "name"))
+        })
+    {
+        return None;
+    }
+    let has_tree_mutations = mutations.iter().any(|mutation| {
+        matches!(
+            mutation,
+            RetainedStyleMutation::Tree(
+                TreeStyleMutation::Insert { .. } | TreeStyleMutation::Remove { .. }
+            )
+        )
+    });
+    let previous = match previous {
+        Some(previous) => previous,
+        None if !has_tree_mutations => {
+            return Some(MutatedSubtrees {
+                old: Vec::new(),
+                new: Vec::new(),
+            })
+        }
+        None => return None,
+    };
+    let current = current_flat_tree(tree);
+    let mut seen_old = HashSet::default();
+    let mut seen_new = HashSet::default();
+    let mut subtrees = MutatedSubtrees {
+        old: Vec::new(),
+        new: Vec::new(),
+    };
+    for mutation in mutations {
+        let node = match mutation {
+            RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. })
+            | RetainedStyleMutation::Tree(TreeStyleMutation::Remove { node, .. }) => *node,
+            _ => continue,
+        };
+        if seen_old.insert(node) {
+            subtrees.old.extend(previous.subtree(node));
+        }
+        if matches!(
+            mutation,
+            RetainedStyleMutation::Tree(TreeStyleMutation::Insert { .. })
+        ) && seen_new.insert(node)
+        {
+            subtrees.new.extend(current.subtree(node));
+        }
+    }
+    Some(subtrees)
+}
+
+/// Whether `node` is on the rendered tree of `tree`'s current state.
+fn rendered_now(tree: &DomTree, node: NodeId) -> bool {
+    current_flat_tree(tree).contains(node)
 }
 
 thread_local! {
@@ -20527,6 +20814,7 @@ mod tests {
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
                 definite_heights: None,
+                previous_rendered: None,
             };
             let (mut active, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20569,6 +20857,7 @@ mod tests {
                 custom_properties: std::mem::take(&mut active.custom_properties),
                 signatures: HashMap::default(),
                 definite_heights: None,
+                previous_rendered: None,
             };
             let (inactive, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -20669,6 +20958,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -20792,6 +21082,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit_at_animation_time(
             &tree,
@@ -20875,6 +21166,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let mutations = [
             TreeStyleMutation::Insert {
@@ -20947,6 +21239,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (_, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21249,6 +21542,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21350,6 +21644,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21690,6 +21985,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -21740,6 +22036,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let mutations = mutations
             .iter()
@@ -22376,6 +22673,7 @@ mod tests {
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
                 definite_heights: None,
+                previous_rendered: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22587,6 +22885,7 @@ mod tests {
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
                 definite_heights: None,
+                previous_rendered: None,
             };
             let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
                 &tree,
@@ -22759,6 +23058,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22810,6 +23110,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -22867,6 +23168,7 @@ mod tests {
             custom_properties: std::mem::take(&mut initial.custom_properties),
             signatures: HashMap::default(),
             definite_heights: None,
+            previous_rendered: None,
         };
         let (incremental, telemetry) = layout_dom_with_web_fonts_pass_limit(
             &tree,
@@ -23626,6 +23928,7 @@ mod tests {
                 custom_properties: std::mem::take(&mut initial.custom_properties),
                 signatures: HashMap::default(),
                 definite_heights: None,
+                previous_rendered: None,
             };
             let (incremental, _) = layout_dom_with_web_fonts_pass_limit(
                 &tree,

@@ -4236,6 +4236,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
         custom_properties: std::mem::take(&mut previous.layout.custom_properties),
         signatures: std::mem::take(&mut previous.layout.cascade_signatures),
         definite_heights: Some(std::mem::take(&mut previous.layout.definite_heights)),
+        previous_rendered: previous.layout.rendered_tree.take(),
     };
     drop(previous);
     prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
@@ -4360,8 +4361,15 @@ fn prepare_dom_internal_unverified(
     // each URL is still fetched at most once.
     let (mut intrinsic, mut selected_images) = retained
         .as_ref()
-        .and_then(|(_, mutations)| {
-            patch_image_intrinsics(tree, viewport, base_url, resources, mutations)
+        .and_then(|(maps, mutations)| {
+            patch_image_intrinsics(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                mutations,
+                maps.previous_rendered.as_deref(),
+            )
         })
         .unwrap_or_else(|| collect_image_intrinsics(tree, viewport, base_url, resources));
     // Preserve the HTML source fallback separately: a remembered CSS content
@@ -4411,7 +4419,13 @@ fn prepare_dom_internal_unverified(
         !mutations
             .iter()
             .any(|mutation| matches!(mutation, crate::dom::RetainedStyleMutation::Resource))
-            && crate::dom::mutations_keep_document_stylesheets(tree, mutations)
+            && crate::dom::mutations_keep_document_stylesheets(
+                tree,
+                mutations,
+                retained
+                    .as_ref()
+                    .and_then(|(maps, _)| maps.previous_rendered.as_deref()),
+            )
     });
     let fonts = match resources
         .web_fonts_memo
@@ -13139,6 +13153,7 @@ fn patch_image_intrinsics(
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
     mutations: &[crate::dom::RetainedStyleMutation],
+    previous: Option<&crate::dom::FlatTree>,
 ) -> Option<(
     HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
     HashMap<obscura_dom::tree::NodeId, SelectedImage>,
@@ -13184,38 +13199,14 @@ fn patch_image_intrinsics(
     if !image_safe {
         return None;
     }
+    let subtrees = crate::dom::mutated_subtrees(tree, mutations, previous)?;
     let mut out = memo.intrinsic.clone();
     let mut selected = memo.selected.clone();
     let mut videos = memo.videos.clone();
-    let document = tree.document();
-    // On the rendered tree: every step up is a rendered child of its parent
-    // (a closed `<details>` renders only its summary).
-    let rendered = |node: obscura_dom::tree::NodeId| {
-        let mut current = node;
-        while current != document {
-            let Some(parent) = tree.with_node(current, |node| node.parent).flatten() else {
-                return false;
-            };
-            if !crate::dom::rendered_children(tree, parent).contains(&current) {
-                return false;
-            }
-            current = parent;
-        }
-        true
-    };
-    for mutation in mutations {
-        match mutation {
-            RetainedStyleMutation::Tree(
-                TreeStyleMutation::Remove { node, .. } | TreeStyleMutation::Insert { node, .. },
-            ) => {
-                for id in std::iter::once(*node).chain(tree.descendants(*node)) {
-                    out.remove(&id);
-                    selected.remove(&id);
-                    videos.retain(|video| *video != id);
-                }
-            }
-            _ => {}
-        }
+    for id in subtrees.old.iter().chain(&subtrees.new) {
+        out.remove(id);
+        selected.remove(id);
+        videos.retain(|video| video != id);
     }
     for &video in &videos {
         out.remove(&video);
@@ -13230,25 +13221,11 @@ fn patch_image_intrinsics(
             &mut selected,
         );
     }
-    for mutation in mutations {
-        if let RetainedStyleMutation::Tree(TreeStyleMutation::Insert { node, .. }) = mutation {
-            if !rendered(*node) {
-                continue;
-            }
-            for id in std::iter::once(*node).chain(crate::dom::rendered_descendants(tree, *node)) {
-                if collect_image_intrinsic_of(
-                    tree,
-                    id,
-                    viewport,
-                    base_url,
-                    cache,
-                    &mut out,
-                    &mut selected,
-                ) && !videos.contains(&id)
-                {
-                    videos.push(id);
-                }
-            }
+    for &id in &subtrees.new {
+        if collect_image_intrinsic_of(tree, id, viewport, base_url, cache, &mut out, &mut selected)
+            && !videos.contains(&id)
+        {
+            videos.push(id);
         }
     }
     cache.image_memo = Some(ImageMemo {

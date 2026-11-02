@@ -241,13 +241,14 @@ pub(crate) struct Ifc {
 impl Ifc {
     /// Take the line layout another IFC of the same template ended its
     /// layout with, for a box whose Taffy layout is reused unchanged.
-    pub(crate) fn adopt_layout_of(&mut self, laid: &Ifc) {
-        self.layout = laid.layout.clone();
-        self.final_layout = laid.final_layout.clone();
+    pub(crate) fn adopt_layout_of(&mut self, laid: Box<Ifc>) {
+        let laid = *laid;
+        self.layout = laid.layout;
+        self.final_layout = laid.final_layout;
         self.layout_is_final = laid.layout_is_final;
         self.content_offset = laid.content_offset;
         self.logical_size = laid.logical_size;
-        self.line_shifts = laid.line_shifts.clone();
+        self.line_shifts = laid.line_shifts;
     }
 }
 

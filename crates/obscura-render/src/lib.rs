@@ -3200,7 +3200,12 @@ fn initialize_grid_calc_contexts(
 }
 
 pub(crate) fn new_taffy_tree<NodeContext>() -> TaffyTree<NodeContext> {
-    let mut tree = TaffyTree::new();
+    new_taffy_tree_with_capacity(16)
+}
+
+/// `new_taffy_tree` with room for `capacity` nodes before it grows.
+pub(crate) fn new_taffy_tree_with_capacity<NodeContext>(capacity: usize) -> TaffyTree<NodeContext> {
+    let mut tree = TaffyTree::with_capacity(capacity);
     // Every opaque handle is backed by an Arc retained in the LayoutStyle
     // map/input tree, which outlives all computations on `tree`.
     tree.set_calc_resolver(crate::style::resolve_grid_calc);
