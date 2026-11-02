@@ -1279,6 +1279,8 @@ impl IfcStore {
             clip: None,
             marker,
             reused_laid: false,
+            slot_states: Vec::new(),
+            live_slot: 0,
             template_id: if key.is_some() {
                 NEXT_TEMPLATE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             } else {

@@ -5245,6 +5245,25 @@ pub(crate) fn set_grid_calc_context(
 /// `value` must point to a live `GridCalcExpression`. `LayoutStyle` retains
 /// the Arc owners for the entire lifetime of every layout tree computation.
 #[allow(unsafe_code)]
+/// The key `TaffyTree::set_calc_key` hashes a `calc()` handle by: everything
+/// `resolve_grid_calc` resolves it from besides the basis.
+pub(crate) fn grid_calc_key(value: *const ()) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use std::sync::atomic::Ordering;
+    // SAFETY: as for `resolve_grid_calc`.
+    let calc = unsafe { &*value.cast::<GridCalcExpression>() };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    calc.expression.hash(&mut hasher);
+    for part in [&calc.em_px, &calc.rem_px, &calc.vw, &calc.vh] {
+        part.load(Ordering::Relaxed).hash(&mut hasher);
+    }
+    calc.context_initialized
+        .load(Ordering::Relaxed)
+        .hash(&mut hasher);
+    calc.signed.hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(crate) fn resolve_grid_calc(value: *const (), basis: f32) -> f32 {
     // SAFETY: upheld by `new_taffy_tree` and the Arc ownership documented on
     // `LayoutStyle::grid_calc_expressions`.

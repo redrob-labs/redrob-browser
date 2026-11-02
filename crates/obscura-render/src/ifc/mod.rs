@@ -240,6 +240,57 @@ pub(crate) struct Ifc {
     /// over whole (see `IfcStore::create`): it already has the line layout
     /// `adopt_layout_of` would give it.
     pub(crate) reused_laid: bool,
+    /// The line layouts of the Taffy perform slots other than `live_slot`
+    /// (see `Ifc::switch_slot`), by slot.
+    pub(crate) slot_states: Vec<Option<IfcSlotState>>,
+    /// The perform slot whose line layout the fields above hold.
+    pub(crate) live_slot: usize,
+}
+
+/// What an inline layout leaves in its IFC, kept per Taffy perform slot.
+#[derive(Clone)]
+pub(crate) struct IfcSlotState {
+    layout: parley::Layout<Brush>,
+    final_layout: Option<parley::Layout<Brush>>,
+    layout_is_final: bool,
+    content_offset: (f32, f32),
+    logical_size: (f32, f32),
+    line_shifts: Vec<(f32, f32)>,
+}
+
+impl Ifc {
+    /// Make the line layout of perform slot `slot` the IFC's own, keeping
+    /// the one it had for its slot. A slot it was never laid out in starts
+    /// from a copy of the current one, which its first layout replaces.
+    fn switch_slot(&mut self, slot: usize) {
+        if self.live_slot == slot {
+            return;
+        }
+        let incoming = match self.slot_states.get_mut(slot).and_then(Option::take) {
+            Some(state) => state,
+            None => IfcSlotState {
+                layout: self.layout.clone(),
+                final_layout: self.final_layout.clone(),
+                layout_is_final: self.layout_is_final,
+                content_offset: self.content_offset,
+                logical_size: self.logical_size,
+                line_shifts: self.line_shifts.clone(),
+            },
+        };
+        let outgoing = IfcSlotState {
+            layout: std::mem::replace(&mut self.layout, incoming.layout),
+            final_layout: std::mem::replace(&mut self.final_layout, incoming.final_layout),
+            layout_is_final: std::mem::replace(&mut self.layout_is_final, incoming.layout_is_final),
+            content_offset: std::mem::replace(&mut self.content_offset, incoming.content_offset),
+            logical_size: std::mem::replace(&mut self.logical_size, incoming.logical_size),
+            line_shifts: std::mem::replace(&mut self.line_shifts, incoming.line_shifts),
+        };
+        if self.slot_states.len() <= self.live_slot {
+            self.slot_states.resize_with(self.live_slot + 1, || None);
+        }
+        self.slot_states[self.live_slot] = Some(outgoing);
+        self.live_slot = slot;
+    }
 }
 
 impl Ifc {
@@ -253,6 +304,8 @@ impl Ifc {
         self.content_offset = laid.content_offset;
         self.logical_size = laid.logical_size;
         self.line_shifts = laid.line_shifts;
+        self.slot_states = laid.slot_states;
+        self.live_slot = laid.live_slot;
     }
 }
 
@@ -366,7 +419,12 @@ impl IfcStore {
         if !std::mem::take(&mut self.active) {
             return;
         }
-        if let Some(ifcs) = ACTIVE.with(|active| active.borrow_mut().pop()) {
+        if let Some(mut ifcs) = ACTIVE.with(|active| active.borrow_mut().pop()) {
+            // Readers after layout see the line layouts of the last slot.
+            let slot = taffy::current_perform_slot();
+            for ifc in ifcs.iter_mut().flatten() {
+                ifc.switch_slot(slot);
+            }
             self.ifcs = ifcs;
         }
     }
@@ -405,6 +463,9 @@ pub(crate) fn with_active_ifc<R>(index: usize, f: impl FnOnce(&mut Ifc) -> R) ->
         let mut active = active.borrow_mut();
         active.last_mut()?.get_mut(index)?.take()
     })?;
+    // An IFC follows the Taffy perform slot of the layout that reads it
+    // (see `Ifc::switch_slot`).
+    ifc.switch_slot(taffy::current_perform_slot());
     let result = f(&mut ifc);
     ACTIVE.with(|active| {
         let mut active = active.borrow_mut();

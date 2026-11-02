@@ -10,12 +10,18 @@ use crate::style::{CompactLength, Style};
 use core::fmt::Write;
 
 /// A 64-bit mixing hasher for subtree keys
-pub(crate) struct KeyHasher(u64);
+pub(crate) struct KeyHasher(u64, Option<fn(*const ()) -> u64>);
 
 impl KeyHasher {
     /// A hasher in its initial state
     pub(crate) fn new() -> Self {
-        Self(0x243f_6a88_85a3_08d3)
+        Self(0x243f_6a88_85a3_08d3, None)
+    }
+
+    /// A hasher that mixes in a `calc()` handle as `calc_key` keys the expression it names
+    /// (see `TaffyTree::set_calc_key`)
+    pub(crate) fn with_calc_key(calc_key: Option<fn(*const ()) -> u64>) -> Self {
+        Self(0x243f_6a88_85a3_08d3, calc_key)
     }
 
     /// Mix in a `u64`
@@ -50,7 +56,11 @@ impl KeyHasher {
         self.write(tag as u64);
         #[cfg(feature = "calc")]
         if value.is_calc() {
-            self.write(value.calc_value() as usize as u64);
+            let key = match self.1 {
+                Some(calc_key) => calc_key(value.calc_value()),
+                None => value.calc_value() as usize as u64,
+            };
+            self.write(key);
             return;
         }
         self.write_f32(value.value());
@@ -139,8 +149,8 @@ pub(crate) fn style_uses_calc(_style: &Style) -> bool {
 }
 
 /// A hash of every field of `style`
-pub(crate) fn style_key(style: &Style) -> u64 {
-    let mut hash = KeyHasher::new();
+pub(crate) fn style_key(style: &Style, calc_key: Option<fn(*const ()) -> u64>) -> u64 {
+    let mut hash = KeyHasher::with_calc_key(calc_key);
     hash.write(style.display as u64);
     hash.write(
         u64::from(style.item_is_table)
