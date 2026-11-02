@@ -18,6 +18,78 @@ fn snap(value: f32) -> f32 {
     (value * 64.0 + 1e-3).floor() / 64.0
 }
 
+/// A key with a dense slot index (a Taffy node's slot in its slot map, a DOM
+/// node's index): `Slots` keeps values in a vector by it.
+trait SlotKey: Copy + PartialEq {
+    fn slot(self) -> usize;
+}
+
+impl SlotKey for taffy::NodeId {
+    fn slot(self) -> usize {
+        // The slot map key's low half is the slot index.
+        (u64::from(self) & 0xffff_ffff) as usize
+    }
+}
+
+impl SlotKey for NodeId {
+    fn slot(self) -> usize {
+        self.index()
+    }
+}
+
+/// A map from slot keys to values, by slot index (a key that reuses a slot
+/// replaces the old key's value).
+struct Slots<K, T> {
+    entries: Vec<Option<(K, T)>>,
+}
+
+impl<K: SlotKey, T> Default for Slots<K, T> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+}
+
+impl<K: SlotKey, T> Slots<K, T> {
+    fn get(&self, key: &K) -> Option<&T> {
+        match self.entries.get(key.slot()) {
+            Some(Some((stored, value))) if stored == key => Some(value),
+            _ => None,
+        }
+    }
+
+    fn get_mut(&mut self, key: &K) -> Option<&mut T> {
+        match self.entries.get_mut(key.slot()) {
+            Some(Some((stored, value))) if stored == key => Some(value),
+            _ => None,
+        }
+    }
+
+    fn contains_key(&self, key: &K) -> bool {
+        self.get(key).is_some()
+    }
+
+    fn insert(&mut self, key: K, value: T) -> Option<T> {
+        let slot = key.slot();
+        if slot >= self.entries.len() {
+            self.entries.resize_with(slot + 1, || None);
+        }
+        match self.entries[slot].replace((key, value)) {
+            Some((stored, old)) if stored == key => Some(old),
+            _ => None,
+        }
+    }
+
+    fn remove(&mut self, key: &K) -> Option<T> {
+        let entry = self.entries.get_mut(key.slot())?;
+        match entry {
+            Some((stored, _)) if stored == key => entry.take().map(|(_, value)| value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Frag {
     /// The parent's absolute origin, rounded and unrounded, the box was
@@ -63,12 +135,12 @@ pub(crate) struct Collected {
     seq: u64,
     root: taffy::NodeId,
     initial_cb_x: f32,
-    frags: HashMap<taffy::NodeId, Frag>,
-    children: HashMap<taffy::NodeId, Vec<taffy::NodeId>>,
+    frags: Slots<taffy::NodeId, Frag>,
+    children: Slots<taffy::NodeId, Vec<taffy::NodeId>>,
     /// The box each element's values come from.
-    winners: HashMap<NodeId, taffy::NodeId>,
+    winners: Slots<NodeId, taffy::NodeId>,
     /// How many boxes each element has.
-    box_counts: HashMap<NodeId, u32>,
+    box_counts: Slots<NodeId, u32>,
     pub(crate) geometry: BoxGeometry,
 }
 
@@ -100,10 +172,10 @@ impl Collected {
             seq: 0,
             root,
             initial_cb_x,
-            frags: HashMap::default(),
-            children: HashMap::default(),
-            winners: HashMap::default(),
-            box_counts: HashMap::default(),
+            frags: Slots::default(),
+            children: Slots::default(),
+            winners: Slots::default(),
+            box_counts: Slots::default(),
             geometry: BoxGeometry::default(),
         }
     }
@@ -238,7 +310,8 @@ impl Reader<'_> {
         };
         if self.state.frags.insert(node, frag).is_none() {
             if let Some(dom) = frag.dom {
-                *self.state.box_counts.entry(dom).or_insert(0) += 1;
+                let count = self.state.box_counts.get(&dom).copied().unwrap_or(0);
+                self.state.box_counts.insert(dom, count + 1);
             }
         }
         if let Some(dom) = frag.dom {

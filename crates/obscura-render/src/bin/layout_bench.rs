@@ -445,7 +445,7 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
         insert = Some(median(inserts));
     }
     println!(
-        "attr_mutation median={:.1}ms text_mutation median={:.1}ms insert={:.1}ms",
+        "attr_mutation median={:.2}ms text_mutation median={:.2}ms insert={:.2}ms",
         if attr.is_empty() { 0.0 } else { median(attr) },
         if text.is_empty() { 0.0 } else { median(text) },
         insert.unwrap_or(0.0)

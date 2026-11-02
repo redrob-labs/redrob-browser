@@ -152,7 +152,7 @@ impl IfcReuseKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         fonts: &super::fonts::Fonts,
         root: NodeId,
         root_style: &LayoutStyle,
@@ -187,7 +187,7 @@ impl IfcReuseKey {
     fn matches(
         &self,
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         fonts: &super::fonts::Fonts,
         root: NodeId,
         root_style: &LayoutStyle,
@@ -340,7 +340,7 @@ pub(crate) fn take_previous_laid(id: u64) -> Option<Box<Ifc>> {
 #[allow(clippy::too_many_arguments)]
 fn take_template(
     tree: &DomTree,
-    styles: &HashMap<NodeId, LayoutStyle>,
+    styles: &crate::StyleTable,
     fonts: &super::fonts::Fonts,
     root: NodeId,
     root_style: &LayoutStyle,
@@ -368,10 +368,7 @@ fn take_template(
 }
 
 /// The style of a span owner.
-fn owner_style<'a>(
-    owner: SpanOwner,
-    styles: &'a HashMap<NodeId, LayoutStyle>,
-) -> Option<&'a LayoutStyle> {
+fn owner_style<'a>(owner: SpanOwner, styles: &'a crate::StyleTable) -> Option<&'a LayoutStyle> {
     match owner {
         SpanOwner::Element(node) => styles.get(&node),
         SpanOwner::Pseudo(host, GeneratedBoxKind::Before) => {
@@ -754,7 +751,7 @@ impl IfcStore {
     pub(crate) fn create(
         &mut self,
         tree: &DomTree,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         root: NodeId,
         root_style: &LayoutStyle,
         anonymous: bool,

@@ -138,6 +138,8 @@ pub use border::{
 };
 
 pub mod dom;
+mod style_table;
+pub use style_table::StyleTable;
 pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,
@@ -2329,6 +2331,12 @@ impl ReplacedIntrinsic {
 /// inline-flex/grid, so this cannot be inferred from `Display::Inline` alone.
 pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
     style.display == Display::Inline || style.is_inline_block
+}
+
+/// Whether `blockify_outer_display` would change `style` (it leaves a
+/// blockified box that is not inline-level as it is).
+pub(crate) fn blockify_changes(style: &LayoutStyle) -> bool {
+    !style.blockified || is_inline_level_box(style)
 }
 
 /// Apply CSS Display blockification while preserving the inner display mode.

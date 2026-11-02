@@ -44,7 +44,7 @@ enum Level {
 }
 
 pub(super) fn pseudo_style(
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     host: NodeId,
     kind: GeneratedBoxKind,
 ) -> Option<&crate::LayoutStyle> {
@@ -99,11 +99,7 @@ fn is_atomic(tree: &DomTree, id: NodeId, style: &crate::LayoutStyle) -> bool {
 /// Whether a non-atomic inline element contains an in-flow block-level box,
 /// in which case it is laid out as a block box (an approximation of the CSS
 /// block-in-inline split).
-fn inline_contains_block(
-    tree: &DomTree,
-    id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
-) -> bool {
+fn inline_contains_block(tree: &DomTree, id: NodeId, styles: &crate::StyleTable) -> bool {
     // An explicit stack: page-controlled nesting must not grow the native
     // stack.
     let mut stack = vec![id];
@@ -142,7 +138,7 @@ fn is_transparent_block_wrapper(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> bool {
     let zero = |edges: &crate::Edges| {
         edges.top == 0.0 && edges.right == 0.0 && edges.bottom == 0.0 && edges.left == 0.0
@@ -172,7 +168,7 @@ fn is_decorated_block_wrapper(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> bool {
     style.display == crate::Display::Inline
         && !style.display_contents
@@ -187,7 +183,7 @@ fn level(
     tree: &DomTree,
     piece: Piece,
     parent_style: Option<&crate::LayoutStyle>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Level {
     match piece {
         Piece::Open(..) | Piece::Close(..) => Level::Inline,
@@ -267,7 +263,7 @@ pub(super) fn flow_pieces(
     tree: &DomTree,
     host: NodeId,
     children: &[NodeId],
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     with_pseudos: bool,
 ) -> Vec<Piece> {
     let mut out = Vec::new();
@@ -287,7 +283,7 @@ pub(super) fn flow_pieces(
 fn splice_pieces(
     tree: &DomTree,
     children: &[NodeId],
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     mut wrappers: Option<&mut Vec<NodeId>>,
     out: &mut Vec<Piece>,
 ) {
@@ -365,7 +361,7 @@ pub(super) struct BuildCx<'a> {
     pub(super) id_map: &'a mut HashMap<taffy::NodeId, NodeId>,
     pub(super) engine: &'a mut crate::inline::TextEngine,
     pub(super) ifc_items: &'a mut IfcRegistry,
-    pub(super) styles: &'a HashMap<NodeId, crate::LayoutStyle>,
+    pub(super) styles: &'a crate::StyleTable,
 }
 
 impl BuildCx<'_> {

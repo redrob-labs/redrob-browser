@@ -16,11 +16,13 @@ const BEFORE_LIMIT: usize = 4096;
 
 /// What each written node's style was before its first write since the
 /// last `take_before` (`None`: it had none).
-pub(crate) type BeforeWrites = HashMap<NodeId, Option<crate::LayoutStyle>>;
+/// Boxed: a written style is copied once, and the map's growth moves
+/// pointers, not styles.
+pub(crate) type BeforeWrites = HashMap<NodeId, Option<Box<crate::LayoutStyle>>>;
 
 #[derive(Default)]
 pub(crate) struct StyleMap {
-    map: HashMap<NodeId, crate::LayoutStyle>,
+    map: crate::StyleTable,
     /// Nodes whose style was written since the last `take_changes` (may
     /// repeat).
     changed: Vec<NodeId>,
@@ -55,7 +57,7 @@ pub(crate) enum StyleChanges {
 }
 
 impl StyleMap {
-    pub(crate) fn new(map: HashMap<NodeId, crate::LayoutStyle>) -> Self {
+    pub(crate) fn new(map: crate::StyleTable) -> Self {
         let check = write_check_enabled();
         Self {
             map,
@@ -66,7 +68,7 @@ impl StyleMap {
     }
 
     /// A map whose writes are not recorded.
-    pub(crate) fn untracked(map: HashMap<NodeId, crate::LayoutStyle>) -> Self {
+    pub(crate) fn untracked(map: crate::StyleTable) -> Self {
         Self {
             map,
             untracked: true,
@@ -74,7 +76,7 @@ impl StyleMap {
         }
     }
 
-    pub(crate) fn into_inner(self) -> HashMap<NodeId, crate::LayoutStyle> {
+    pub(crate) fn into_inner(self) -> crate::StyleTable {
         self.map
     }
 
@@ -112,7 +114,7 @@ impl StyleMap {
                 .before
                 .as_ref()
                 .and_then(|before| before.get(id))
-                .is_some_and(|old| old.as_ref() == self.map.get(id))
+                .is_some_and(|old| old.as_deref() == self.map.get(id))
     }
 
     /// The nodes written since the last `take_changes` (may repeat; empty
@@ -152,7 +154,7 @@ impl StyleMap {
             let entry = by_pass.entry(pass).or_default();
             if before
                 .get(&id)
-                .is_some_and(|old| old.as_ref() == self.map.get(&id))
+                .is_some_and(|old| old.as_deref() == self.map.get(&id))
             {
                 entry.0 += 1;
             } else {
@@ -175,7 +177,7 @@ impl StyleMap {
                 if before.len() >= BEFORE_LIMIT {
                     self.before_overflow = true;
                 } else {
-                    before.insert(id, self.map.get(&id).cloned());
+                    before.insert(id, self.map.get(&id).cloned().map(Box::new));
                 }
             }
         }
@@ -256,7 +258,7 @@ impl StyleMap {
                 if before.len() >= BEFORE_LIMIT {
                     self.before_overflow = true;
                 } else {
-                    before.insert(id, old);
+                    before.insert(id, old.map(Box::new));
                 }
             }
         }
@@ -269,25 +271,13 @@ impl StyleMap {
         self.map.remove(id)
     }
 
-    pub(crate) fn entry(
-        &mut self,
-        id: NodeId,
-    ) -> std::collections::hash_map::Entry<'_, NodeId, crate::LayoutStyle> {
-        self.note_write(id);
-        self.map.entry(id)
-    }
-
-    pub(crate) fn values_mut(
-        &mut self,
-    ) -> std::collections::hash_map::ValuesMut<'_, NodeId, crate::LayoutStyle> {
+    pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut crate::LayoutStyle> {
         self.all_changed |= !self.untracked;
         self.written_all = true;
         self.map.values_mut()
     }
 
-    pub(crate) fn iter_mut(
-        &mut self,
-    ) -> std::collections::hash_map::IterMut<'_, NodeId, crate::LayoutStyle> {
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = (&NodeId, &mut crate::LayoutStyle)> {
         self.all_changed |= !self.untracked;
         self.written_all = true;
         self.map.iter_mut()
@@ -311,7 +301,7 @@ impl StyleMap {
 }
 
 impl std::ops::Deref for StyleMap {
-    type Target = HashMap<NodeId, crate::LayoutStyle>;
+    type Target = crate::StyleTable;
 
     fn deref(&self) -> &Self::Target {
         &self.map
