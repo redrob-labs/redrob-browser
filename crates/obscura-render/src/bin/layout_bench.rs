@@ -197,9 +197,14 @@ fn median(mut values: Vec<f64>) -> f64 {
 
 fn page_bench(ctx: &mut Ctx, html: &str) {
     let tree = parse_html(html);
-    // Detach the last paragraph so it can be re-inserted as a mutation.
+    // Detach the last paragraph (or the last element named by
+    // BENCH_INSERT_TAG, e.g. a comment thread) so it can be re-inserted as a
+    // mutation.
     let paragraphs = elements_named(&tree, "p");
-    let moved = paragraphs.last().copied();
+    let moved = match std::env::var("BENCH_INSERT_TAG") {
+        Ok(tag) => elements_named(&tree, &tag).last().copied(),
+        Err(_) => paragraphs.last().copied(),
+    };
     let moved_parent = moved.and_then(|p| tree.with_node(p, |node| node.parent).flatten());
     let moved_next = moved.and_then(|p| tree.with_node(p, |node| node.next_sibling).flatten());
     if let Some(p) = moved {
@@ -360,7 +365,34 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
         };
         let start = Instant::now();
         prepared = ctx.retained(&tree, prepared, &[mutation.into()]);
-        insert = Some(ms(start));
+        let mut inserts = vec![ms(start)];
+        // BENCH_INSERT_ROUNDS: remove and re-insert it again, timing each
+        // insert's layout (the removal's layout is not timed).
+        let rounds: usize = std::env::var("BENCH_INSERT_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        for _ in 0..rounds {
+            tree.remove_child(p);
+            let removal = TreeStyleMutation::Remove {
+                node: p,
+                old_parent: parent,
+            };
+            prepared = ctx.retained(&tree, prepared, &[removal.into()]);
+            match moved_next {
+                Some(next) => tree.insert_before(next, p),
+                None => tree.append_child(parent, p),
+            }
+            let mutation = TreeStyleMutation::Insert {
+                node: p,
+                old_parent: None,
+                new_parent: parent,
+            };
+            let start = Instant::now();
+            prepared = ctx.retained(&tree, prepared, &[mutation.into()]);
+            inserts.push(ms(start));
+        }
+        insert = Some(median(inserts));
     }
     println!(
         "attr_mutation median={:.1}ms text_mutation median={:.1}ms insert={:.1}ms",

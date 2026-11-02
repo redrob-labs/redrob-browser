@@ -24517,7 +24517,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &redrob_scene_raster::ResourceStore::new(),
-            &HashMap::default(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24612,7 +24612,7 @@ mod scene_text_tests {
             ))
         );
         let raster = |scroll_y: f32| {
-            let scroll: HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
+            let scroll: std::collections::HashMap<u64, (f32, f32)> = [(0u64, (0.0, scroll_y))].into();
             redrob_scene_raster::rasterize(
                 &built.frame,
                 &redrob_scene_raster::ResourceStore::new(),
@@ -24711,7 +24711,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::default(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
@@ -24777,7 +24777,7 @@ mod scene_text_tests {
         let image = redrob_scene_raster::rasterize(
             &built.frame,
             &store,
-            &HashMap::default(),
+            &std::collections::HashMap::default(),
             redrob_scene::Rect {
                 x: 0.0,
                 y: 0.0,
