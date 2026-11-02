@@ -256,6 +256,31 @@ pub struct TaffyTree<NodeContext = ()> {
     /// The node the latest `compute_layout_with_measure` laid out as a root: its own layout is
     /// current whatever its ancestors wait for
     last_root: Option<NodeId>,
+    /// The nodes created since [`TaffyTree::start_creation_log`], in creation order
+    created: Option<Vec<NodeId>>,
+    /// The changes made since [`TaffyTree::begin_journal`], oldest first
+    journal: Option<Journal>,
+}
+
+/// One change recorded by the journal (see [`TaffyTree::begin_journal`])
+#[derive(Debug, Clone)]
+enum JournalOp {
+    /// A node was created
+    Created(NodeId),
+    /// A node's style was replaced; the old style
+    Style(NodeId, Style),
+    /// A node's child list was changed; the old list
+    Children(NodeId, Vec<NodeId>),
+    /// A node's inline-root flag was changed; the old flag
+    InlineRoot(NodeId, bool),
+}
+
+/// The changes a [`TaffyTree`] recorded since [`TaffyTree::begin_journal`]
+#[derive(Debug, Clone, Default)]
+struct Journal {
+    ops: Vec<JournalOp>,
+    /// A change the journal cannot undo was made (a node was removed or its context changed)
+    broken: bool,
 }
 
 /// The tree an [`InlineLayoutFn`] lays out an inline formatting context in. It gives access to the
@@ -925,7 +950,105 @@ impl<NodeContext> TaffyTree<NodeContext> {
             deferred_nodes: Vec::new(),
             force_perform: None,
             last_root: None,
+            created: None,
+            journal: None,
         }
+    }
+
+    /// Record every node created from now on (see [`Self::created_nodes`])
+    pub fn start_creation_log(&mut self) {
+        self.created = Some(Vec::new());
+    }
+
+    /// Stop recording created nodes
+    pub fn stop_creation_log(&mut self) {
+        self.created = None;
+    }
+
+    /// The nodes created since [`Self::start_creation_log`], in creation order
+    pub fn created_nodes(&self) -> &[NodeId] {
+        self.created.as_deref().unwrap_or(&[])
+    }
+
+    #[inline]
+    fn note_created(&mut self, node: NodeId) {
+        if let Some(created) = self.created.as_mut() {
+            created.push(node);
+        }
+        if let Some(journal) = self.journal.as_mut() {
+            journal.ops.push(JournalOp::Created(node));
+        }
+    }
+
+    #[inline]
+    fn journal_children(&mut self, parent: NodeId) {
+        if let Some(journal) = self.journal.as_mut() {
+            let old = self.children[parent.into()].iter().copied().collect();
+            journal.ops.push(JournalOp::Children(parent, old));
+        }
+    }
+
+    /// Record every change to styles and child lists, and every node created, from now on, so
+    /// [`Self::rollback_journal`] can return the tree to its current state. Removing a node or
+    /// changing a node's context cannot be undone: the journal is then broken.
+    pub fn begin_journal(&mut self) {
+        self.journal = Some(Journal::default());
+    }
+
+    /// Whether a journal is being kept and every change since it began can be undone
+    pub fn journal_is_sound(&self) -> bool {
+        self.journal.as_ref().is_some_and(|journal| !journal.broken)
+    }
+
+    /// Undo every change since [`Self::begin_journal`] (newest first) and stop keeping the
+    /// journal. Cached results stay: they carry the subtree keys they were computed under.
+    /// Returns false (and changes nothing) when there is no sound journal.
+    pub fn rollback_journal(&mut self) -> bool {
+        let Some(journal) = self.journal.take() else {
+            return false;
+        };
+        if journal.broken {
+            return false;
+        }
+        for op in journal.ops.into_iter().rev() {
+            match op {
+                JournalOp::Created(node) => {
+                    let _ = self.remove(node);
+                }
+                JournalOp::Style(node, style) => {
+                    if self.nodes.get(node.into()).is_some() {
+                        let _ = self.set_style(node, style);
+                    }
+                }
+                JournalOp::Children(parent, old) => {
+                    if self.nodes.get(parent.into()).is_none() {
+                        continue;
+                    }
+                    let current = core::mem::take(&mut self.children[parent.into()]);
+                    for child in current.iter() {
+                        if self.parents.get((*child).into()).is_some_and(|p| *p == Some(parent)) {
+                            self.parents[(*child).into()] = None;
+                        }
+                    }
+                    for &child in old.iter() {
+                        self.parents[child.into()] = Some(parent);
+                    }
+                    self.children[parent.into()] = old.iter().copied().collect();
+                    self.note_changed(parent);
+                }
+                JournalOp::InlineRoot(node, flag) => {
+                    if self.nodes.get(node.into()).is_some() {
+                        let _ = self.set_inline_root(node, flag);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// Stop keeping the journal without undoing anything
+    pub fn drop_journal(&mut self) {
+        self.journal = None;
     }
 
     /// Enable rounding of layout values. Rounding is enabled by default.
@@ -953,6 +1076,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let id = self.nodes.insert(NodeData::new(layout));
         let _ = self.children.insert(new_vec_with_capacity(0));
         let _ = self.parents.insert(None);
+        self.note_created(id.into());
 
         Ok(id.into())
     }
@@ -969,6 +1093,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
         let _ = self.children.insert(new_vec_with_capacity(0));
         let _ = self.parents.insert(None);
+        self.note_created(id.into());
 
         Ok(id.into())
     }
@@ -983,6 +1108,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
         let _ = self.children.insert(children.iter().copied().collect::<_>());
         let _ = self.parents.insert(None);
+        self.note_created(id);
 
         Ok(id)
     }
@@ -998,6 +1124,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
     ///
     /// Returns the id of the node removed.
     pub fn remove(&mut self, node: NodeId) -> TaffyResult<NodeId> {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.broken = true;
+        }
         let key = node.into();
         if let Some(parent) = self.parents[key] {
             if let Some(children) = self.children.get_mut(parent.into()) {
@@ -1025,6 +1154,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Sets the context data associated with the node
     #[inline]
     pub fn set_node_context(&mut self, node: NodeId, measure: Option<NodeContext>) -> TaffyResult<()> {
+        if let Some(journal) = self.journal.as_mut() {
+            journal.broken = true;
+        }
         let key = node.into();
         if let Some(measure) = measure {
             self.nodes[key].has_context = true;
@@ -1128,6 +1260,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     /// Adds a `child` node under the supplied `parent`
     pub fn add_child(&mut self, parent: NodeId, child: NodeId) -> TaffyResult<()> {
+        self.journal_children(parent);
         let parent_key = parent.into();
         let child_key = child.into();
         self.parents[child_key] = Some(parent);
@@ -1146,6 +1279,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         self.parents[child.into()] = Some(parent);
         self.children[parent_key].insert(child_index, child);
         self.note_changed(parent);
@@ -1155,6 +1289,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     /// Directly sets the `children` of the supplied `parent`
     pub fn set_children(&mut self, parent: NodeId, children: &[NodeId]) -> TaffyResult<()> {
+        self.journal_children(parent);
         let parent_key = parent.into();
 
         // Remove node as parent from all its current children.
@@ -1198,6 +1333,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         let child = self.children[parent_key].remove(child_index);
         self.parents[child.into()] = None;
 
@@ -1215,6 +1351,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     where
         R: core::ops::RangeBounds<usize>,
     {
+        self.journal_children(parent);
         let parent_key = parent.into();
         for child in self.children[parent_key].drain(range) {
             self.parents[child.into()] = None;
@@ -1240,6 +1377,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             return Err(TaffyError::ChildIndexOutOfBounds { parent, child_index, child_count });
         }
 
+        self.journal_children(parent);
         self.parents[new_child.into()] = Some(parent);
         let old_child = core::mem::replace(&mut self.children[parent_key][child_index], new_child);
         self.parents[old_child.into()] = None;
@@ -1289,7 +1427,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
         // can change value with the same style, so its results go.
         let keep_cache = self.config.subtree_keys && !super::subtree_key::style_uses_calc(&style);
         let data = &mut self.nodes[node.into()];
-        data.style = style;
+        let old = core::mem::replace(&mut data.style, style);
+        if let Some(journal) = self.journal.as_mut() {
+            journal.ops.push(JournalOp::Style(node, old));
+        }
+        let data = &mut self.nodes[node.into()];
         data.style_key = None;
         if keep_cache {
             self.note_changed(node);
@@ -1390,6 +1532,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
         let node = &mut self.nodes[node_id.into()];
         if node.is_inline_root != is_inline_root {
             node.is_inline_root = is_inline_root;
+            if let Some(journal) = self.journal.as_mut() {
+                journal.ops.push(JournalOp::InlineRoot(node_id, !is_inline_root));
+            }
             self.mark_dirty(node_id)?;
         }
         Ok(())

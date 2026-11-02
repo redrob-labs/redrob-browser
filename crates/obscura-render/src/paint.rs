@@ -4294,6 +4294,11 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             derived: previous_derived,
             counters_used: previous.layout.counters_used,
             emoji,
+            layout_tree: previous.layout.layout_tree.take().map(|mut layout_tree| {
+                layout_tree.store = Some(std::mem::take(&mut previous.layout.ifc));
+                layout_tree.engine = Some(std::mem::take(&mut previous.layout.text_engine));
+                layout_tree
+            }),
         }),
     };
     drop(previous);
