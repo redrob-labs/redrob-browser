@@ -97,6 +97,8 @@ struct CacheKey {
     kd_available_space: u64,
     /// The initial cached size of the parent's node
     parent_size: u64,
+    /// The float context the result was computed in (see `BlockContext::float_key`), 0 for none
+    float_key: u64,
 }
 
 impl CacheKey {
@@ -126,6 +128,7 @@ impl From<&LayoutInput> for CacheKey {
         Self {
             kd_available_space: size_mixed_cache_key(input.known_dimensions, input.available_space),
             parent_size: (size_option_cache_key(input.parent_size) & NON_SIGN_BITS_MASK) | extra_bits,
+            float_key: 0,
         }
     }
 }
@@ -279,13 +282,20 @@ impl Cache {
     /// Try to retrieve a cached result from the cache
     #[inline]
     pub fn get(&self, input: &LayoutInput) -> Option<LayoutOutput> {
-        let key = CacheKey::from(input);
+        self.get_in_float_context(input, 0)
+    }
+
+    /// Try to retrieve a result computed in the float context `float_key` (0: none)
+    #[inline]
+    pub fn get_in_float_context(&self, input: &LayoutInput, float_key: u64) -> Option<LayoutOutput> {
+        let key = CacheKey { float_key, ..CacheKey::from(input) };
         match input.run_mode {
             RunMode::PerformLayout => self.final_layout_entry.filter(|entry| entry.key == key).map(|e| e.content),
             RunMode::ComputeSize => {
                 let margins = vertical_margin_context_key(input);
                 let matches = |entry: &CacheEntry<MeasureOutput>| {
                     entry.key.kd_available_space == key.kd_available_space
+                        && entry.key.float_key == key.float_key
                         && (entry.key.x_axis_parent_size() == key.x_axis_parent_size())
                         && entry.content.vertical_margins_are_collapsible == margins
                 };
@@ -302,7 +312,12 @@ impl Cache {
 
     /// Store a computed size in the cache
     pub fn store(&mut self, input: &LayoutInput, layout_output: LayoutOutput) {
-        let key = CacheKey::from(input);
+        self.store_in_float_context(input, layout_output, 0);
+    }
+
+    /// Store a result computed in the float context `float_key` (0: none)
+    pub fn store_in_float_context(&mut self, input: &LayoutInput, layout_output: LayoutOutput, float_key: u64) {
+        let key = CacheKey { float_key, ..CacheKey::from(input) };
         match input.run_mode {
             RunMode::PerformLayout => {
                 self.is_empty = false;

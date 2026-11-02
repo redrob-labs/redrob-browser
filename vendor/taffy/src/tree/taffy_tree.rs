@@ -140,6 +140,12 @@ struct NodeData {
     /// it is laid out in. Such a layout depends on more than its `LayoutInput` and is not cached
     /// when laid out within a block formatting context.
     pub(crate) float_sensitive: bool,
+
+    /// The float context (`BlockContext::float_key`) of the node's current layout request, or 0
+    /// outside any float context. Cache entries carry the key they were computed under: a layout
+    /// made beside floats is only reused beside the same floats at the same position.
+    #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+    pub(crate) float_key: u64,
 }
 
 impl NodeData {
@@ -158,6 +164,8 @@ impl NodeData {
             float_bands: Vec::new(),
             is_inline_root: false,
             float_sensitive: false,
+            #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+            float_key: 0,
         }
     }
 
@@ -391,14 +399,24 @@ where
             self.taffy.nodes[node_id.into()].float_bands.clone_from(&float_bands);
         }
 
-        // A layout that places floats into the block formatting context it is laid out in, or that
-        // reads floats placed there earlier, depends on the float context as well as on `inputs`:
-        // it must run again rather than reuse a cached result.
+        // A layout that places floats into the block formatting context it is laid out in depends on
+        // the float context it leaves behind as well as on `inputs`: it must run again rather than
+        // reuse a cached result. One that only reads floats placed there earlier is cached under the
+        // float context it read (`float_key`): a different context empties the node's cache first.
         #[cfg(all(feature = "block_layout", feature = "float_layout"))]
-        let bypass_cache = block_ctx.as_ref().is_some_and(|ctx| {
+        let bypass_cache = {
             let node = &self.taffy.nodes[node_id.into()];
-            node.float_sensitive || (ctx.has_floats() && (node.is_inline_root || node.style.display == Display::Block))
-        });
+            let reads_floats = node.is_inline_root || node.style.display == Display::Block || node.has_context;
+            let float_key = match block_ctx.as_ref() {
+                Some(ctx) if ctx.has_floats() && reads_floats => ctx.float_key(),
+                _ => 0,
+            };
+            let node = &mut self.taffy.nodes[node_id.into()];
+            node.float_key = float_key;
+            (block_ctx.is_some() && node.float_sensitive, float_key)
+        };
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        let (bypass_cache, float_key) = bypass_cache;
         #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
         let bypass_cache = false;
 
@@ -447,10 +465,23 @@ where
             }
         };
 
+        // The bands follow from the float context, so a layout under them is cached with it.
+        // The result is stored under the float key of this request, whatever a nested layout did.
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+            let output = compute(tree, node_id, inputs);
+            tree.taffy.nodes[node_id.into()].float_key = float_key;
+            output
+        };
+
         #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
         if !float_bands.is_empty() {
             let previous = LEAF_FLOAT_BANDS.with(|bands| bands.replace(float_bands));
-            let output = compute(self, node_id, inputs);
+            let output = if bypass_cache {
+                compute(self, node_id, inputs)
+            } else {
+                compute_cached_layout(self, node_id, inputs, compute)
+            };
             LEAF_FLOAT_BANDS.with(|bands| bands.replace(previous));
             return output;
         }
@@ -605,11 +636,19 @@ where
         FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     fn cache_get(&self, node_id: NodeId, input: &LayoutInput) -> Option<LayoutOutput> {
-        self.taffy.nodes[node_id.into()].cache.get(input)
+        let node = &self.taffy.nodes[node_id.into()];
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        return node.cache.get_in_float_context(input, node.float_key);
+        #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
+        node.cache.get(input)
     }
 
     fn cache_store(&mut self, node_id: NodeId, input: &LayoutInput, layout_output: LayoutOutput) {
-        self.taffy.nodes[node_id.into()].cache.store(input, layout_output)
+        let node = &mut self.taffy.nodes[node_id.into()];
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        return node.cache.store_in_float_context(input, layout_output, node.float_key);
+        #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
+        node.cache.store(input, layout_output)
     }
 
     fn cache_clear(&mut self, node_id: NodeId) {
@@ -893,6 +932,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
         data.cache = source_data.cache.clone();
         data.unrounded_layout = source_data.unrounded_layout;
         data.final_layout = source_data.final_layout;
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        {
+            data.float_key = source_data.float_key;
+            data.float_bands.clone_from(&source_data.float_bands);
+        }
         #[cfg(feature = "detailed_layout_info")]
         {
             data.detailed_layout_info = source_data.detailed_layout_info.clone();

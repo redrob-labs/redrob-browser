@@ -187,6 +187,36 @@ impl FloatContext {
         self.has_floats
     }
 
+    /// A hash of everything a box laid out in this context can read from it:
+    /// the width, every segment and the clearance bottoms. Two contexts with
+    /// the same fingerprint answer every query alike, so a layout made in one
+    /// is valid in the other (the node cache keys on it, see
+    /// `TaffyTree::compute_child_layout`). The placement state of later
+    /// floats (`last_float_top`, the float lists) is left out: only a layout
+    /// that places floats reads it, and those are never cached.
+    pub fn fingerprint(&self) -> u64 {
+        let mut hash = FingerprintHasher::new();
+        hash.write_bool(self.has_floats);
+        hash.write_f32(self.available_width);
+        hash.write_usize(self.segments.len());
+        for segment in &self.segments {
+            hash.write_f32(segment.y.start);
+            hash.write_f32(segment.y.end);
+            hash.write_f32(segment.insets[0]);
+            hash.write_f32(segment.insets[1]);
+        }
+        for bottom in self.lowest_float_bottoms {
+            match bottom {
+                Some(bottom) => {
+                    hash.write_bool(true);
+                    hash.write_f32(bottom);
+                }
+                None => hash.write_bool(false),
+            }
+        }
+        hash.finish()
+    }
+
     /// Whether the float context contains any floats that extend to or below min_y
     #[inline(always)]
     pub fn has_active_floats(&self, min_y: f32) -> bool {
@@ -613,6 +643,52 @@ impl FloatContext {
                 height: f32::INFINITY,
             },
         }
+    }
+}
+
+/// FNV-1a over the bit patterns of the values written: deterministic across
+/// runs and processes, unlike the std hasher, because a fingerprint is
+/// compared against one recorded by an earlier layout.
+pub(crate) struct FingerprintHasher(u64);
+
+impl FingerprintHasher {
+    /// A hasher in its initial state
+    pub(crate) fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        for byte in value.to_le_bytes() {
+            self.0 ^= u64::from(byte);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    /// Mix in an `f32` by its bits, so `0.0` and `-0.0` stay apart
+    pub(crate) fn write_f32(&mut self, value: f32) {
+        self.write_u32(value.to_bits());
+    }
+
+    /// Mix in a `bool`
+    pub(crate) fn write_bool(&mut self, value: bool) {
+        self.write_u32(u32::from(value));
+    }
+
+    /// Mix in a `usize`
+    pub(crate) fn write_usize(&mut self, value: usize) {
+        self.write_u32(value as u32);
+        self.write_u32((value as u64 >> 32) as u32);
+    }
+
+    /// Mix in a previous hash
+    pub(crate) fn write_u64(&mut self, value: u64) {
+        self.write_u32(value as u32);
+        self.write_u32((value >> 32) as u32);
+    }
+
+    /// The hash, never 0 (0 stands for "laid out without floats")
+    pub(crate) fn finish(&self) -> u64 {
+        self.0.max(1)
     }
 }
 

@@ -117,6 +117,21 @@ impl BlockContext<'_> {
         self.bfc.float_context.has_floats()
     }
 
+    /// Everything a box laid out in this context can read from it: the float
+    /// context's fingerprint and this block's position in it. Never 0.
+    pub fn float_key(&self) -> u64 {
+        let mut hash = super::float::FingerprintHasher::new();
+        hash.write_u64(self.bfc.float_context.fingerprint());
+        hash.write_f32(self.y_offset);
+        hash.write_f32(self.insets[0]);
+        hash.write_f32(self.insets[1]);
+        hash.write_f32(self.content_box_insets[0]);
+        hash.write_f32(self.content_box_insets[1]);
+        hash.write_f32(self.float_content_contribution);
+        hash.write_bool(self.is_root);
+        hash.finish()
+    }
+
     /// Whether the float context contains any floats that extend to or below min_y
     #[inline(always)]
     pub fn has_active_floats(&self, min_y: f32) -> bool {

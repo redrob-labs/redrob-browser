@@ -41,7 +41,8 @@ pub mod prof {
     pub const SHEET_SOURCES: usize = 5;
     pub const RETAIN_CHECKS: usize = 6;
     pub const STYLE_PLAN: usize = 7;
-    const NAMES: [&str; 8] = [
+    pub const IFC_LAYOUT: usize = 8;
+    const NAMES: [&str; 9] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -50,9 +51,10 @@ pub mod prof {
         "sheet_sources",
         "retain_checks",
         "style_plan",
+        "ifc_layout",
     ];
-    static NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-    static COUNTS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    static NANOS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
+    static COUNTS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
