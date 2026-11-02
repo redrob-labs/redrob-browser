@@ -2553,6 +2553,19 @@ impl PreparedRender {
             .to_string(),
         );
 
+        // Each row of named areas serializes as one double-quoted string,
+        // whether it came from the longhand or the grid-template shorthand.
+        out.insert(
+            "grid-template-areas",
+            match style.grid_areas.as_deref() {
+                Some(rows) if !rows.is_empty() => rows
+                    .iter()
+                    .map(|row| format!("\"{}\"", row.join(" ")))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                _ => "none".to_string(),
+            },
+        );
         // A grid container's resolved track lists are its used track sizes,
         // implicit tracks included (CSS Grid 1 §7.2.6).
         if let Some((columns, rows)) =

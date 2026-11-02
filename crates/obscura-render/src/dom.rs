@@ -6733,19 +6733,22 @@ fn layout_dom_once(
                     })
                     .and_then(|parent| styles.get(&parent))
                     .is_some_and(|parent| {
-                        parent.display == crate::Display::Flex
-                            && !parent.internal_flex_container
-                            && if matches!(
-                                parent.flex_direction,
-                                Some(
-                                    taffy::FlexDirection::Column
-                                        | taffy::FlexDirection::ColumnReverse
-                                )
-                            ) {
-                                parent_definite
-                            } else {
-                                stretched_row_flex_item(parent, style)
-                            }
+                        (parent.display == crate::Display::Grid
+                            && parent.css_display == crate::CssDisplay::Layout
+                            && stretched_grid_item(parent, style))
+                            || parent.display == crate::Display::Flex
+                                && !parent.internal_flex_container
+                                && if matches!(
+                                    parent.flex_direction,
+                                    Some(
+                                        taffy::FlexDirection::Column
+                                            | taffy::FlexDirection::ColumnReverse
+                                    )
+                                ) {
+                                    parent_definite
+                                } else {
+                                    stretched_row_flex_item(parent, style)
+                                }
                     })
             });
             let reused_computed_style = fresh_styles
@@ -12554,6 +12557,19 @@ fn stretched_row_flex_item(parent: &crate::LayoutStyle, item: &crate::LayoutStyl
         && !item.margin_auto[2]
 }
 
+/// A `height:auto` grid item stretched over its grid area in the block axis
+/// (`align-self` normal or stretch, no auto block margins). CSS Grid §6.2:
+/// the stretched size is definite, so percentage heights inside it resolve
+/// against the area. Spotify's main view is such an item around a
+/// `height:100%` scroller, which collapsed to its content without it.
+fn stretched_grid_item(parent: &crate::LayoutStyle, item: &crate::LayoutStyle) -> bool {
+    let align = item.align_self.or(parent.align_items);
+    !item.is_replaced_box
+        && align.is_none_or(|align| align == taffy::AlignItems::STRETCH)
+        && !item.margin_auto[0]
+        && !item.margin_auto[2]
+}
+
 /// Content height of an absolutely positioned box whose height comes from
 /// its insets (`height:auto` with `top` and `bottom` set), as in CSS 2.1
 /// §10.6.4. Such a height is definite, so percentage heights inside it
@@ -13619,6 +13635,7 @@ where
         margin: f32,
         inline_edges: f32,
         content_box: bool,
+        keyword: crate::IntrinsicWidth,
     }
 
     // Snapshot every containing-space input before intrinsic subtree
@@ -13628,6 +13645,15 @@ where
         .filter_map(|(&node, &dom)| {
             let style = styles.get(&dom)?;
             if !style.width_fit_content || style.ignores_used_box_sizes() {
+                return None;
+            }
+            // An auto-width float or absolutely positioned box already
+            // shrinks to fit, which is its max-content size whenever that
+            // fits; the taffy pass sizes it without a measured override.
+            if style.width_intrinsic == crate::IntrinsicWidth::MaxContent
+                && (style.float.is_some()
+                    || matches!(style.position, Some(taffy::Position::Absolute)))
+            {
                 return None;
             }
             let layout = taffy_tree.layout(node).ok()?;
@@ -13706,6 +13732,7 @@ where
                 margin,
                 inline_edges,
                 content_box: style.box_sizing == crate::BoxSizing::ContentBox,
+                keyword: style.width_intrinsic,
             })
         })
         .collect();
@@ -13727,7 +13754,11 @@ where
             continue;
         };
         let fill = (candidate.available - candidate.margin).max(0.0);
-        let used_outer = min_content.max(max_content.min(fill));
+        let used_outer = match candidate.keyword {
+            crate::IntrinsicWidth::FitContent => min_content.max(max_content.min(fill)),
+            crate::IntrinsicWidth::MaxContent => max_content,
+            crate::IntrinsicWidth::MinContent => min_content,
+        };
         let declaration = if candidate.content_box {
             (used_outer - candidate.inline_edges).max(0.0)
         } else {

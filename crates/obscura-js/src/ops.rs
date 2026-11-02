@@ -1067,31 +1067,37 @@ fn fetch_max_body_bytes() -> usize {
         .unwrap_or(100 * 1024 * 1024)
 }
 
+/// `read_body_capped_here` on the transport runtime, as op_fetch_url runs it.
+#[cfg(test)]
+async fn read_body_capped(
+    response: reqwest::Response,
+    max: usize,
+) -> Result<Vec<u8>, deno_error::JsErrorBox> {
+    obscura_net::on_transport(read_body_capped_here(response, max))
+        .await
+        .map_err(deno_error::JsErrorBox::generic)
+}
+
 /// Read a response body into memory, refusing bodies larger than `max` bytes —
 /// both when the server advertises an oversized `Content-Length` and when the
 /// streamed chunks exceed the cap (a lying or chunked server). Streaming keeps
-/// a multi-GB response from ever being fully allocated.
-async fn read_body_capped(
+/// a multi-GB response from ever being fully allocated. op_fetch_url runs it
+/// on the transport runtime, so chunks arrive without waiting on page tasks.
+async fn read_body_capped_here(
     mut response: reqwest::Response,
     max: usize,
-) -> Result<Vec<u8>, deno_error::JsErrorBox> {
+) -> Result<Vec<u8>, String> {
     if let Some(len) = response.content_length() {
         if len > max as u64 {
-            return Err(deno_error::JsErrorBox::generic(format!(
+            return Err(format!(
                 "response body of {len} bytes exceeds the maximum of {max}"
-            )));
+            ));
         }
     }
     let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = response
-        .chunk()
-        .await
-        .map_err(|e| deno_error::JsErrorBox::generic(e.to_string()))?
-    {
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
         if buf.len() + chunk.len() > max {
-            return Err(deno_error::JsErrorBox::generic(format!(
-                "response body exceeds the maximum of {max} bytes"
-            )));
+            return Err(format!("response body exceeds the maximum of {max} bytes"));
         }
         buf.extend_from_slice(&chunk);
     }
@@ -1130,7 +1136,9 @@ fn op_fetch_cancel_handle(state: &mut OpState) -> u32 {
 ///
 /// Returns `undefined` on success. A thrown value comes back wrapped as
 /// `{ error }` so the caller can rethrow it from its own `catch` path.
-#[op2]
+/// A script it runs can run another one (document.write of an inline
+/// script), so the op is reentrant.
+#[op2(reentrant)]
 fn op_run_classic_script<'s, 'i>(
     scope: &mut v8::PinScope<'s, 'i>,
     #[string] source: &str,
@@ -3992,6 +4000,53 @@ fn op_report_browser_exception<'s, 'i>(
     };
 }
 
+/// Values a cross-realm postMessage transfers (MessagePorts), parked between
+/// the sender's realm and the receiver's. Every realm lives in this isolate,
+/// so the port object itself crosses; only the message data goes as JSON.
+#[derive(Default)]
+struct TransferSlots {
+    next_id: u32,
+    slots: std::collections::BTreeMap<u32, v8::Global<v8::Value>>,
+}
+
+/// A message dropped on the way (queue limit, origin mismatch, frame gone)
+/// never claims its slot; the oldest are evicted past this bound.
+const MAX_TRANSFER_SLOTS: usize = 1024;
+
+#[op2(fast)]
+fn op_transfer_stash(
+    scope: &mut v8::PinScope,
+    state: &mut OpState,
+    value: v8::Local<v8::Value>,
+) -> u32 {
+    if !state.has::<TransferSlots>() {
+        state.put(TransferSlots::default());
+    }
+    let slots = state.borrow_mut::<TransferSlots>();
+    slots.next_id = slots.next_id.wrapping_add(1).max(1);
+    let id = slots.next_id;
+    slots.slots.insert(id, v8::Global::new(scope, value));
+    while slots.slots.len() > MAX_TRANSFER_SLOTS {
+        slots.slots.pop_first();
+    }
+    id
+}
+
+#[op2]
+fn op_transfer_take<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    state: &mut OpState,
+    id: u32,
+) -> v8::Local<'s, v8::Value> {
+    let value = state
+        .try_borrow_mut::<TransferSlots>()
+        .and_then(|slots| slots.slots.remove(&id));
+    match value {
+        Some(value) => v8::Local::new(scope, value),
+        None => v8::undefined(scope).into(),
+    }
+}
+
 #[op2(fast)]
 fn op_console_msg(
     state: &OpState,
@@ -4939,9 +4994,11 @@ async fn fetch_url_inner(
                 unsafe_header_names.join(","),
             );
         }
-        let preflight = preflight_request.send().await.map_err(|e| {
-            deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e))
-        })?;
+        let preflight = obscura_net::on_transport(preflight_request.send())
+            .await
+            .map_err(|e| {
+                deno_error::JsErrorBox::generic(format!("CORS preflight failed: {}", e))
+            })?;
 
         // Fetch spec: the preflight response's status must be an ok status
         // before its CORS headers are consulted (#973).
@@ -5106,7 +5163,7 @@ async fn fetch_url_inner(
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 PageInFlightGuard(counter.clone())
             });
-            req.send()
+            obscura_net::on_transport(req.send())
                 .await
                 .map_err(|error| deno_error::JsErrorBox::generic(error.to_string()))?
         };
@@ -5274,12 +5331,27 @@ async fn fetch_url_inner(
         "opaque": opaque,
         "headers": script_headers,
     });
+    // The body streams in on the transport runtime from here on. A small body
+    // is usually already in the connection's buffer with its headers; give it
+    // a moment so it completes with them, as when it was read on this thread.
+    let mut body_read = obscura_net::spawn_on_transport(read_body_capped_here(
+        response,
+        fetch_max_body_bytes(),
+    ));
+    let early_body =
+        tokio::time::timeout(std::time::Duration::from_millis(5), &mut body_read)
+            .await
+            .ok();
     // A resource must not form an ownership cycle with its OpState table.
     let body_state = Rc::downgrade(&state);
     let body = Box::pin(async move {
         let _page_in_flight = _page_in_flight;
         let mut network_guard = network_guard;
-        let resp_bytes = read_body_capped(response, fetch_max_body_bytes()).await?;
+        let resp_bytes = match early_body {
+            Some(result) => result,
+            None => body_read.await,
+        }
+        .map_err(deno_error::JsErrorBox::generic)?;
         if let Some(ref cbs) = callbacks {
             if cbs.has_response_callbacks().await {
                 let resp = fetch_response(
@@ -8634,10 +8706,12 @@ pub fn build_extension() -> Extension {
         op_runtime_events_enabled(),
         op_console_msg(),
         op_report_browser_exception(),
+        op_run_classic_script(),
+        op_transfer_stash(),
+        op_transfer_take(),
         op_fetch_url(),
         op_fetch_cancel_handle(),
         op_abort_signal_state(),
-        op_run_classic_script(),
         op_console_value_kind(),
         op_performance_now(),
         op_host_hardware(),

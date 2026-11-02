@@ -849,7 +849,7 @@ fn reject_oversized_content_length(
 /// and the response dropped (cancelling the rest of the transfer) instead
 /// of failing the request.
 async fn read_reqwest_body_bounded(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     url: &Url,
     limit: usize,
     truncate: bool,
@@ -857,6 +857,19 @@ async fn read_reqwest_body_bounded(
     if !truncate {
         reject_oversized_content_length(response.headers(), url, limit)?;
     }
+    let url = url.clone();
+    crate::on_transport(async move {
+        read_reqwest_body_bounded_here(response, &url, limit, truncate).await
+    })
+    .await
+}
+
+async fn read_reqwest_body_bounded_here(
+    mut response: reqwest::Response,
+    url: &Url,
+    limit: usize,
+    truncate: bool,
+) -> Result<Vec<u8>, ObscuraNetError> {
     let capacity = response
         .content_length()
         .and_then(|length| usize::try_from(length).ok())
@@ -1661,7 +1674,7 @@ impl ObscuraHttpClient {
 
             let in_flight = InFlightGuard::new(&self.in_flight);
             let sent_at = Instant::now();
-            let resp = req_builder.send().await.map_err(|e| {
+            let resp = crate::on_transport(req_builder.send()).await.map_err(|e| {
                 ObscuraNetError::Network(format!("{}: {}", current_url, error_chain(&e)))
             })?;
             let headers_ms = sent_at.elapsed().as_millis();
