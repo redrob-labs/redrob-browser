@@ -12014,11 +12014,23 @@ fn layout_dom_once(
                 projective_transforms = geometry.projective_transforms;
                 // Entries of nodes no longer rendered go; the walk below
                 // reaches every node that is rendered and was not before.
-                let flat = current_flat_tree(tree);
-                clip_rects.retain(|id, _| flat.contains(*id));
-                translates.retain(|id, _| flat.contains(*id));
-                transforms.retain(|id, _| flat.contains(*id));
-                projective_transforms.retain(|id, _| flat.contains(*id));
+                match &derived_changes {
+                    Some((_, changes)) => {
+                        for id in &changes.removed {
+                            clip_rects.remove(id);
+                            translates.remove(id);
+                            transforms.remove(id);
+                            projective_transforms.remove(id);
+                        }
+                    }
+                    None => {
+                        let flat = current_flat_tree(tree);
+                        clip_rects.retain(|id, _| flat.contains(*id));
+                        translates.retain(|id, _| flat.contains(*id));
+                        transforms.retain(|id, _| flat.contains(*id));
+                        projective_transforms.retain(|id, _| flat.contains(*id));
+                    }
+                }
                 dirty
             });
         let mut walked = derived_changes
@@ -15333,7 +15345,9 @@ pub(crate) fn rendered_tree_changes(old: &FlatTree, new: &FlatTree) -> RenderedT
         added: Vec::new(),
         removed: Vec::new(),
     };
-    if std::ptr::eq(old, new) {
+    // A shared walk is a flat tree `patch_flat_tree` copied: the same child
+    // lists.
+    if std::ptr::eq(old, new) || std::rc::Rc::ptr_eq(&old.walk, &new.walk) {
         return changes;
     }
     for &id in new.walk.iter() {
