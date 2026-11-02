@@ -267,8 +267,8 @@ pub struct TaffyTree<NodeContext = ()> {
 enum JournalOp {
     /// A node was created
     Created(NodeId),
-    /// A node's style was replaced; the old style
-    Style(NodeId, Style),
+    /// A node's style was replaced; the old style and its style key, when computed
+    Style(NodeId, Style, Option<u64>),
     /// A node's child list was changed; the old list
     Children(NodeId, Vec<NodeId>),
     /// A node's inline-root flag was changed; the old flag
@@ -1053,12 +1053,12 @@ impl<NodeContext> TaffyTree<NodeContext> {
                 JournalOp::Created(node) => {
                     let _ = self.remove(node);
                 }
-                JournalOp::Style(node, style) => {
+                JournalOp::Style(node, style, style_key) => {
                     // The node held this style (and its `calc()` handles) before: the results
                     // computed under it are still valid, whatever handles it brings back.
                     if let Some(data) = self.nodes.get_mut(node.into()) {
                         data.style = style;
-                        data.style_key = None;
+                        data.style_key = style_key;
                         self.note_changed(node);
                     }
                 }
@@ -1472,8 +1472,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
             && super::subtree_key::calc_handles_kept(&self.nodes[node.into()].style, &style);
         let data = &mut self.nodes[node.into()];
         let old = core::mem::replace(&mut data.style, style);
+        let old_key = data.style_key;
         if let Some(journal) = self.journal.as_mut() {
-            journal.ops.push(JournalOp::Style(node, old));
+            journal.ops.push(JournalOp::Style(node, old, old_key));
         }
         let data = &mut self.nodes[node.into()];
         data.style_key = None;

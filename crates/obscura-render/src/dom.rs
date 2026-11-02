@@ -2933,105 +2933,81 @@ fn resolve_inline_percentage_heights(
     if candidates.is_empty() {
         return false;
     }
-    place(taffy_tree, &candidates, false);
-    let mut on_path: HashSet<taffy::NodeId> = HashSet::default();
-    for &candidate in &candidates {
-        let mut current = Some(candidate);
-        while let Some(node) = current {
-            if !on_path.insert(node) {
+    // A candidate resolves against the content box of its nearest ancestor
+    // box with an element, read from that box's layout alone. Only a direct
+    // element child of it with a definite-height parent of the kinds below
+    // changes, so only those candidates' parent boxes are placed and read
+    // (placing the candidates themselves would lay out every inline
+    // formatting context on the way to them again).
+    let mut acting: Vec<(taffy::NodeId, taffy::NodeId, f32)> = Vec::new();
+    for &node in &candidates {
+        let Some(dom_id) = id_map.get(&node).copied() else {
+            continue;
+        };
+        let Some(percent) = styles.get(&dom_id).and_then(inline_percentage_height) else {
+            continue;
+        };
+        let mut parent_box = taffy_tree.parent(node);
+        while let Some(parent) = parent_box {
+            if id_map.contains_key(&parent) {
                 break;
             }
-            current = taffy_tree.parent(node);
+            parent_box = taffy_tree.parent(parent);
         }
+        let Some(parent_box) = parent_box else {
+            continue;
+        };
+        let parent_id = id_map[&parent_box];
+        if rendered_parent(tree, dom_id) != Some(parent_id) {
+            continue;
+        }
+        let parent_is_definite = styles.get(&parent_id).is_some_and(|style| {
+            (style.float.is_some()
+                || style.is_inline_block
+                || (style.display == crate::Display::Block
+                    && style.column_count.is_none()
+                    && taffy_tree
+                        .parent(node)
+                        .is_some_and(|parent| !id_map.contains_key(&parent))))
+                && definite_height_nodes.contains(&parent_id)
+                && style.size_expressions[1].is_none()
+        });
+        if !parent_is_definite {
+            continue;
+        }
+        // The walk from the root reaches only boxes under it.
+        let mut top = node;
+        while let Some(parent) = taffy_tree.parent(top) {
+            top = parent;
+        }
+        if top != taffy_root {
+            continue;
+        }
+        acting.push((node, parent_box, percent));
     }
-    if !on_path.contains(&taffy_root) {
+    if acting.is_empty() {
         return false;
     }
-    fn visit(
-        tree: &DomTree,
-        taffy_tree: &mut TaffyTree<usize>,
-        node: taffy::NodeId,
-        nearest_dom_parent: Option<NodeId>,
-        containing_block_height: f32,
-        id_map: &HashMap<taffy::NodeId, NodeId>,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
-        definite_height_nodes: &HashSet<NodeId>,
-        on_path: &HashSet<taffy::NodeId>,
-        changed: &mut bool,
-    ) {
-        let Ok(layout) = taffy_tree.layout(node) else {
-            return;
+    let parents: Vec<taffy::NodeId> = acting.iter().map(|&(_, parent, _)| parent).collect();
+    place(taffy_tree, &parents, false);
+    let mut changed = false;
+    for (node, parent_box, percent) in acting {
+        let Ok(layout) = taffy_tree.layout(parent_box) else {
+            continue;
         };
-        let own_content_height = layout.content_box_height().max(0.0);
-        let dom_id = id_map.get(&node).copied();
-
-        if let (Some(dom_id), Some(parent_id)) = (dom_id, nearest_dom_parent) {
-            let is_direct_dom_child = rendered_parent(tree, dom_id) == Some(parent_id);
-            let child_percent = styles.get(&dom_id).and_then(inline_percentage_height);
-            let parent_is_definite = styles.get(&parent_id).is_some_and(|style| {
-                (style.float.is_some()
-                    || style.is_inline_block
-                    || (style.display == crate::Display::Block
-                        && style.column_count.is_none()
-                        && taffy_tree
-                            .parent(node)
-                            .is_some_and(|parent| !id_map.contains_key(&parent))))
-                    && definite_height_nodes.contains(&parent_id)
-                    && style.size_expressions[1].is_none()
-            });
-            if is_direct_dom_child && parent_is_definite && containing_block_height.is_finite() {
-                if let Some(percent) = child_percent {
-                    if let Ok(current) = taffy_tree.style(node) {
-                        let mut resolved = current.clone();
-                        resolved.size.height =
-                            taffy::Dimension::length((percent * containing_block_height).max(0.0));
-                        if taffy_tree.set_style_if_changed(node, resolved).is_ok() {
-                            *changed = true;
-                        }
-                    }
-                }
-            }
+        let containing_block_height = layout.content_box_height().max(0.0);
+        if !containing_block_height.is_finite() {
+            continue;
         }
-
-        let next_dom_parent = dom_id.or(nearest_dom_parent);
-        let next_containing_block_height = if dom_id.is_some() {
-            own_content_height
-        } else {
-            containing_block_height
-        };
-        let children = taffy_tree.children(node).unwrap_or_default();
-        for child in children {
-            if !on_path.contains(&child) {
-                continue;
+        if let Ok(current) = taffy_tree.style(node) {
+            let mut resolved = current.clone();
+            resolved.size.height =
+                taffy::Dimension::length((percent * containing_block_height).max(0.0));
+            if taffy_tree.set_style_if_changed(node, resolved).is_ok() {
+                changed = true;
             }
-            visit(
-                tree,
-                taffy_tree,
-                child,
-                next_dom_parent,
-                next_containing_block_height,
-                id_map,
-                styles,
-                definite_height_nodes,
-                on_path,
-                changed,
-            );
         }
     }
-
-    let mut changed = false;
-    visit(
-        tree,
-        taffy_tree,
-        taffy_root,
-        None,
-        0.0,
-        id_map,
-        styles,
-        definite_height_nodes,
-        &on_path,
-        &mut changed,
-    );
     changed
 }
 
@@ -4705,7 +4681,7 @@ fn cascade_node_style(
         style.after_pseudo = after_pseudo.map(Box::new);
         style.placeholder_pseudo = placeholder_pseudo.map(Box::new);
         descendant_color_scheme_dark = style.color_scheme_dark;
-        styles.insert(id, style);
+        styles.replace(id, style);
     }
 
     Some((
@@ -11410,11 +11386,15 @@ fn layout_dom_once(
                     let read: Vec<taffy::NodeId> = static_position_candidates
                         .iter()
                         .flat_map(|candidate| {
+                            // The child's own layout is read only for its
+                            // margin, and only without a placeholder.
                             [
-                                candidate.placeholder.unwrap_or(candidate.child),
-                                candidate.child,
-                                candidate.target,
+                                Some(candidate.placeholder.unwrap_or(candidate.child)),
+                                candidate.placeholder.is_none().then_some(candidate.child),
+                                Some(candidate.target),
                             ]
+                            .into_iter()
+                            .flatten()
                         })
                         .collect();
                     taffy_tree.place_deferred(&read, false, &mut measure);
@@ -11607,11 +11587,15 @@ fn layout_dom_once(
                     let read: Vec<taffy::NodeId> = static_position_candidates
                         .iter()
                         .flat_map(|candidate| {
+                            // The child's own layout is read only for its
+                            // margin, and only without a placeholder.
                             [
-                                candidate.placeholder.unwrap_or(candidate.child),
-                                candidate.child,
-                                candidate.target,
+                                Some(candidate.placeholder.unwrap_or(candidate.child)),
+                                candidate.placeholder.is_none().then_some(candidate.child),
+                                Some(candidate.target),
                             ]
+                            .into_iter()
+                            .flatten()
                         })
                         .collect();
                     taffy_tree.place_deferred(&read, false, &mut measure);
@@ -19524,6 +19508,32 @@ fn defer_cyclic_flex_inline_sizes(
     deferred
 }
 
+/// The inline size a deferred replaced box contributes to its flex item's
+/// natural floor: its natural width, or with a definite height the width the
+/// natural ratio transfers from it.
+fn deferred_natural_width(style: &crate::LayoutStyle) -> Option<f32> {
+    let metadata = style.replaced_intrinsic?;
+    let (width, height) = metadata.natural_size()?;
+    // With the percentage width treated as auto, a definite height transfers
+    // through the natural ratio (Chrome: a 433x273 image at width:95%;
+    // height:220px contributes 348.94).
+    let ratio = metadata
+        .ratio
+        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
+        .or_else(|| (height > 0.0).then(|| width / height));
+    Some(match (style.height, ratio) {
+        (crate::Dimension::Px(used), Some(ratio)) => {
+            let edges = if style.box_sizing == crate::BoxSizing::BorderBox {
+                style.padding.top + style.padding.bottom + style.border.top + style.border.bottom
+            } else {
+                0.0
+            };
+            (used - edges).max(0.0) * ratio
+        }
+        _ => width,
+    })
+}
+
 fn resolve_deferred_flex_inline_sizes<F>(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
@@ -19554,14 +19564,37 @@ where
     // restoring percentages that Taffy can resolve natively, and laying out
     // once before resolving functional sizes.
     let flex_items: HashSet<NodeId> = deferred.iter().map(|entry| entry.flex_item).collect();
-    // The layouts read below: each item's, its parent box's and its
-    // siblings'.
+    // The natural floor of each flex item (see below), in one pass over the
+    // entries: the largest natural width of its deferred replaced boxes.
+    let mut natural_floors: HashMap<NodeId, f32> = HashMap::default();
+    for entry in deferred.iter().filter(|entry| entry.slot == 0) {
+        let Some(width) = styles.get(&entry.node).and_then(deferred_natural_width) else {
+            continue;
+        };
+        if width.is_finite() && width > 0.0 {
+            let floor = natural_floors.entry(entry.flex_item).or_insert(0.0);
+            *floor = floor.max(width);
+        }
+    }
+    // Only an item lifted to a natural floor reads the room its siblings
+    // leave.
+    let reads_room = |item: NodeId| {
+        natural_floors.get(&item).is_some_and(|floor| *floor > 0.0)
+            && styles.get(&item).is_some_and(|style| {
+                style.width == crate::Dimension::Auto
+                    && style.flex_basis == crate::Dimension::Auto
+                    && style.flex_shrink.unwrap_or(1.0) > 0.0
+            })
+    };
+    // The layouts read below: each item's, its parent box's and, for an item
+    // that reads its room, its siblings'.
     let read_boxes: Vec<taffy::NodeId> = flex_items
         .iter()
         .flat_map(|&item| {
             let parent = rendered_parent(tree, item);
             std::iter::once(item).chain(parent).chain(
                 parent
+                    .filter(|_| reads_room(item))
                     .map(|parent| rendered_children(tree, parent))
                     .unwrap_or_default(),
             )
@@ -19600,43 +19633,13 @@ where
         // images' natural width before pinning. An item with a definite
         // width or flex-basis keeps its already-correct measurement.
         if style.width == crate::Dimension::Auto && style.flex_basis == crate::Dimension::Auto {
-            let natural_floor = deferred
-                .iter()
-                .filter(|entry| entry.flex_item == flex_item && entry.slot == 0)
-                .filter_map(|entry| styles.get(&entry.node))
-                .filter_map(|style| {
-                    let metadata = style.replaced_intrinsic?;
-                    let (width, height) = metadata.natural_size()?;
-                    // With the percentage width treated as auto, a definite
-                    // height transfers through the natural ratio (Chrome: a
-                    // 433x273 image at width:95%; height:220px contributes
-                    // 348.94).
-                    let ratio = metadata
-                        .ratio
-                        .filter(|ratio| ratio.is_finite() && *ratio > 0.0)
-                        .or_else(|| (height > 0.0).then(|| width / height));
-                    Some(match (style.height, ratio) {
-                        (crate::Dimension::Px(used), Some(ratio)) => {
-                            let edges = if style.box_sizing == crate::BoxSizing::BorderBox {
-                                style.padding.top
-                                    + style.padding.bottom
-                                    + style.border.top
-                                    + style.border.bottom
-                            } else {
-                                0.0
-                            };
-                            (used - edges).max(0.0) * ratio
-                        }
-                        _ => width,
-                    })
-                })
-                .filter(|width| width.is_finite() && *width > 0.0)
-                .fold(0.0_f32, f32::max);
+            let natural_floor = natural_floors.get(&flex_item).copied().unwrap_or(0.0);
             // The floor is the item's flex base size, not a minimum: a
             // shrinkable item in a row with a definite width shrinks to the
             // room its siblings leave (Chrome: the sass certificate preview
             // is 206 wide beside a 170px column in a 376px row, not 250).
-            let room = (style.flex_shrink.unwrap_or(1.0) > 0.0)
+            // A zero floor stays zero whatever the room.
+            let room = (style.flex_shrink.unwrap_or(1.0) > 0.0 && natural_floor > 0.0)
                 .then(|| rendered_parent(tree, flex_item))
                 .flatten()
                 .and_then(|parent| {
