@@ -119,7 +119,7 @@ impl Frag {
 /// value is its last box's in tree order).
 #[derive(Default)]
 pub(crate) struct BoxGeometry {
-    pub(crate) rects: HashMap<NodeId, Rect>,
+    pub(crate) rects: crate::NodeMap<Rect>,
     pub(crate) grid_overflow: HashMap<NodeId, Rect>,
     pub(crate) grid_tracks: HashMap<NodeId, (Vec<f32>, Vec<f32>)>,
     /// Each element's unrounded border box snapped to 1/64 px, and its

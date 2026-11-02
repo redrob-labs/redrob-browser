@@ -645,9 +645,12 @@ fn transformed_bounds(t: &crate::Affine2, r: Rect) -> Rect {
 }
 
 fn add_rect(map: &mut HashMap<NodeId, Rect>, id: NodeId, rect: Rect) {
-    map.entry(id)
-        .and_modify(|r| *r = union(*r, rect))
-        .or_insert(rect);
+    match map.get_mut(&id) {
+        Some(r) => *r = union(*r, rect),
+        None => {
+            map.insert(id, rect);
+        }
+    }
 }
 
 fn union(a: Rect, b: Rect) -> Rect {

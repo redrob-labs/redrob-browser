@@ -386,7 +386,11 @@ impl RelationalKeySummary {
             }
             if let Some(attributes) = dom_node.attrs() {
                 for attribute in attributes {
-                    add(&mut summary.attributes, attribute.name.local.as_ref(), false);
+                    add(
+                        &mut summary.attributes,
+                        attribute.name.local.as_ref(),
+                        false,
+                    );
                 }
             }
         }
