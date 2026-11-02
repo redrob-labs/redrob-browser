@@ -16,6 +16,7 @@ pub mod jsdialog;
 pub mod languages;
 pub mod permission;
 pub mod print;
+pub mod reader;
 pub mod site_info;
 pub mod spelling;
 pub mod ui;
@@ -105,6 +106,7 @@ pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
             sink.send(browser.identifier(), Event::Zoom(percent));
         }
         Op::Print => print::print(sink, browser),
+        Op::Reader => reader::toggle(browser),
         _ => {}
     }
 }

@@ -1,4 +1,4 @@
-//! Chrome's own commands (Chrome style pages, docs/FEATURES.md).
+//! Chrome's own commands (Chrome style pages, docs/CHROME-FEATURES.md).
 //!
 //! A Chrome style page runs inside a Chrome browser of its own that has no
 //! tab strip or toolbar: the window draws those. So Chrome's commands that

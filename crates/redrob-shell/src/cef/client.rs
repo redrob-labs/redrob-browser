@@ -76,6 +76,31 @@ thread_local! {
     static PAUSED: RefCell<Vec<TabId>> = const { RefCell::new(Vec::new()) };
 }
 
+/// The browser id of the extension popup open now (cdp.rs), 0 for none.
+static POPUP_BROWSER: AtomicI32 = AtomicI32::new(0);
+/// Escape was pressed in the extension popup.
+static POPUP_ESCAPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_popup_browser(id: i32) {
+    POPUP_BROWSER.store(id, Ordering::SeqCst);
+}
+
+/// Escape in `browser`'s page: true when it is the extension popup, which
+/// Escape closes, as in Chrome.
+pub fn popup_escape(browser: i32) -> bool {
+    let popup = POPUP_BROWSER.load(Ordering::SeqCst);
+    let hit = popup != 0 && popup == browser;
+    if hit {
+        POPUP_ESCAPED.store(true, Ordering::SeqCst);
+    }
+    hit
+}
+
+/// Whether Escape was pressed in the extension popup since the last call.
+pub fn take_popup_escaped() -> bool {
+    POPUP_ESCAPED.swap(false, Ordering::SeqCst)
+}
+
 /// Pages paused in the debugger since the last call (an extension popup
 /// before its first script, cdp.rs).
 pub fn take_paused() -> Vec<TabId> {

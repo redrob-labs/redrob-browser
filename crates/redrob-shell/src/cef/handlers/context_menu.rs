@@ -98,6 +98,9 @@ pub struct Target {
     pub suggestions: Vec<String>,
     /// The page has Chrome's own commands (Chrome style).
     pub chrome: bool,
+    /// Chrome can translate the page: only with Google's API keys, which
+    /// CEF builds do not have, so the item shows only where it works.
+    pub translate: bool,
 }
 
 /// Chrome's items for `t`, in Chrome's order.
@@ -148,7 +151,9 @@ pub fn entries(t: &Target) -> Vec<Entry> {
         if t.chrome {
             out.push(item(Command::Cast, true));
             out.push(item(Command::QrCode, true));
-            out.push(item(Command::Translate, true));
+            if t.translate {
+                out.push(item(Command::Translate, true));
+            }
             out.push(item(Command::ReadingMode, true));
         }
         out.push(Entry::Separator);
@@ -274,9 +279,7 @@ fn run(
         Command::QrCode => {
             super::chrome::run(browser, super::chrome::id::QRCODE_GENERATOR);
         }
-        Command::ReadingMode => {
-            super::chrome::run(browser, super::chrome::id::DISTILL_PAGE);
-        }
+        Command::ReadingMode => super::reader::toggle(browser),
     }
 }
 
@@ -348,6 +351,8 @@ wrap_context_menu_handler! {
                 misspelled,
                 suggestions,
                 chrome: crate::cef::native::chrome_style(),
+                translate: crate::cef::native::chrome_style()
+                    && super::chrome::enabled(browser, super::chrome::id::SHOW_TRANSLATE),
                 link: if flag(types, T::CM_TYPEFLAG_LINK.0) {
                     super::text(&params.link_url())
                 } else {

@@ -352,6 +352,7 @@ fn ko(en: &str) -> Option<&'static str> {
         "Computed" => "계산된 스타일",
         // Extensions and page info
         "Extensions" => "확장 프로그램",
+        "Reading mode" => "읽기 모드",
         "Pin" => "고정",
         "Unpin" => "고정 해제",
         "Manage extensions" => "확장 프로그램 관리",

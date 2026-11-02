@@ -523,7 +523,9 @@ mod tests {
             | P::CEF_PERMISSION_TYPE_MIC_STREAM as u32;
         assert_eq!(prompt_kinds(cam), vec![Kind::Camera, Kind::Microphone]);
         let ar = P::CEF_PERMISSION_TYPE_AR_SESSION as u32;
-        assert_eq!(prompt_kinds(ar), vec![Kind::Other(ar)]);
+        assert_eq!(prompt_kinds(ar), vec![Kind::Xr]);
+        let quota = P::CEF_PERMISSION_TYPE_DISK_QUOTA as u32;
+        assert_eq!(prompt_kinds(quota), vec![Kind::Other(quota)]);
     }
 
     #[test]

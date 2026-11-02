@@ -599,7 +599,7 @@ pub(crate) fn set_pref_to(name: &str, value: Pref) {
     }
 }
 
-/// Chrome's own features the window relies on (docs/FEATURES.md): spell
+/// Chrome's own features the window relies on (docs/CHROME-FEATURES.md): spell
 /// check in English and Korean, and no second password manager next to the
 /// window's vault. Run once Chromium's context is ready (cef/app.rs).
 pub(crate) fn write_feature_prefs() {
@@ -611,7 +611,8 @@ pub(crate) fn write_feature_prefs() {
     // The window's vault saves and fills passwords (vault.rs); Chrome's
     // password manager would ask a second time.
     set_pref_to("credentials_enable_service", Pref::Bool(false));
-    // Offer to translate pages in other languages, as Chrome does.
+    // Offer to translate pages in other languages, as Chrome does (it can
+    // only with Google's API keys, context_menu.rs).
     set_pref_to("translate.enabled", Pref::Bool(true));
 }
 

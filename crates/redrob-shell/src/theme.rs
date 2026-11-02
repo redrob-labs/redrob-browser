@@ -309,6 +309,7 @@ pub enum Icon {
     SignIn,
     Incognito,
     Plug,
+    BookOpen,
 }
 
 impl Icon {
@@ -342,6 +343,7 @@ impl Icon {
             Icon::SignIn => svg!("signIn"),
             Icon::Incognito => svg!("anonymous"),
             Icon::Plug => svg!("plug"),
+            Icon::BookOpen => svg!("bookOpen"),
         }
     }
 

@@ -118,6 +118,8 @@ pub enum Op {
     SiteInfo,
     /// Delete the cookies and stored data of this site (`origin`).
     ClearSiteData(String),
+    /// Reading mode on or off (cef/handlers/reader.rs).
+    Reader,
 }
 
 /// The browser window a command came from. A tab belongs to the window that
@@ -336,12 +338,14 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
         let closed = client::take_closed();
         let resized = client::take_resized();
         let paused = client::take_paused();
+        let escaped = client::take_popup_escaped();
         let replied = client::run_replies();
         let cmd = commands.try_recv().ok();
         if created.is_empty()
             && closed.is_empty()
             && resized.is_empty()
             && paused.is_empty()
+            && !escaped
             && cmd.is_none()
             && !replied
         {
@@ -358,8 +362,15 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) {
             for tab in paused {
                 e.popup_paused(tab);
             }
+            if escaped {
+                if let Some(page) = e.popup.as_ref().map(|p| p.page) {
+                    e.close_popup();
+                    e.sink.send_tab(page, Event::PopupClosed);
+                }
+            }
             for tab in closed {
                 if e.popup.as_ref().is_some_and(|p| p.tab == tab) {
+                    client::set_popup_browser(0);
                     if let Some(p) = e.popup.take() {
                         e.sink.send_tab(p.page, Event::PopupClosed);
                     }
@@ -924,6 +935,7 @@ impl Engine {
         let browser = c.browser.clone();
         p.native = native::of(&browser);
         p.browser = Some(browser.clone());
+        client::set_popup_browser(browser.identifier());
         p._devtools = devtools;
         if let Some(n) = p.native {
             native::raise(n);
@@ -1032,9 +1044,11 @@ impl Engine {
         }
     }
 
-    /// Close the extension popup, if one is open.
+    /// Close the extension popup, if one is open. Not reported: the window
+    /// asked for it, or opened another popup in its place.
     fn close_popup(&mut self) {
         let Some(p) = self.popup.take() else { return };
+        client::set_popup_browser(0);
         if let Some(n) = p.native {
             native::set_visible(n, false, None);
         }
@@ -1042,7 +1056,6 @@ impl Engine {
             self.closing.insert(p.tab);
             h.close_browser(1);
         }
-        self.sink.send_tab(p.page, Event::PopupClosed);
     }
 
     /// `tab` is now the page on screen in `window`, which may take it from

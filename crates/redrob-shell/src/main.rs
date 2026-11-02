@@ -1577,6 +1577,12 @@ impl Window {
                 self.open_tab(internal::PASSWORDS, true);
                 ui.close();
             }
+            if item(ui, Icon::BookOpen, t("Reading mode")).clicked() {
+                if let Some(id) = self.active_id() {
+                    self.op(id, Op::Reader);
+                }
+                ui.close();
+            }
             if item(ui, Icon::Code, t("Developer tools")).clicked() {
                 self.devtools();
                 ui.close();

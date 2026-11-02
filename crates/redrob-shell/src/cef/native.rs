@@ -24,7 +24,7 @@ pub struct Place {
 /// hidden flag at creation).
 const AWAY: i32 = -30_000;
 
-/// The runtime style of every page (docs/CEF.md, docs/FEATURES.md): Chrome
+/// The runtime style of every page (docs/CEF.md, docs/CHROME-FEATURES.md): Chrome
 /// style, so pages get Chrome's own features (print preview, extensions,
 /// autofill, passwords, chrome:// pages, choosers, page info). macOS: CEF
 /// always uses Alloy for a page inside a parent NSView.
@@ -543,7 +543,9 @@ mod imp {
     /// Put `child` above its sibling pages: the last subview draws on top.
     pub fn raise(child: Handle) {
         let Some(c) = view(child) else { return };
-        let Some(parent) = c.superview() else {
+        // SAFETY: `c` is a live view; its superview is read on the main
+        // thread, where the window runs.
+        let Some(parent) = (unsafe { c.superview() }) else {
             return;
         };
         // SAFETY: `c` is a live view; kept alive while it moves.
