@@ -237,6 +237,9 @@ struct Window {
     address_id: egui::Id,
     /// Pointer, click and wheel state of the page area (cef/input.rs).
     page_input: cef::input::State,
+    /// Permission prompts, page dialogs, the context menu, find and zoom
+    /// (cef/handlers/ui.rs).
+    prompts: cef::handlers::ui::Prompts,
     /// Whether the page area had keyboard focus last frame.
     page_focused: bool,
     autoscroll: autoscroll::Autoscroll,
@@ -348,6 +351,7 @@ impl Window {
 
     fn close_tab(&mut self, index: usize) {
         if let Some(id) = self.model.close_tab(index) {
+            self.prompts.close_tab(id);
             self.op(id, Op::Close);
         }
         if self.model.tabs.is_empty() {
@@ -400,6 +404,13 @@ impl Window {
 
     fn drain_updates(&mut self, ctx: &egui::Context) {
         while let Ok(Update { tab, event }) = self.updates.try_recv() {
+            let Some(event) = self.prompts.take(ctx, tab, event) else {
+                continue;
+            };
+            if let Event::OpenTab(url) = event {
+                self.open_tab(&url, false);
+                continue;
+            }
             if let Event::Download {
                 guid,
                 url,
@@ -507,7 +518,14 @@ impl Window {
                 Event::Opened { .. }
                 | Event::Closed
                 | Event::Download { .. }
-                | Event::LoginSubmitted { .. } => {}
+                | Event::LoginSubmitted { .. }
+                | Event::Permission(_)
+                | Event::Dialog(_)
+                | Event::ContextMenu(_)
+                | Event::FindResult { .. }
+                | Event::Zoom(_)
+                | Event::Clipboard(_)
+                | Event::OpenTab(_) => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -574,6 +592,12 @@ impl Window {
                     i.consume_key(Modifiers::ALT, Key::ArrowRight),
                 )
             });
+        // Find, zoom and print (cef/handlers/ui.rs).
+        if let Some(id) = self.active_id() {
+            for op in self.prompts.keys(ctx, id) {
+                self.op(id, op);
+            }
+        }
         let n = self.model.tabs.len();
         if new {
             self.open_tab(NEW_TAB, true);
@@ -643,7 +667,7 @@ impl Window {
     }
 
     fn on_download(&mut self, item: model::DownloadItem) {
-        let finished = item.state != "inProgress";
+        let finished = matches!(item.state.as_str(), "completed" | "canceled");
         match self
             .model
             .downloads
@@ -680,14 +704,40 @@ impl Window {
                 self.show_downloads = false;
             }
         });
+        use cef::handlers::download::{self, Action};
         for d in self.model.downloads.iter().rev().take(6) {
             ui.horizontal(|ui| {
                 let state = match d.state.as_str() {
                     "completed" => t("Done"),
                     "canceled" => t("Failed"),
+                    "paused" => t("Paused"),
                     _ => t("Downloading"),
                 };
                 ui.label(format!("{}  {}  {} KB", d.filename, state, d.bytes / 1024));
+                let path = std::path::Path::new(&d.path);
+                match d.state.as_str() {
+                    "inProgress" | "paused" => {
+                        if d.state == "paused" {
+                            if ui.small_button(t("Resume")).clicked() {
+                                download::control(&d.guid, Action::Resume);
+                            }
+                        } else if ui.small_button(t("Pause")).clicked() {
+                            download::control(&d.guid, Action::Pause);
+                        }
+                        if ui.small_button(t("Cancel")).clicked() {
+                            download::control(&d.guid, Action::Cancel);
+                        }
+                    }
+                    "completed" if !d.path.is_empty() => {
+                        if ui.small_button(t("Open")).clicked() {
+                            let _ = download::open(path);
+                        }
+                        if ui.small_button(t("Show in folder")).clicked() {
+                            let _ = download::show_in_folder(path);
+                        }
+                    }
+                    _ => {}
+                }
                 if !d.path.is_empty() {
                     ui.weak(&d.path);
                 }
@@ -726,9 +776,15 @@ impl Window {
             return;
         }
         let _ = profile.load(&mut self.model);
+        // Signed-in sites stay signed in: Chrome's cookies into Chromium's.
+        let cookies = match import_chrome::read_cookies(source, &scratch) {
+            Ok((c, _)) => cef::handlers::cookies::import(&c),
+            Err(_) => 0,
+        };
+        let _ = std::fs::remove_dir(&scratch);
         self.notice = Some(tf(
-            "Imported {0} bookmarks and {1} history entries from {2}.",
-            &[&added, &history, &source.name],
+            "Imported {0} bookmarks, {1} history entries and {2} cookies from {3}.",
+            &[&added, &history, &cookies, &source.name],
         ));
     }
 
@@ -2382,7 +2438,9 @@ impl Window {
                 )
             });
         }
-        if focused != self.page_focused {
+        // The page's context menu takes egui's focus, not the page's: the
+        // page keeps its caret for the menu's Paste and Cut.
+        if focused != self.page_focused && !self.prompts.menu_open() {
             self.page_focused = focused;
             self.op(tab, Op::Focus(focused));
         }
@@ -2402,6 +2460,10 @@ impl Window {
             .filter(&mut events, rect, link.as_deref(), text)
         {
             self.open_tab(&url, false);
+        }
+        // Clicks on the page's context menu are the menu's, not the page's.
+        if self.prompts.menu_open() {
+            events.clear();
         }
         let mut ops = cef::input::to_ops(
             &mut self.page_input,
@@ -2500,6 +2562,13 @@ impl Window {
         drop(v);
         if let Some(t) = tooltip {
             response.clone().on_hover_text_at_pointer(t);
+        }
+        for op in self.prompts.show(&ctx, tab, rect) {
+            self.op(tab, op);
+        }
+        if self.prompts.take_refocus() {
+            self.focus_page = true;
+            ctx.request_repaint();
         }
     }
 }

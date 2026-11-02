@@ -197,6 +197,11 @@ fn ko(en: &str) -> Option<&'static str> {
         "Downloading" => "받는 중",
         "Done" => "완료",
         "Failed" => "실패",
+        "Paused" => "일시정지됨",
+        "Resume" => "다시 받기",
+        "Cancel" => "취소",
+        "Open" => "열기",
+        "Show in folder" => "폴더에서 보기",
         // Import
         "No Chrome, Chromium, Edge or Brave profile found" => {
             "Chrome, Chromium, Edge, Brave 프로필을 찾지 못했어요"
@@ -211,8 +216,8 @@ fn ko(en: &str) -> Option<&'static str> {
         }
         "Could not import from {0}: {1}" => "{0}에서 가져오지 못했어요: {1}",
         "Could not save the import: {0}" => "가져온 내용을 저장하지 못했어요: {0}",
-        "Imported {0} bookmarks and {1} history entries from {2}." => {
-            "{2}에서 북마크 {0}개와 방문 기록 {1}개를 가져왔어요."
+        "Imported {0} bookmarks, {1} history entries and {2} cookies from {3}." => {
+            "{3}에서 북마크 {0}개, 방문 기록 {1}개, 쿠키 {2}개를 가져왔어요."
         }
         "Could not save bookmarks: {0}" => "북마크를 저장하지 못했어요: {0}",
         // Passwords

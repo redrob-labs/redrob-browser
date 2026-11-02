@@ -5471,6 +5471,7 @@ dependencies = [
  "aes 0.8.4",
  "aes-gcm",
  "anyhow",
+ "arboard",
  "base64 0.22.1",
  "cbc 0.1.2",
  "cef",

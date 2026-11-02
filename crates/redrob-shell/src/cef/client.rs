@@ -9,15 +9,17 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use cef::{
     rc::Rc as _, sys, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
-    CefString, Client, CursorInfo, CursorType, DevToolsMessageObserver, DictionaryValue,
-    DisplayHandler, FocusHandler, FocusSource, Frame, ImplBrowser, ImplBrowserHost, ImplClient,
-    ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler, ImplLifeSpanHandler,
-    ImplLoadHandler, LifeSpanHandler, LoadHandler, PopupFeatures, Registration, RenderHandler,
-    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
-    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    CefString, Client, ContextMenuHandler, CursorInfo, CursorType, DevToolsMessageObserver,
+    DictionaryValue, DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource,
+    Frame, ImplBrowser, ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver,
+    ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler,
+    JsdialogHandler, LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration,
+    RenderHandler, WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver,
+    WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
 };
 use serde_json::{json, Value};
 
+use super::handlers;
 use super::osr::{self, Gpu, SharedView};
 use super::Sink;
 use crate::cdp::Event;
@@ -106,12 +108,18 @@ pub fn browser_settings() -> BrowserSettings {
 }
 
 pub fn new(ctx: TabCtx) -> Client {
+    let f = handlers::features();
     TabClient::new(
         osr::handler(ctx.view.clone(), ctx.tab, ctx.sink.clone(), ctx.gpu.clone()),
         Display::new(ctx.clone()),
         Load::new(ctx.clone()),
         LifeSpan::new(ctx.clone()),
         Focus::new(),
+        handlers::download::new(ctx.sink.clone(), f.downloads.clone(), false),
+        handlers::permission::new(ctx.sink.clone(), f.sites.clone()),
+        handlers::jsdialog::new(ctx.sink.clone()),
+        handlers::context_menu::new(ctx.sink.clone()),
+        handlers::find::new(ctx.sink.clone()),
     )
 }
 
@@ -122,6 +130,11 @@ wrap_client! {
         load: LoadHandler,
         life_span: LifeSpanHandler,
         focus: FocusHandler,
+        download: DownloadHandler,
+        permission: PermissionHandler,
+        jsdialog: JsdialogHandler,
+        context_menu: ContextMenuHandler,
+        find: FindHandler,
     }
 
     impl Client {
@@ -139,6 +152,22 @@ wrap_client! {
         }
         fn focus_handler(&self) -> Option<FocusHandler> {
             Some(self.focus.clone())
+        }
+        // The features (cef/handlers/).
+        fn download_handler(&self) -> Option<DownloadHandler> {
+            Some(self.download.clone())
+        }
+        fn permission_handler(&self) -> Option<PermissionHandler> {
+            Some(self.permission.clone())
+        }
+        fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
+            Some(self.jsdialog.clone())
+        }
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            Some(self.context_menu.clone())
+        }
+        fn find_handler(&self) -> Option<FindHandler> {
+            Some(self.find.clone())
         }
     }
 }
@@ -172,6 +201,14 @@ wrap_display_handler! {
     impl DisplayHandler {
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             self.ctx.sink.send_tab(self.ctx.tab, Event::Title(text(title)));
+        }
+
+        fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            if let (Some(b), Some(f)) = (browser, frame) {
+                if f.is_main() == 1 {
+                    handlers::on_address_change(&self.ctx.sink, b, &text(url));
+                }
+            }
         }
 
         fn on_status_message(&self, _browser: Option<&mut Browser>, value: Option<&CefString>) {

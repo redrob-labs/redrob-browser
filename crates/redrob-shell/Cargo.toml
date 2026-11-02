@@ -34,6 +34,8 @@ sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
 open = "5"
+# Paste from the page's context menu reads the system clipboard (cef/handlers/context_menu.rs).
+arboard = { version = "3.7", default-features = false }
 # Chromium in every window tab (docs/CEF.md). The binaries come from CEF_PATH.
 # accelerated_osr: pages arrive as GPU textures (dmabuf, IOSurface, D3D11).
 cef = { version = "=156.3.0", default-features = false, features = ["accelerated_osr", "sandbox"] }

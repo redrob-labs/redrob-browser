@@ -360,6 +360,16 @@ impl Browser {
             "redrob-browser: page frames: {}",
             frame_path(cc.wgpu_render_state.as_ref(), accelerated)
         );
+        // Per-site choices: the profile's, or memory only for incognito.
+        let sites = profile
+            .as_ref()
+            .filter(|_| !start.incognito)
+            .and_then(|p| crate::profile::SiteSettings::open(&p.dir).ok())
+            .unwrap_or_else(crate::profile::SiteSettings::memory);
+        crate::cef::handlers::configure(crate::cef::handlers::Features {
+            sites,
+            downloads: crate::profile::downloads_dir(),
+        });
         cdp::init(
             sink,
             gpu.as_ref().filter(|_| accelerated).map(|g| g.device()),
@@ -472,6 +482,7 @@ impl Browser {
             last_size: (0, 0, 0.0, (0, 0)),
             address_id: egui::Id::new("address"),
             page_input: Default::default(),
+            prompts: Default::default(),
             page_focused: false,
             autoscroll: Default::default(),
             incognito: self.incognito,

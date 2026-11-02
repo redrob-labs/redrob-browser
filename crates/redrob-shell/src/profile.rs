@@ -383,6 +383,73 @@ impl Profile {
     }
 }
 
+/// Per-site choices the person made: permissions and zoom. CEF handlers read
+/// and write them on CEF's UI thread, so they have their own connection to
+/// the profile's database. An incognito window keeps them in memory only.
+#[derive(Clone)]
+pub struct SiteSettings {
+    db: std::sync::Arc<std::sync::Mutex<Connection>>,
+}
+
+impl SiteSettings {
+    /// The choices saved in the profile at `dir`.
+    pub fn open(dir: &Path) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(dir)?;
+        Self::with(Connection::open(dir.join("profile.sqlite"))?)
+    }
+
+    /// Choices that last until the window closes (incognito).
+    pub fn memory() -> Self {
+        Self::with(Connection::open_in_memory().expect("in-memory SQLite"))
+            .expect("in-memory site settings")
+    }
+
+    fn with(db: Connection) -> anyhow::Result<Self> {
+        db.busy_timeout(std::time::Duration::from_secs(2))?;
+        db.execute_batch(
+            "CREATE TABLE IF NOT EXISTS site_settings (
+                 origin TEXT NOT NULL,
+                 key TEXT NOT NULL,
+                 value TEXT NOT NULL,
+                 PRIMARY KEY (origin, key)
+             );",
+        )?;
+        Ok(Self {
+            db: std::sync::Arc::new(std::sync::Mutex::new(db)),
+        })
+    }
+
+    pub fn get(&self, origin: &str, key: &str) -> Option<String> {
+        self.db
+            .lock()
+            .ok()?
+            .query_row(
+                "SELECT value FROM site_settings WHERE origin = ?1 AND key = ?2",
+                params![origin, key],
+                |r| r.get(0),
+            )
+            .ok()
+    }
+
+    /// Save `value`, or forget the choice when it is None.
+    pub fn set(&self, origin: &str, key: &str, value: Option<&str>) {
+        let Ok(db) = self.db.lock() else {
+            return;
+        };
+        let _ = match value {
+            Some(v) => db.execute(
+                "INSERT INTO site_settings (origin, key, value) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(origin, key) DO UPDATE SET value = excluded.value",
+                params![origin, key, v],
+            ),
+            None => db.execute(
+                "DELETE FROM site_settings WHERE origin = ?1 AND key = ?2",
+                params![origin, key],
+            ),
+        };
+    }
+}
+
 /// The default profile's folder.
 pub fn default_dir() -> PathBuf {
     data_dir().join("redrob-browser").join("Default")

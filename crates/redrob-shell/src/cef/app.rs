@@ -68,5 +68,10 @@ wrap_browser_process_handler! {
         fn on_schedule_message_pump_work(&self, delay_ms: i64) {
             super::schedule(Duration::from_millis(delay_ms.max(0) as u64));
         }
+
+        fn on_context_initialized(&self) {
+            // Protected video plays on the first visit (cef/handlers/widevine.rs).
+            super::handlers::widevine::install();
+        }
     }
 }

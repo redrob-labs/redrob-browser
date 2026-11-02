@@ -125,6 +125,19 @@ pub enum Op {
         username: String,
         password: zeroize::Zeroizing<String>,
     },
+    /// Find `text` in the page; `next` continues the search it started.
+    /// Answered with `Event::FindResult` (cef/handlers/find.rs).
+    Find {
+        text: String,
+        forward: bool,
+        match_case: bool,
+        next: bool,
+    },
+    /// Close find: clear the highlight, keep the selection.
+    StopFind,
+    /// Ctrl +, Ctrl -, Ctrl 0. The level is remembered for the site.
+    Zoom(crate::cef::handlers::zoom::Step),
+    Print,
 }
 
 /// The browser window a command came from. A tab belongs to the window that
@@ -183,8 +196,25 @@ pub enum Event {
     Target(String),
     /// Result of FillLogin: "filled" or "no-form".
     Filled(String),
+    /// A page asks for camera, microphone, location, notifications or the
+    /// clipboard; the window asks the person (cef/handlers/permission.rs).
+    Permission(crate::cef::handlers::permission::Prompt),
+    /// alert, confirm, prompt or "leave this page?" (cef/handlers/jsdialog.rs).
+    Dialog(crate::cef::handlers::jsdialog::Dialog),
+    /// The page's context menu, for the window to draw.
+    ContextMenu(crate::cef::handlers::context_menu::Menu),
+    /// Matches for `Op::Find`: how many, which one is selected (1-based).
+    FindResult {
+        count: i32,
+        active: i32,
+    },
+    /// The page's zoom changed, in percent.
+    Zoom(u32),
+    /// Put this text on the clipboard ("Copy link address").
+    Clipboard(String),
+    /// Open this address in a new tab behind the current one.
+    OpenTab(String),
     /// A file download began or changed state. Sent with tab 0.
-    #[allow(dead_code)]
     Download {
         guid: String,
         url: String,
@@ -657,6 +687,9 @@ impl Engine {
                         );
                     },
                 );
+            }
+            op if crate::cef::handlers::is_feature(&op) => {
+                crate::cef::handlers::run_op(&self.sink, &browser, op)
             }
             other => input::apply(&browser, other),
         }
