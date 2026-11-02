@@ -230,6 +230,11 @@ pub trait RoundTree: TraverseTree {
     }
     /// The node's subtree was just rounded at this cumulative offset
     fn note_rounded(&mut self, _node_id: NodeId, _cumulative_x: f32, _cumulative_y: f32) {}
+    /// The node's children do not hold the layouts of its current layout yet: rounding stops at
+    /// the node and comes back once they are placed
+    fn is_deferred(&self, _node_id: NodeId) -> bool {
+        false
+    }
 }
 
 /// Trait used by the `print_tree` method which prints a debug representation
