@@ -7,9 +7,12 @@
 //! - The page scrolls toward the pointer, faster the farther the pointer is
 //!   from where the click was, with a small dead zone around that point.
 //! - A middle click on a link opens the link in a new background tab.
+//! - A middle click in a text field goes to the page (Linux pastes there).
 //!
-//! Whether the click is on a link is asked of the page (`Op::LinkAt`), so the
-//! middle press is held back from the page until that answer comes.
+//! Chromium knows what is under the pointer (its status message and
+//! cursor, cef/osr.rs), so the window decides at once; the page scrolls by
+//! precise wheel events at the anchor. Chromium's own middle-click
+//! autoscroll wedges an off-screen renderer, so it stays off.
 
 use std::time::Instant;
 
@@ -25,10 +28,6 @@ const SEND_EVERY_SECS: f32 = 0.05;
 
 #[derive(Default)]
 pub struct Autoscroll {
-    /// A middle press waiting for the page to say whether it hit a link.
-    pending: Option<Pos2>,
-    /// The middle button was released before the answer came.
-    released_early: bool,
     anchor: Option<Pos2>,
     held: bool,
     moved: bool,
@@ -37,14 +36,10 @@ pub struct Autoscroll {
     since_send: f32,
 }
 
-/// What the window must do this frame.
+/// What the window must do this frame: scroll the page by `wheel` CSS
+/// pixels at the page point `wheel_at`.
 #[derive(Default)]
 pub struct Step {
-    /// Ask the page what is under this page-local point.
-    pub ask_link_at: Option<(f32, f32)>,
-    /// Scroll by this many CSS px now (window tiles), and send it as a wheel
-    /// event at `wheel_at` when set.
-    pub scroll: Vec2,
     pub wheel_at: Option<(f32, f32)>,
     pub wheel: Vec2,
 }
@@ -54,15 +49,17 @@ impl Autoscroll {
         self.anchor.is_some()
     }
 
-    /// Where autoscroll started: the box there is the one that scrolls.
-    pub fn anchor(&self) -> Option<Pos2> {
-        self.anchor
-    }
-
     /// Take middle-button events (and the stopping click while active) out of
-    /// `events` before they reach the page.
-    pub fn filter(&mut self, events: &mut Vec<egui::Event>, rect: Rect) -> Step {
-        let mut step = Step::default();
+    /// `events` before they reach the page. `link`: the link under the
+    /// pointer; `text`: a text field is. Returns a link to open in a new tab.
+    pub fn filter(
+        &mut self,
+        events: &mut Vec<egui::Event>,
+        rect: Rect,
+        link: Option<&str>,
+        text: bool,
+    ) -> Option<String> {
+        let mut open = None;
         events.retain(|ev| match ev {
             egui::Event::PointerButton {
                 pos,
@@ -82,20 +79,23 @@ impl Autoscroll {
                     }
                     return false;
                 }
-                if *button != egui::PointerButton::Middle {
+                if *button != egui::PointerButton::Middle || text {
                     return true;
                 }
                 if *pressed && rect.contains(*pos) {
-                    self.pending = Some(*pos);
-                    self.released_early = false;
-                    self.held = true;
-                    self.moved = false;
-                    step.ask_link_at = Some(((pos.x - rect.left()), (pos.y - rect.top())));
+                    match link.filter(|l| !l.is_empty()) {
+                        Some(url) => open = Some(url.to_string()),
+                        None => {
+                            self.anchor = Some(*pos);
+                            self.held = true;
+                            self.moved = false;
+                            self.last = Some(Instant::now());
+                            self.unsent = Vec2::ZERO;
+                            self.since_send = 0.0;
+                        }
+                    }
                 } else if !*pressed {
                     self.held = false;
-                    if self.pending.is_some() {
-                        self.released_early = true;
-                    }
                 }
                 false
             }
@@ -109,35 +109,11 @@ impl Autoscroll {
             }
             _ => true,
         });
-        step
-    }
-
-    /// The page's answer to `ask_link_at`: the link's URL, if any. Returns the
-    /// URL to open in a new tab.
-    pub fn link_answer(&mut self, link: Option<String>) -> Option<String> {
-        let at = self.pending.take()?;
-        match link {
-            Some(url) if !url.is_empty() => {
-                self.held = false;
-                Some(url)
-            }
-            _ => {
-                self.anchor = Some(at);
-                // Released before the answer and not dragged: toggle mode.
-                if self.released_early {
-                    self.held = false;
-                }
-                self.last = Some(Instant::now());
-                self.unsent = Vec2::ZERO;
-                self.since_send = 0.0;
-                None
-            }
-        }
+        open
     }
 
     pub fn stop(&mut self) {
         self.anchor = None;
-        self.pending = None;
         self.held = false;
         self.moved = false;
         self.last = None;
@@ -169,7 +145,6 @@ impl Autoscroll {
         };
         let v = Vec2::new(axis(d.x), axis(d.y));
         let delta = v * dt;
-        step.scroll = delta;
         self.unsent += delta;
         self.since_send += dt;
         if self.since_send >= SEND_EVERY_SECS && self.unsent != Vec2::ZERO {
