@@ -224,6 +224,8 @@ struct Engine {
     sizes: HashMap<WindowId, (u32, u32, f32, (i32, i32))>,
     /// Which window shows each tab.
     tab_window: HashMap<TabId, WindowId>,
+    /// Which tabs' browsers send GPU frames (osr.rs).
+    paths: osr::Paths,
 }
 
 thread_local! {
@@ -245,6 +247,7 @@ pub fn init(sink: Sink, gpu: Option<osr::Gpu>, shared_texture: bool) {
             active: HashMap::new(),
             sizes: HashMap::new(),
             tab_window: HashMap::new(),
+            paths: osr::Paths::default(),
         })
     });
 }
@@ -276,6 +279,7 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> V
                 gone.push(tab);
                 e.closing.remove(&tab);
                 e.views.remove(&tab);
+                e.paths.forget(tab);
                 if e.tabs.remove(&tab).is_some() {
                     e.tab_window.remove(&tab);
                     e.active.retain(|_, t| *t != tab);
@@ -287,6 +291,21 @@ pub fn process(commands: &mut mpsc::UnboundedReceiver<(WindowId, Command)>) -> V
         if let Some((window, cmd)) = cmd {
             run(window, cmd);
         }
+    }
+    // A GPU frame could not be imported: every tab still on the GPU path
+    // gets a browser that sends pixels, now.
+    if osr::import_failed() {
+        let Some(mut e) = ENGINE.with_borrow_mut(|e| e.take()) else {
+            return gone;
+        };
+        for tab in e.paths.switch(true) {
+            e.rehost(tab);
+        }
+        ENGINE.with_borrow_mut(|slot| {
+            if slot.is_none() {
+                *slot = Some(e);
+            }
+        });
     }
     gone
 }
@@ -350,6 +369,7 @@ impl Engine {
     fn adopt(&mut self, c: client::Created) {
         let browser = c.browser.clone();
         let devtools = c.observe();
+        self.paths.adopted(c.tab, c.ctx.gpu.is_some());
         self.views.insert(c.tab, c.ctx.view.clone());
         self.tabs.insert(
             c.tab,
@@ -451,7 +471,19 @@ impl Engine {
         }
         self.views.insert(tab, view.clone());
         self.opening.insert(tab, (url, Vec::new()));
-        let shared_texture = self.shared_texture && !osr::import_failed();
+        let shared_texture = osr::Paths::gpu_for_new(self.shared_texture, osr::import_failed());
+        if !self.create(tab, view, shared_texture) {
+            self.opening.remove(&tab);
+            self.views.remove(&tab);
+            self.sink.send_tab(
+                tab,
+                Event::Error("Chromium could not open the tab".to_string()),
+            );
+        }
+    }
+
+    /// Ask CEF for the tab's browser; `adopt` takes it once it exists.
+    fn create(&mut self, tab: TabId, view: SharedView, shared_texture: bool) -> bool {
         let mut client = client::new(TabCtx {
             tab,
             sink: self.sink.clone(),
@@ -463,22 +495,54 @@ impl Engine {
         let mut context = crate::cef::request_context();
         // The page loads its address once the window's scripts are in
         // place (adopt), so it starts blank.
-        let created = cef::browser_host_create_browser(
+        cef::browser_host_create_browser(
             Some(&info),
             Some(&mut client),
             Some(&CefString::from("about:blank")),
             Some(&settings),
             None,
             context.as_mut(),
-        );
-        if created != 1 {
+        ) == 1
+    }
+
+    /// Move a tab whose browser sends GPU frames the window cannot import to
+    /// a new browser that sends pixels. CEF cannot switch a browser's render
+    /// path, so the page loads again at the same address, in the same
+    /// profile (cookies, storage, zoom), and keeps its tab, window and place.
+    fn rehost(&mut self, tab: TabId) {
+        let Some(old) = self.tabs.remove(&tab) else {
+            return;
+        };
+        let Some(view) = self.views.get(&tab).cloned() else {
+            return;
+        };
+        let url = old
+            .browser
+            .main_frame()
+            .map(|f| CefString::from(&f.url()).to_string())
+            .unwrap_or_default();
+        // Its closing is not the tab's: the window keeps the tab.
+        client::retire(old.browser.identifier());
+        if let Some(h) = old.browser.host() {
+            h.close_browser(1);
+        }
+        drop(old);
+        {
+            let mut v = osr::lock(&view);
+            v.page = osr::Layer::default();
+            v.popup = osr::Layer::default();
+            v.popup_rect = None;
+        }
+        eprintln!("redrob-browser: tab {tab} re-hosted with pixel upload");
+        self.opening.insert(tab, (url, Vec::new()));
+        if !self.create(tab, view, false) {
             self.opening.remove(&tab);
-            self.views.remove(&tab);
             self.sink.send_tab(
                 tab,
                 Event::Error("Chromium could not open the tab".to_string()),
             );
         }
+        self.sink.repaint(tab);
     }
 
     fn handle(&mut self, window: WindowId, tab: TabId, op: Op) {
@@ -497,6 +561,7 @@ impl Engine {
             Op::Open(_) => {}
             Op::Close => {
                 self.tabs.remove(&tab);
+                self.paths.forget(tab);
                 self.closing.insert(tab);
                 self.tab_window.remove(&tab);
                 self.active.retain(|_, t| *t != tab);

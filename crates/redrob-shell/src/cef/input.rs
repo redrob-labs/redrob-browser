@@ -524,7 +524,9 @@ pub fn apply(browser: &Browser, op: Op) {
             let underline = CompositionUnderline {
                 size: std::mem::size_of::<CompositionUnderline>(),
                 range: Range { from: 0, to: len },
-                color: 0xFF00_0000,
+                // Transparent: Blink draws the line in the text's colour, as
+                // Chrome's own composition does.
+                color: 0,
                 background_color: 0,
                 thick: 0,
                 style: sys::cef_composition_underline_style_t::CEF_CUS_SOLID.into(),
@@ -928,16 +930,14 @@ fn native_key_code(k: Key, repeat: bool, up: bool) -> i32 {
         }
         return l;
     }
-    let evdev = if extended {
-        evdev_extended(k).unwrap_or(0)
-    } else {
-        scan
-    };
-    if evdev == 0 {
-        0
-    } else {
-        evdev + 8
-    }
+    xkb_keycode(k).unwrap_or(0)
+}
+
+/// The XKB keycode of the physical key (Linux evdev number + 8).
+pub(crate) fn xkb_keycode(k: Key) -> Option<i32> {
+    let (scan, extended) = scan_code(k)?;
+    let evdev = if extended { evdev_extended(k)? } else { scan };
+    Some(evdev + 8)
 }
 
 #[cfg(test)]

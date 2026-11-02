@@ -60,6 +60,18 @@ thread_local! {
     static READY: RefCell<Vec<(Reply, bool, Value)>> = const { RefCell::new(Vec::new()) };
     /// Popups CEF announced and has not created yet, by popup id.
     static POPUPS: RefCell<HashMap<i32, TabId>> = RefCell::new(HashMap::new());
+    /// Browsers closing because their tab moved to a new one (cdp.rs
+    /// `rehost`): their closing does not close the tab.
+    static RETIRED: RefCell<std::collections::HashSet<i32>> = RefCell::new(Default::default());
+}
+
+/// The browser `id` is closing but its tab lives on in another browser.
+pub fn retire(id: i32) {
+    RETIRED.with_borrow_mut(|r| r.insert(id));
+}
+
+fn retired(browser: Option<&mut Browser>) -> bool {
+    browser.is_some_and(|b| RETIRED.with_borrow(|r| r.contains(&b.identifier())))
 }
 
 type Reply = Box<dyn FnOnce(bool, Value)>;
@@ -142,6 +154,12 @@ wrap_client! {
     impl Client {}
 }
 
+/// The platform's cursor handle as CEF's display handler takes it.
+#[cfg(target_os = "macos")]
+type CursorHandle = *mut u8;
+#[cfg(not(target_os = "macos"))]
+type CursorHandle = sys::cef_cursor_handle_t;
+
 fn text(s: Option<&CefString>) -> String {
     s.map(|s| s.to_string()).unwrap_or_default()
 }
@@ -172,7 +190,7 @@ wrap_display_handler! {
         fn on_cursor_change(
             &self,
             _browser: Option<&mut Browser>,
-            _cursor: ::std::os::raw::c_ulong,
+            _cursor: CursorHandle,
             type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
@@ -239,13 +257,15 @@ wrap_life_span_handler! {
                 v.scale = opener.scale;
                 v.origin = opener.origin;
             }
+            // GPU frames only while the window can still import them.
+            let shared = window_info.shared_texture_enabled == 1 && !osr::import_failed();
             let ctx = TabCtx {
                 tab,
                 sink: self.ctx.sink.clone(),
                 view,
-                gpu: self.ctx.gpu.clone(),
+                gpu: self.ctx.gpu.clone().filter(|_| shared),
             };
-            *window_info = self::window_info(window_info.shared_texture_enabled == 1);
+            *window_info = self::window_info(shared);
             *client = Some(new(ctx));
             if let Some(s) = settings {
                 *s = browser_settings();
@@ -286,16 +306,23 @@ wrap_life_span_handler! {
             self.ctx.sink.repaint(self.ctx.tab);
         }
 
-        fn do_close(&self, _browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
+        fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
             // `window.close()`, or the window closing the tab: let it close
             // and tell the window, which removes the tab if it still shows it.
-            self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
+            if !retired(browser) {
+                self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
+            }
             0
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
             if let Some(b) = browser {
-                self.ctx.sink.unbind(b.identifier());
+                let id = b.identifier();
+                self.ctx.sink.unbind(id);
+                // A re-hosted tab's old browser: the tab lives on.
+                if RETIRED.with_borrow_mut(|r| r.remove(&id)) {
+                    return;
+                }
             }
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
         }

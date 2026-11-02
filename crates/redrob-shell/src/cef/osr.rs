@@ -6,12 +6,14 @@
 //! (`OnAcceleratedPaint`: dmabuf, IOSurface, D3D11 shared handle) when the
 //! window's wgpu device can import them, else as BGRA pixels (`OnPaint`).
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use cef::{
-    rc::Rc as _, sys, wrap_render_handler, AcceleratedPaintInfo, Browser, ImplRenderHandler,
-    PaintElementType, Range, Rect, RenderHandler, ScreenInfo, TextInputMode, WrapRenderHandler,
+    rc::Rc as _, sys, wrap_render_handler, AcceleratedPaintInfo, Browser, CefString,
+    ImplRenderHandler, PaintElementType, Range, Rect, RenderHandler, ScreenInfo, TextInputMode,
+    WrapRenderHandler,
 };
 use eframe::wgpu;
 
@@ -96,8 +98,11 @@ pub struct View {
     pub cursor: egui::CursorIcon,
     /// A text field has focus: the window turns on the input method.
     pub editing: bool,
-    /// The composition's character boxes, CSS pixels, for the IME window.
+    /// Where the input method composes, CSS pixels: the composition's
+    /// character boxes, else the caret. Its candidate window opens there.
     pub ime_rect: Option<[i32; 4]>,
+    /// Chromium reports a composition's character boxes.
+    pub composing: bool,
     /// The link under the pointer (Chromium's status message).
     pub status: Option<String>,
     /// The page's tooltip (`title` attribute) under the pointer.
@@ -117,6 +122,7 @@ impl Default for View {
             cursor: egui::CursorIcon::Default,
             editing: false,
             ime_rect: None,
+            composing: false,
             status: None,
             tooltip: None,
         }
@@ -132,10 +138,53 @@ pub fn lock(v: &SharedView) -> MutexGuard<'_, View> {
 static IMPORTED: AtomicBool = AtomicBool::new(false);
 static IMPORT_FAILED: AtomicBool = AtomicBool::new(false);
 
-/// A GPU frame could not be imported into the window's device: tabs opened
-/// from now on ask Chromium for pixels instead.
+/// A GPU frame could not be imported into the window's device: every tab
+/// moves to pixels ([`Paths::switch`]) and new ones start there.
 pub fn import_failed() -> bool {
     IMPORT_FAILED.load(Ordering::SeqCst)
+}
+
+/// Which render path each tab's browser was created with.
+///
+/// CEF fixes a browser's path when it creates it (`shared_texture_enabled`)
+/// and has no call to change it, so when a GPU frame cannot be imported the
+/// window re-hosts every tab still on the GPU path in a browser that sends
+/// pixels (cdp.rs `rehost`): same address and profile, drawn at once.
+#[derive(Default)]
+pub struct Paths {
+    gpu: HashSet<TabId>,
+}
+
+impl Paths {
+    /// Whether a browser created now may send GPU frames.
+    pub fn gpu_for_new(allowed: bool, failed: bool) -> bool {
+        allowed && !failed
+    }
+
+    /// The tab's browser exists, on the GPU path or not.
+    pub fn adopted(&mut self, tab: TabId, gpu: bool) {
+        if gpu {
+            self.gpu.insert(tab);
+        } else {
+            self.gpu.remove(&tab);
+        }
+    }
+
+    pub fn forget(&mut self, tab: TabId) {
+        self.gpu.remove(&tab);
+    }
+
+    /// After an import failure: the tabs whose browser is still on the GPU
+    /// path, oldest first, each to be re-hosted on pixels. Each comes back
+    /// once.
+    pub fn switch(&mut self, failed: bool) -> Vec<TabId> {
+        if !failed || self.gpu.is_empty() {
+            return Vec::new();
+        }
+        let mut tabs: Vec<TabId> = self.gpu.drain().collect();
+        tabs.sort_unstable();
+        tabs
+    }
 }
 
 /// The window's GPU, when CEF frames can be imported into it.
@@ -277,12 +326,13 @@ wrap_render_handler! {
             let texture = match unsafe { handle.import_texture(&gpu.device, &gpu.queue) } {
                 Ok(t) => t,
                 Err(e) => {
-                    // New tabs take pixels from here on (cdp.rs).
+                    // Every tab moves to pixels (cdp.rs re-hosts them).
                     if !IMPORT_FAILED.swap(true, Ordering::SeqCst) {
                         eprintln!(
-                            "redrob-browser: page frame import failed ({e}); new tabs use pixel upload (REDROB_OSR=cpu starts that way)"
+                            "redrob-browser: page frame import failed ({e}); every tab switches to pixel upload (REDROB_OSR=cpu starts that way)"
                         );
                     }
+                    self.sink.repaint(self.tab);
                     return;
                 }
             };
@@ -339,27 +389,144 @@ wrap_render_handler! {
             character_bounds: Option<&[Rect]>,
         ) {
             let Some(bounds) = character_bounds.filter(|b| !b.is_empty()) else {
+                lock(&self.view).composing = false;
                 return;
             };
             let x0 = bounds.iter().map(|r| r.x).min().unwrap_or(0);
             let y0 = bounds.iter().map(|r| r.y).min().unwrap_or(0);
             let x1 = bounds.iter().map(|r| r.x + r.width).max().unwrap_or(0);
             let y1 = bounds.iter().map(|r| r.y + r.height).max().unwrap_or(0);
-            lock(&self.view).ime_rect = Some([x0, y0, x1 - x0, y1 - y0]);
+            {
+                let mut v = lock(&self.view);
+                v.ime_rect = Some([x0, y0, x1 - x0, y1 - y0]);
+                v.composing = true;
+            }
             self.sink.repaint(self.tab);
         }
 
-        fn on_virtual_keyboard_requested(&self, _browser: Option<&mut Browser>, input_mode: TextInputMode) {
+        fn on_text_selection_changed(
+            &self,
+            browser: Option<&mut Browser>,
+            _selected_text: Option<&CefString>,
+            _selected_range: Option<&Range>,
+        ) {
+            // The caret moved: the next composition starts there.
+            if let Some(b) = browser {
+                if !lock(&self.view).composing {
+                    caret(b, &self.view, &self.sink, self.tab);
+                }
+            }
+        }
+
+        fn on_virtual_keyboard_requested(&self, browser: Option<&mut Browser>, input_mode: TextInputMode) {
             let none = *input_mode.as_ref() == sys::cef_text_input_mode_t::CEF_TEXT_INPUT_MODE_NONE;
             let mut v = lock(&self.view);
             v.editing = !none;
-            if none {
-                v.ime_rect = None;
-            }
+            v.composing = false;
+            v.ime_rect = None;
             drop(v);
+            if let Some(b) = browser.filter(|_| !none) {
+                caret(b, &self.view, &self.sink, self.tab);
+            }
             self.sink.repaint(self.tab);
         }
     }
+}
+
+/// Where the caret of the focused text field is, in the top document's CSS
+/// pixels, and the page's zoom (`devicePixelRatio`). Chromium tells an
+/// off-screen view where a composition is, not where the caret waits, so
+/// the input method's window would open at the page's corner before the
+/// first key. Reads only: the page's DOM is not touched.
+const CARET_JS: &str = r#"(() => {
+  let doc = document, el = doc.activeElement, ox = 0, oy = 0;
+  for (;;) {
+    if (el && el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
+    if (el && (el.tagName === 'IFRAME' || el.tagName === 'FRAME')) {
+      let inner = null;
+      try { inner = el.contentDocument; } catch (e) {}
+      if (!inner || !inner.activeElement) break;
+      const r = el.getBoundingClientRect();
+      ox += r.left + el.clientLeft; oy += r.top + el.clientTop;
+      doc = inner; el = inner.activeElement; continue;
+    }
+    break;
+  }
+  if (!el || !doc.defaultView) return null;
+  const win = doc.defaultView;
+  let rect = null;
+  if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionEnd === 'number') {
+    const cs = win.getComputedStyle(el);
+    const ctx = new OffscreenCanvas(1, 1).getContext('2d');
+    ctx.font = cs.font;
+    const px = (v) => parseFloat(v) || 0;
+    const er = el.getBoundingClientRect();
+    const left = er.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
+    const top = er.top + px(cs.borderTopWidth) + px(cs.paddingTop);
+    const width = el.clientWidth - px(cs.paddingLeft) - px(cs.paddingRight);
+    let before = el.value.substring(0, el.selectionEnd);
+    if (el.type === 'password') before = '\u2022'.repeat(before.length);
+    const fontSize = px(cs.fontSize) || 16;
+    const lineHeight = px(cs.lineHeight) || fontSize * 1.2;
+    if (el.tagName === 'INPUT') {
+      const x = left + ctx.measureText(before).width - el.scrollLeft;
+      rect = [x, er.top + (er.height - lineHeight) / 2, 1, lineHeight];
+    } else {
+      let line = 0, last = '';
+      for (const l of before.split('\n')) {
+        let rest = l;
+        while (width > 0 && rest.length > 1 && ctx.measureText(rest).width > width) {
+          let n = rest.length;
+          while (n > 1 && ctx.measureText(rest.substring(0, n)).width > width) n--;
+          rest = rest.substring(n); line++;
+        }
+        last = rest; line++;
+      }
+      line = Math.max(line - 1, 0);
+      const x = left + ctx.measureText(last).width - el.scrollLeft;
+      rect = [x, top + line * lineHeight - el.scrollTop, 1, lineHeight];
+    }
+  } else {
+    const sel = win.getSelection();
+    if (sel && sel.rangeCount) {
+      const r = sel.getRangeAt(0).cloneRange();
+      r.collapse(false);
+      const b = r.getClientRects()[0] || r.getBoundingClientRect();
+      if (b && (b.height > 0 || b.left > 0)) rect = [b.left, b.top, 1, b.height || 16];
+    }
+    if (!rect) { const b = el.getBoundingClientRect(); rect = [b.left, b.top, 1, b.height]; }
+  }
+  return [rect[0] + ox, rect[1] + oy, rect[2], rect[3], window.devicePixelRatio || 1];
+})()"#;
+
+/// Ask the page where its caret is, for the input method's window.
+fn caret(browser: &mut Browser, view: &SharedView, sink: &Sink, tab: TabId) {
+    let view = view.clone();
+    let sink = sink.clone();
+    let params =
+        serde_json::json!({ "expression": CARET_JS, "returnByValue": true, "silent": true });
+    super::client::devtools(browser, "Runtime.evaluate", params, move |ok, r| {
+        let Some(a) = r["result"]["value"].as_array().filter(|_| ok) else {
+            return;
+        };
+        let n: Vec<f64> = a.iter().filter_map(|v| v.as_f64()).collect();
+        let [x, y, w, h, dpr] = n[..] else { return };
+        let mut v = lock(&view);
+        if v.composing || !v.editing {
+            return;
+        }
+        v.ime_rect = Some(caret_rect([x, y, w, h], dpr, v.scale));
+        drop(v);
+        sink.repaint(tab);
+    });
+}
+
+/// The page's CSS pixels as the view's: the page zoom is the page's device
+/// pixel ratio over the screen's.
+fn caret_rect(css: [f64; 4], dpr: f64, scale: f32) -> [i32; 4] {
+    let zoom = if scale > 0.0 { dpr / scale as f64 } else { 1.0 };
+    let z = |v: f64| (v * zoom).round() as i32;
+    [z(css[0]), z(css[1]), z(css[2]).max(1), z(css[3]).max(1)]
 }
 
 /// egui's cursor for a CEF cursor type.
@@ -412,5 +579,65 @@ pub fn cursor_icon(t: sys::cef_cursor_type_t) -> egui::CursorIcon {
         T::CT_GRAB => C::Grab,
         T::CT_GRABBING | T::CT_DND_MOVE => C::Grabbing,
         _ => C::Default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_import_moves_every_open_tab_to_pixels_once() {
+        let mut paths = Paths::default();
+        for tab in [3, 1, 2] {
+            paths.adopted(tab, Paths::gpu_for_new(true, false));
+        }
+        // A tab that started on pixels and one that closed are left alone.
+        paths.adopted(4, Paths::gpu_for_new(false, false));
+        paths.adopted(5, true);
+        paths.forget(5);
+        assert!(paths.switch(false).is_empty());
+
+        // The first failed frame: every tab still on the GPU path, at once.
+        assert_eq!(paths.switch(true), vec![1, 2, 3]);
+        // Their new browsers send pixels, and so does every later tab.
+        for tab in [1, 2, 3, 6] {
+            paths.adopted(tab, Paths::gpu_for_new(true, true));
+        }
+        assert!(paths.switch(true).is_empty());
+    }
+
+    #[test]
+    fn the_caret_follows_the_page_zoom() {
+        // 125% page zoom on a 2x screen: devicePixelRatio 2.5.
+        assert_eq!(
+            caret_rect([100.0, 40.0, 1.0, 20.0], 2.5, 2.0),
+            [125, 50, 1, 25]
+        );
+        assert_eq!(caret_rect([10.4, 0.0, 0.0, 0.0], 1.0, 1.0), [10, 0, 1, 1]);
+    }
+
+    #[test]
+    fn pixels_repaint_the_rows_that_changed() {
+        let mut layer = Layer::default();
+        let frame = [7u8; 4 * 4 * 4];
+        layer.paint(&[], frame.as_ptr(), 4, 4);
+        assert_eq!(
+            (layer.width, layer.height, layer.dirty),
+            (4, 4, Some((0, 4)))
+        );
+        layer.dirty = None;
+        let next = [9u8; 4 * 4 * 4];
+        let rect = Rect {
+            x: 1,
+            y: 2,
+            width: 2,
+            height: 1,
+        };
+        layer.paint(&[rect], next.as_ptr(), 4, 4);
+        assert_eq!(layer.dirty, Some((2, 3)));
+        assert_eq!(&layer.pixels[2 * 16 + 4..2 * 16 + 12], &[9; 8]);
+        assert_eq!(layer.pixels[2 * 16], 7);
+        assert!(layer.texture.is_none());
     }
 }

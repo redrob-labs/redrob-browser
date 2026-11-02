@@ -55,9 +55,12 @@ The relay (`relay.rs`) holds the only connection to Chromium's DevTools protocol
 file, Chromium runs with `--remote-debugging-pipe` and no port, and `relay::start` gives each
 client its own browser session on that pipe (`Target.attachToBrowserTarget`). Nothing on the
 machine can reach Chromium except through the relay, which checks the peer, `Host`, `Origin`
-and a secret in its address (written owner-only to `ws-endpoint`). On Windows, Chromium's
-own copy of the C runtime only sees pipes handed over when the process starts, so the window
-keeps a random loopback port there.
+and a secret in its address (written owner-only to `ws-endpoint`). On Windows, libcef's own C
+runtime cannot see our fds 3 and 4, so the window makes two anonymous pipes and passes
+Chromium's ends as `--remote-debugging-io-pipes=<read>,<write>` (handle values; Chromium maps
+them with `_open_osfhandle`). The relay checks the pipe with `Browser.getVersion`; a pipe that
+stays silent while Chromium runs is remembered (`devtools-pipe-failed` in the profile's
+Chromium folder) and the next start uses a random loopback port. The log names the transport.
 
 The window answers `Target.createTarget`, `activateTarget` and `closeTarget` for its tabs
 (`relay::TabRequest`; CEF's own `createTarget` would open a Chrome-style window outside ours):

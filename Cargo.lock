@@ -5485,6 +5485,7 @@ dependencies = [
  "open",
  "pbkdf2",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha1",
  "sha2 0.10.9",
@@ -5494,6 +5495,7 @@ dependencies = [
  "url",
  "windows-sys 0.61.2",
  "winresource",
+ "zbus",
  "zeroize",
 ]
 

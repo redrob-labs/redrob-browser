@@ -146,22 +146,75 @@ static CACHE: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// How agents reach Chromium's DevTools protocol: through the window's relay
 /// only (relay.rs), which holds this.
 pub enum DevTools {
-    /// `--remote-debugging-pipe`: Chromium reads commands on fd 3 and writes
-    /// replies on fd 4, in this process. No port: nothing else on the
-    /// machine can connect, and the relay's checks cannot be bypassed.
-    #[cfg(unix)]
+    /// `--remote-debugging-pipe`: Chromium reads commands from one pipe and
+    /// writes replies to the other, in this process: fds 3 and 4 on Linux
+    /// and macOS, handles named by `--remote-debugging-io-pipes` on
+    /// Windows. No port: nothing else on the machine can connect, and the
+    /// relay's checks cannot be bypassed.
     Pipe {
         commands: std::fs::File,
         replies: std::fs::File,
     },
-    /// A loopback port (Windows, where Chromium's copy of the C runtime only
-    /// sees pipes handed over at process start).
+    /// A loopback port, only when the pipe could not be set up or did not
+    /// answer on an earlier start ([`pipe_failed`]).
     Port(u16),
 }
 
 static DEVTOOLS: Mutex<Option<DevTools>> = Mutex::new(None);
 /// The browser process passes `--remote-debugging-pipe` (cef/app.rs).
 pub(crate) static PIPE: AtomicBool = AtomicBool::new(false);
+/// Windows: Chromium's ends of the pipes, `<read>,<write>` handle values,
+/// for `--remote-debugging-io-pipes` (cef/app.rs).
+pub(crate) static PIPE_HANDLES: OnceLock<String> = OnceLock::new();
+/// Where a failed DevTools pipe is remembered, so the next start uses a port.
+static PIPE_MARK: OnceLock<PathBuf> = OnceLock::new();
+
+/// The DevTools pipe did not answer (relay.rs probes it): remember it, so
+/// the next start of this profile uses a loopback port. Chromium cannot
+/// open a port once it runs.
+pub fn pipe_failed(why: &str) {
+    eprintln!("redrob-browser: DevTools pipe failed ({why}); the next start uses a loopback port");
+    if let Some(mark) = PIPE_MARK.get() {
+        let _ = std::fs::write(mark, why);
+    }
+}
+
+/// Windows: two anonymous pipes for Chromium's DevTools. The handles stay
+/// in this process (Chromium runs here, and maps them into its own C
+/// runtime with `_open_osfhandle`), so they are not inheritable: no program
+/// this one starts gets them.
+#[cfg(windows)]
+fn windows_pipe() -> Option<(DevTools, String)> {
+    use std::os::windows::io::FromRawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::Pipes::CreatePipe;
+    fn pipe() -> Option<(HANDLE, HANDLE)> {
+        let (mut r, mut w): (HANDLE, HANDLE) = (std::ptr::null_mut(), std::ptr::null_mut());
+        // SAFETY: out pointers to locals; no security attributes (not
+        // inheritable); a 1 MiB buffer.
+        (unsafe { CreatePipe(&mut r, &mut w, std::ptr::null(), 1 << 20) } != 0).then_some((r, w))
+    }
+    let (cmd_r, cmd_w) = pipe()?;
+    let Some((rep_r, rep_w)) = pipe() else {
+        // SAFETY: handles this function created and nothing else holds.
+        unsafe {
+            CloseHandle(cmd_r);
+            CloseHandle(cmd_w);
+        }
+        return None;
+    };
+    // SAFETY: fresh pipe ends; each File owns its handle from here.
+    let (commands, replies) = unsafe {
+        (
+            std::fs::File::from_raw_handle(cmd_w as _),
+            std::fs::File::from_raw_handle(rep_r as _),
+        )
+    };
+    // Chromium reads commands and writes replies. Handle values fit in 32
+    // bits, which is how Chromium parses them.
+    let handles = format!("{},{}", cmd_r as usize as u32, rep_w as usize as u32);
+    Some((DevTools::Pipe { commands, replies }, handles))
+}
 
 /// Put Chromium's DevTools pipe on fds 3 and 4. Call first thing in the
 /// browser process, before anything else opens a file (which would take
@@ -234,7 +287,26 @@ pub fn start(config: Config) -> anyhow::Result<()> {
     // Agents and `redrob-browser tab` reach the tabs through the window's
     // relay, which speaks to Chromium over the DevTools pipe; only where
     // there is none, over a loopback port nothing else holds.
+    let mark = config.root.join("devtools-pipe-failed");
+    let failed_before = mark.is_file();
+    let _ = PIPE_MARK.set(mark);
+    if failed_before {
+        PIPE.store(false, Ordering::SeqCst);
+        DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+    #[cfg(windows)]
+    if !failed_before {
+        if let Some((pipe, handles)) = windows_pipe() {
+            *DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(pipe);
+            let _ = PIPE_HANDLES.set(handles);
+            PIPE.store(true, Ordering::SeqCst);
+        }
+    }
     let port = if PIPE.load(Ordering::SeqCst) {
+        match PIPE_HANDLES.get() {
+            Some(h) => eprintln!("redrob-browser: DevTools: pipe (handles {h})"),
+            None => eprintln!("redrob-browser: DevTools: pipe (fds 3 and 4)"),
+        }
         0
     } else {
         let port = std::net::TcpListener::bind("127.0.0.1:0")
@@ -242,6 +314,12 @@ pub fn start(config: Config) -> anyhow::Result<()> {
             .map(|a| a.port())
             .unwrap_or(0);
         *DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(DevTools::Port(port));
+        let why = if failed_before {
+            "the pipe failed on an earlier start; delete devtools-pipe-failed to retry"
+        } else {
+            "no pipe could be made"
+        };
+        eprintln!("redrob-browser: DevTools: loopback port {port} ({why})");
         port
     };
 
@@ -290,6 +368,7 @@ pub fn start(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
 /// Run `quit` (on a thread of its own) when the process gets SIGTERM or
@@ -392,6 +471,14 @@ pub(crate) fn schedule(delay: Duration) {
     }
 }
 
+static PUMPS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many times Chromium's loop has run: a silent DevTools pipe only
+/// means failure while Chromium runs (relay.rs).
+pub fn pumps() -> u64 {
+    PUMPS.load(Ordering::Relaxed)
+}
+
 /// Let CEF do its work: call every window pass. Never re-entered.
 pub fn pump() {
     thread_local! {
@@ -401,6 +488,7 @@ pub fn pump() {
         return;
     }
     IN_PUMP.set(true);
+    PUMPS.fetch_add(1, Ordering::Relaxed);
     *PUMP_DUE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     cef::do_message_loop_work();
     IN_PUMP.set(false);
@@ -474,4 +562,43 @@ fn userns_allowed() -> bool {
         return false;
     }
     true
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::io::{Read, Write};
+    use std::os::windows::io::FromRawHandle;
+
+    use super::*;
+
+    #[test]
+    fn chromium_gets_its_pipe_ends_as_handle_values() {
+        let Some((
+            DevTools::Pipe {
+                mut commands,
+                mut replies,
+            },
+            handles,
+        )) = windows_pipe()
+        else {
+            panic!("no pipe");
+        };
+        let (r, w) = handles.split_once(',').expect("<read>,<write>");
+        let (r, w): (u32, u32) = (r.parse().unwrap(), w.parse().unwrap());
+        // SAFETY: the handles windows_pipe left for Chromium; the test owns them.
+        let (mut chromium_reads, mut chromium_writes) = unsafe {
+            (
+                std::fs::File::from_raw_handle(r as usize as _),
+                std::fs::File::from_raw_handle(w as usize as _),
+            )
+        };
+        commands.write_all(b"{\"id\":1}\0").unwrap();
+        let mut got = [0u8; 9];
+        chromium_reads.read_exact(&mut got).unwrap();
+        assert_eq!(&got, b"{\"id\":1}\0");
+        chromium_writes.write_all(b"{}\0").unwrap();
+        let mut back = [0u8; 3];
+        replies.read_exact(&mut back).unwrap();
+        assert_eq!(&back, b"{}\0");
+    }
 }

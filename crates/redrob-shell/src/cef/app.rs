@@ -35,8 +35,12 @@ wrap_app! {
                     .append_switch_with_value(Some(&CefString::from(name)), Some(&CefString::from(v)))
             };
             if super::PIPE.load(std::sync::atomic::Ordering::SeqCst) {
-                // DevTools on fds 3 and 4 only (cef/mod.rs), no port.
+                // DevTools on the pipe only (cef/mod.rs), no port: fds 3
+                // and 4, or on Windows the handles named here.
                 switch("remote-debugging-pipe");
+                if let Some(handles) = super::PIPE_HANDLES.get() {
+                    value("remote-debugging-io-pipes", handles);
+                }
             }
             switch("noerrdialogs");
             switch("hide-crash-restore-bubble");
