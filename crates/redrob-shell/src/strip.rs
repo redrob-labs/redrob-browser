@@ -522,8 +522,10 @@ impl Window {
         }
         let r = ui.interact(rect, id, Sense::click_and_drag());
         if r.drag_started_by(egui::PointerButton::Primary) {
-            let grab = r
-                .interact_pointer_pos()
+            // Where the press was, not where the drag was noticed.
+            let at = ui.input(|i| i.pointer.press_origin());
+            let grab = at
+                .or(r.interact_pointer_pos())
                 .map_or(Vec2::ZERO, |p| p - rect.min)
                 + Vec2::new(0.0, 4.0);
             self.drag_start = Some(DragStart {
@@ -633,8 +635,10 @@ impl Window {
         let detachable = count > 1;
         let r = ui.interact(rect, id, Sense::click_and_drag());
         if r.drag_started_by(egui::PointerButton::Primary) {
-            let grab = r
-                .interact_pointer_pos()
+            // Where the press was, not where the drag was noticed.
+            let at = ui.input(|i| i.pointer.press_origin());
+            let grab = at
+                .or(r.interact_pointer_pos())
                 .map_or(Vec2::ZERO, |q| q - rect.min);
             self.drag_start = Some(DragStart {
                 item: DragItem::Tab(tab_id),

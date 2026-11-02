@@ -1079,8 +1079,11 @@ impl Browser {
                 };
                 self.put(i, payload, at);
                 cdp::trace(format_args!(
-                    "drag {:?}: into window {} at {at}",
-                    d.item, self.windows[i].wid
+                    "drag {:?}: from window {} into window {} at {at} ({} windows)",
+                    d.item,
+                    self.windows[holder].wid,
+                    self.windows[i].wid,
+                    self.windows.len()
                 ));
                 let wv = &mut self.windows[i];
                 wv.drag_view = Some(DragView {
