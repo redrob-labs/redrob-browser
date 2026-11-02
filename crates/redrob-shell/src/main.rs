@@ -1128,7 +1128,7 @@ impl Window {
             .profile
             .as_ref()
             .and_then(|p| p.setting("agent_server"))
-            .unwrap_or_else(|| agent_bridge::DEFAULT_SERVER.to_string());
+            .unwrap_or_default();
         let tx = self.agent_tx.clone();
         std::thread::spawn(move || {
             let msg = match agent_bridge::send_prompt(&server, &prompt, &url, &title) {
@@ -1190,6 +1190,10 @@ impl Window {
             }
             if item(ui, Icon::Settings, t("Settings")).clicked() {
                 self.open_tab(internal::SETTINGS, true);
+                ui.close();
+            }
+            if item(ui, Icon::Code, t("Open logs folder")).clicked() {
+                startup::open_log_dir();
                 ui.close();
             }
             ui.separator();

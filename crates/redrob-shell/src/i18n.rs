@@ -293,10 +293,12 @@ fn ko(en: &str) -> Option<&'static str> {
         "Search engine" => "검색엔진",
         "Files are saved to {0}" => "파일은 {0}에 저장해요",
         "Redrob Code" => "Redrob Code",
-        "Server address" => "서버 주소",
-        "Prompts typed after > in the address bar go here. Only this computer is allowed." => {
-            "주소창에 > 다음에 쓴 요청이 여기로 가요. 이 컴퓨터 안의 주소만 쓸 수 있어요."
+        "Automatic" => "자동",
+        "Leave it empty to use Redrob Code on this computer. It starts when needed." => {
+            "비워 두면 이 컴퓨터의 Redrob Code를 써요. 필요할 때 알아서 켜져요."
         }
+        "Logs" => "로그",
+        "Open logs folder" => "로그 폴더 열기",
         "Profile folder" => "프로필 폴더",
         "About Redrob Browser" => "레드롭 브라우저 정보",
         "Version {0}, with Chromium {1}" => "버전 {0}, Chromium {1} 기반",

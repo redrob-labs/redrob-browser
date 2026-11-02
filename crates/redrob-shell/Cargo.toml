@@ -34,6 +34,9 @@ sha2 = "0.10"
 ureq = { version = "2.9", features = ["json"] }
 url = { workspace = true }
 open = "5"
+# Finds the shared Redrob Code server and its password (agent_bridge.rs), the
+# way every Rust Redrob app does. Pinned to an engine tag.
+redrob-engine-client = { git = "https://github.com/redrob-labs/redrob-code", tag = "v0.18.3" }
 # Chromium in every window tab (docs/CEF.md), each page a native child
 # window of the browser window. The binaries come from CEF_PATH.
 cef = { version = "=156.3.0", default-features = false, features = ["sandbox"] }
