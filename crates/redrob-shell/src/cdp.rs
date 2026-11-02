@@ -635,4 +635,3 @@ pub async fn relay(
     crate::write_private(&endpoint_file, &relay_url);
     Ok(())
 }
-
