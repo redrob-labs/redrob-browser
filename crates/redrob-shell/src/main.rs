@@ -366,7 +366,12 @@ impl Window {
             } else {
                 t.url.clone()
             };
-            self.op(t.id, Op::Activate);
+            let id = t.id;
+            self.op(id, Op::Activate);
+            // The page area keeps keyboard focus across a tab switch.
+            if self.page_focused {
+                self.op(id, Op::Focus(true));
+            }
         }
     }
 
