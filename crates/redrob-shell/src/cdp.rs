@@ -389,6 +389,7 @@ impl Engine {
         let b = browser.clone();
         client::devtools(&browser, "Target.getTargetInfo", json!({}), move |_, r| {
             if let Some(id) = r["targetInfo"]["targetId"].as_str() {
+                crate::cef::note_target(id, b.identifier());
                 sink.send_tab(tab, Event::Target(id.to_string()));
             }
             if !url.is_empty() && url != "about:blank" {

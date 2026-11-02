@@ -78,6 +78,8 @@ wrap_browser_process_handler! {
         fn on_context_initialized(&self) {
             // Protected video plays on the first visit (cef/handlers/widevine.rs).
             super::handlers::widevine::install();
+            // Pages ask for the window's language (cef/mod.rs).
+            super::write_languages();
         }
     }
 }

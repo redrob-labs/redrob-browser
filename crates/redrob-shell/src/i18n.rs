@@ -16,7 +16,11 @@ pub enum Lang {
 static LANG: AtomicU8 = AtomicU8::new(0);
 
 pub fn set(lang: Lang) {
-    LANG.store(if lang == Lang::Ko { 1 } else { 0 }, Ordering::Relaxed);
+    let new = if lang == Lang::Ko { 1 } else { 0 };
+    if LANG.swap(new, Ordering::Relaxed) != new {
+        // Pages are asked for the new language at once, as in Chrome.
+        crate::cef::apply_languages();
+    }
 }
 
 pub fn current() -> Lang {

@@ -133,5 +133,9 @@ client returns it from `get_<name>_handler`.
 
 - Size: the release archive grows by about 100 MB per platform.
 - Codecs: CEF's prebuilt binaries leave out H.264 and AAC. YouTube serves
-  VP9/AV1 with Opus. Widevine needs the CDM component (Windows, macOS).
+  VP9/AV1 with Opus. Widevine needs the CDM component: Windows and macOS
+  ask the component updater at start; on Linux the window points Chromium
+  at a CDM already on the machine (Google Chrome's, or one Chrome or
+  Chromium downloaded) and otherwise plays protected media from the start
+  after the updater's download (cef/handlers/widevine.rs).
 - macOS: every helper app is signed and notarized with the main app.

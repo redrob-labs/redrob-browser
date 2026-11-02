@@ -172,11 +172,8 @@ fn run(
 ) {
     let id = browser.identifier();
     let opened = |url: &str| Event::OpenTab(url.to_string());
-    let download = |url: &str| {
-        if let Some(h) = browser.host() {
-            h.start_download(Some(&CefString::from(url)));
-        }
-    };
+    // A save dialog, as in Chrome (download.rs).
+    let download = |url: &str| super::download::save_as(browser, url);
     let edit = |f: fn(&Frame)| {
         let target = browser.focused_frame().or_else(|| frame.cloned());
         if let Some(fr) = target {

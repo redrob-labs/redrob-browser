@@ -90,12 +90,46 @@ impl Sink {
         (self.wake)(Some(tab));
     }
 
+    /// Have the window look at the tab behind `browser_id` again (a dialog
+    /// it shows was answered elsewhere).
+    pub fn wake(&self, browser_id: i32) {
+        if let Some(tab) = self.tab_of(browser_id) {
+            (self.wake)(Some(tab));
+        }
+    }
+
     /// Report an event that belongs to no tab (downloads use tab 0).
     #[allow(dead_code)]
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
     }
+}
+
+/// Each tab's CDP target id and its browser, so the relay can reach what
+/// the window holds for a target (its page dialogs).
+fn targets() -> &'static Mutex<HashMap<String, i32>> {
+    static TARGETS: OnceLock<Mutex<HashMap<String, i32>>> = OnceLock::new();
+    TARGETS.get_or_init(Default::default)
+}
+
+/// `target` is the CDP target id of the browser `browser_id`.
+pub fn note_target(target: &str, browser_id: i32) {
+    if let Ok(mut t) = targets().lock() {
+        t.insert(target.to_string(), browser_id);
+    }
+}
+
+/// The browser `browser_id` closed.
+pub fn forget_browser(browser_id: i32) {
+    if let Ok(mut t) = targets().lock() {
+        t.retain(|_, b| *b != browser_id);
+    }
+}
+
+/// The browser behind a CDP target id, for a window tab.
+pub fn browser_of(target: &str) -> Option<i32> {
+    targets().lock().ok()?.get(target).copied()
 }
 
 /// Run a CEF subprocess (renderer, GPU, utility, zygote) when this process
@@ -326,6 +360,9 @@ pub fn start(config: Config) -> anyhow::Result<()> {
         port
     };
 
+    // Linux: Widevine from a CDM already on the machine (widevine.rs).
+    handlers::widevine::prepare(&config.root);
+
     let resources = resources_dir();
     let mut settings = cef::Settings {
         external_message_pump: (!cfg!(target_os = "linux")) as _,
@@ -344,7 +381,11 @@ pub fn start(config: Config) -> anyhow::Result<()> {
         log_severity: cef::sys::cef_log_severity_t::LOGSEVERITY_ERROR.into(),
         log_file: CefString::from(config.root.join("chromium.log").to_string_lossy().as_ref()),
         locale: CefString::from(locale().0),
-        accept_language_list: CefString::from(locale().1),
+        // No `accept_language_list`: CEF prefers it over the profile's
+        // `intl.accept_languages` for every page it creates, so a language
+        // the window switches to later would be lost on the next
+        // navigation. The preference is written once Chromium is up
+        // (cef/app.rs) and on every change (`apply_languages`).
         background_color: 0xFFFF_FFFF,
         ..Default::default()
     };
@@ -441,12 +482,86 @@ pub fn request_context() -> Option<cef::RequestContext> {
     })
 }
 
+/// Ask pages for the window's languages (`Accept-Language`,
+/// `navigator.languages`) from now on, as Chrome does when its languages
+/// change: open pages pick them up at once. Call on the window thread after
+/// the window's language changed.
+pub fn apply_languages() {
+    if STARTED.load(Ordering::SeqCst) {
+        handlers::on_ui(write_languages);
+    }
+}
+
+/// [`apply_languages`] on CEF's UI thread. Also run once Chromium's context
+/// is ready (cef/app.rs): the profile keeps the preferences, and the
+/// window's language may have changed since they were written.
+///
+/// Chromium derives `intl.accept_languages` from `intl.selected_languages`
+/// (LanguagePrefs), so both are written, the selected ones first.
+pub(crate) fn write_languages() {
+    let langs = locale().1;
+    set_pref("intl.selected_languages", langs);
+    set_pref("intl.accept_languages", langs);
+}
+
+/// Set the profile's string preference `name` (Chromium's own settings).
+/// Call on CEF's UI thread.
+pub(crate) fn set_pref(name: &str, value: &str) {
+    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    let contexts = [request_context(), cef::request_context_get_global_context()];
+    for c in contexts.iter().flatten() {
+        let Some(mut v) = cef::value_create() else {
+            continue;
+        };
+        v.set_string(Some(&CefString::from(value)));
+        // Not empty: CEF refuses a null error string, and an empty
+        // CefString has no buffer.
+        let mut error = CefString::from(" ");
+        if c.set_preference(Some(&CefString::from(name)), Some(&mut v), Some(&mut error)) != 1 {
+            eprintln!("redrob-browser: {name} not set: {error}");
+        }
+    }
+}
+
+/// Whether the profile holds its own value for the preference `name` (not
+/// Chromium's default). Call on CEF's UI thread.
+pub(crate) fn pref_is_set(name: &str) -> bool {
+    use cef::{ImplDictionaryValue as _, ImplPreferenceManager as _};
+    let Some(mut dict) = request_context().and_then(|c| c.all_preferences(0)) else {
+        return false;
+    };
+    let mut parts = name.split('.').peekable();
+    while let Some(part) = parts.next() {
+        let key = CefString::from(part);
+        if parts.peek().is_none() {
+            return dict.has_key(Some(&key)) == 1;
+        }
+        match dict.dictionary(Some(&key)) {
+            Some(d) => dict = d,
+            None => return false,
+        }
+    }
+    false
+}
+
+/// The profile's string preference `name`; empty when unset. Call on CEF's
+/// UI thread.
+pub(crate) fn pref(name: &str) -> String {
+    use cef::{ImplPreferenceManager as _, ImplValue as _};
+    request_context()
+        .and_then(|c| c.preference(Some(&CefString::from(name))))
+        .map(|v| CefString::from(&v.string()).to_string())
+        .unwrap_or_default()
+}
+
 /// Chromium's UI locale and the languages pages are asked for.
 fn locale() -> (&'static str, &'static str) {
-    match crate::i18n::current() {
-        crate::i18n::Lang::Ko => ("ko", "ko-KR,ko,en-US,en"),
-        crate::i18n::Lang::En => ("en-US", "en-US,en"),
-    }
+    let lang = crate::i18n::current();
+    let ui = match lang {
+        crate::i18n::Lang::Ko => "ko",
+        crate::i18n::Lang::En => "en-US",
+    };
+    (ui, handlers::languages::list(lang))
 }
 
 /// When CEF last asked to be pumped, and for when.
