@@ -138,6 +138,8 @@ pub use border::{
 };
 
 pub mod dom;
+mod style_table;
+pub use style_table::StyleTable;
 pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,

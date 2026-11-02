@@ -236,7 +236,7 @@ impl StyleIndex {
 
     /// Bring the index up to date: the styles of `ids` were written, or,
     /// when it is not valid, every style may have changed.
-    pub(super) fn update(&mut self, ids: &[NodeId], styles: &HashMap<NodeId, crate::LayoutStyle>) {
+    pub(super) fn update(&mut self, ids: &[NodeId], styles: &crate::StyleTable) {
         if !self.valid {
             *self = Self {
                 valid: true,
@@ -484,7 +484,7 @@ impl BuildReuse {
     pub(super) fn indexed_boxes(
         &self,
         kind: IndexKind,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
     ) -> Option<Vec<(taffy::NodeId, NodeId)>> {
         if !self.index.valid {
             return None;
@@ -525,7 +525,7 @@ impl BuildReuse {
     pub(super) fn indexed_elements(
         &self,
         kind: IndexKind,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
     ) -> Option<Vec<NodeId>> {
         self.index.valid.then(|| {
             self.index.kinds[kind as usize]
@@ -537,11 +537,7 @@ impl BuildReuse {
     }
 
     /// Whether some element's style is of `kind`, when known.
-    pub(super) fn any_indexed(
-        &self,
-        kind: IndexKind,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
-    ) -> Option<bool> {
+    pub(super) fn any_indexed(&self, kind: IndexKind, styles: &crate::StyleTable) -> Option<bool> {
         self.index.valid.then(|| {
             self.index.kinds[kind as usize]
                 .iter()
@@ -559,7 +555,7 @@ impl BuildReuse {
         &mut self,
         tree: &DomTree,
         id: NodeId,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
         taffy_tree: &TaffyTree<usize>,
         items: &mut IfcRegistry,
     ) -> Option<taffy::NodeId> {
@@ -823,7 +819,7 @@ pub(super) fn build_reusing(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     build: impl FnOnce(
         &DomTree,
         NodeId,
@@ -831,7 +827,7 @@ pub(super) fn build_reusing(
         &mut HashMap<taffy::NodeId, NodeId>,
         &mut crate::inline::TextEngine,
         &mut IfcRegistry,
-        &HashMap<NodeId, crate::LayoutStyle>,
+        &crate::StyleTable,
     ) -> Option<taffy::NodeId>,
 ) -> Option<taffy::NodeId> {
     let Some(mut reuse) = ifc_items.reuse.take() else {
@@ -997,7 +993,7 @@ impl RetainedLayoutTree {
 pub(super) fn mark_style_changes(
     items: &mut IfcRegistry,
     tree: &DomTree,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     changes: super::stylemap::StyleChanges,
     before: Option<super::stylemap::BeforeWrites>,
     deferrals: Deferrals,
@@ -1132,7 +1128,7 @@ pub(super) fn retain(
     id_map: HashMap<taffy::NodeId, NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
     items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     pending: Vec<NodeId>,
     pending_before: Option<super::stylemap::BeforeWrites>,
     viewport: (f32, f32),

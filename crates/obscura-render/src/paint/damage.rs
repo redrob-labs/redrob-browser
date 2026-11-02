@@ -73,7 +73,7 @@ pub struct DamageSnapshot {
     globals: u64,
     background: Option<(NodeId, NodeId, LayoutStyle)>,
     items: HashMap<Key, Item>,
-    styles: HashMap<NodeId, LayoutStyle>,
+    styles: crate::StyleTable,
     walk: Walk,
     /// [`PreparedRender::paint_epoch`] that `styles` and `text` describe.
     epoch: u64,
@@ -152,24 +152,23 @@ impl DamageSnapshot {
         let mut live: HashSet<NodeId> =
             HashSet::with_capacity_and_hasher(laid.styles.len(), Default::default());
         let walk = &self.walk;
-        let mut check_style =
-            |id: NodeId, owner: NodeId, styles: &mut HashMap<NodeId, LayoutStyle>| {
-                let Some(style) = laid.styles.get(&id) else {
-                    return;
-                };
-                live.insert(id);
-                match styles.get_mut(&id) {
-                    Some(old) if old == style => {}
-                    Some(old) => {
-                        *old = style.clone();
-                        restyled.insert(owner);
-                    }
-                    None => {
-                        styles.insert(id, style.clone());
-                        restyled.insert(owner);
-                    }
-                }
+        let mut check_style = |id: NodeId, owner: NodeId, styles: &mut crate::StyleTable| {
+            let Some(style) = laid.styles.get(&id) else {
+                return;
             };
+            live.insert(id);
+            match styles.get_mut(&id) {
+                Some(old) if old == style => {}
+                Some(old) => {
+                    *old = style.clone();
+                    restyled.insert(owner);
+                }
+                None => {
+                    styles.insert(id, style.clone());
+                    restyled.insert(owner);
+                }
+            }
+        };
         if !same_epoch {
             for (id, _, _, _) in &walk.boxes {
                 check_style(*id, *id, &mut self.styles);

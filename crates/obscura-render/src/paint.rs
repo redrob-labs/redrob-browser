@@ -4322,7 +4322,7 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
 
 fn retained_animation_restyle_mutations(
     tree: &DomTree,
-    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     animation_timeline: &crate::AnimationTimelineState,
 ) -> Vec<crate::dom::RetainedStyleMutation> {
     let connected = |node: obscura_dom::tree::NodeId| {
@@ -12732,7 +12732,7 @@ fn paint_in_flow_generated_box(
 fn paint_positioned_pseudo(
     ifc: &mut crate::ifc::IfcStore,
     tree: &DomTree,
-    styles: &HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     owner: obscura_dom::tree::NodeId,
     pixmap: &mut Pixmap,
     style: &crate::LayoutStyle,
@@ -13426,7 +13426,7 @@ fn collect_image_intrinsic_of(
 /// entry was added and layout therefore needs one resource-aware retry.
 fn collect_content_image_intrinsics(
     tree: &DomTree,
-    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     base_url: Option<&str>,
     cache: &mut RenderResourceCache,
     out: &mut crate::HashMap<obscura_dom::tree::NodeId, crate::ReplacedIntrinsic>,
@@ -14748,7 +14748,7 @@ fn serialize_svg(tree: &DomTree, root: obscura_dom::tree::NodeId) -> String {
 fn serialize_svg_styled(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: &crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     custom_properties: &crate::HashMap<
         obscura_dom::tree::NodeId,
         std::rc::Rc<crate::HashMap<String, String>>,
@@ -14792,7 +14792,7 @@ fn serialize_svg_node(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -14821,7 +14821,7 @@ fn serialize_svg_node_impl(
     tree: &DomTree,
     nid: obscura_dom::tree::NodeId,
     is_root: bool,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -15318,7 +15318,7 @@ fn inline_svg_image_hrefs(
 fn inject_external_sprites(
     tree: &DomTree,
     root: obscura_dom::tree::NodeId,
-    styles: Option<&crate::HashMap<obscura_dom::tree::NodeId, crate::LayoutStyle>>,
+    styles: Option<&crate::StyleTable>,
     custom_properties: Option<
         &crate::HashMap<obscura_dom::tree::NodeId, std::rc::Rc<crate::HashMap<String, String>>>,
     >,
@@ -24362,7 +24362,8 @@ mod tests {
             "the timeline accessor must return the exact deduplicated target set"
         );
 
-        let mutations = retained_animation_restyle_mutations(&tree, &HashMap::default(), &timeline);
+        let mutations =
+            retained_animation_restyle_mutations(&tree, &crate::StyleTable::default(), &timeline);
         assert_eq!(
             mutations,
             vec![crate::dom::RetainedStyleMutation::WaapiAnimation { node: connected }],

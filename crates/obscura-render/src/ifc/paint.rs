@@ -4,7 +4,6 @@
 use crate::HashMap;
 use std::hash::{Hash, Hasher};
 
-use obscura_dom::tree::NodeId;
 use parley::PositionedLayoutItem;
 use swash::scale::{image::Content, image::Image, Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Angle, Format, Transform, Vector};
@@ -601,7 +600,7 @@ fn decorations(ifc: &Ifc, run: &PaintRun, color: [u8; 4]) -> Vec<(f32, f32, f32,
 }
 
 /// Whether the text of paint `paint` should not paint at all.
-fn invisible(ifc: &Ifc, paint: usize, styles: &HashMap<NodeId, LayoutStyle>) -> bool {
+fn invisible(ifc: &Ifc, paint: usize, styles: &crate::StyleTable) -> bool {
     ifc.paints
         .get(paint)
         .and_then(|paint| styles.get(&paint.owner))
@@ -757,7 +756,7 @@ impl Ifc {
     pub(crate) fn paint(
         &self,
         raster: &mut GlyphRaster,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         pixmap: &mut tiny_skia::Pixmap,
         origin: (f32, f32),
         offset: (f32, f32),
@@ -791,7 +790,7 @@ impl Ifc {
     fn paint_pixels(
         &self,
         raster: &mut GlyphRaster,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         pixmap: &mut tiny_skia::Pixmap,
         origin: (f32, f32),
         offset: (f32, f32),
@@ -1069,7 +1068,7 @@ impl Ifc {
     #[cfg(feature = "scene")]
     fn scene_paint(
         &self,
-        styles: &HashMap<NodeId, LayoutStyle>,
+        styles: &crate::StyleTable,
         pixmap: &tiny_skia::Pixmap,
         origin: (f32, f32),
         offset: (f32, f32),

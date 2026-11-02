@@ -285,7 +285,7 @@ pub struct DomLayout {
     /// Multicol `column-rule` segments to paint over each container:
     /// (rect, color), between columns that hold content.
     pub column_rules: HashMap<NodeId, Vec<(Rect, [u8; 4])>>,
-    pub styles: HashMap<NodeId, crate::LayoutStyle>,
+    pub styles: crate::StyleTable,
     /// Computed custom properties in force for each element. Values are
     /// reference-counted because the overwhelmingly common case is inheritance
     /// without an override: an entire subtree can share one cascade map while
@@ -447,9 +447,12 @@ pub fn layout_difference(incremental: &DomLayout, scratch: &DomLayout) -> Option
             )
         })
         .or_else(|| {
-            first_map_difference("styles", &incremental.styles, &scratch.styles, |a, b| {
-                a == b || format!("{a:?}") == format!("{b:?}")
-            })
+            first_map_difference(
+                "styles",
+                incremental.styles.boxed(),
+                scratch.styles.boxed(),
+                |a, b| a == b || format!("{a:?}") == format!("{b:?}"),
+            )
         })
         .or_else(|| {
             first_map_difference(
@@ -1226,7 +1229,7 @@ impl From<TreeStyleMutation> for RetainedStyleMutation {
 /// these post-layout values; moving ownership avoids cloning their heap-heavy
 /// payloads when a final layout or query-disabled seed is replaced.
 pub(crate) struct RetainedStyleMaps {
-    pub styles: HashMap<NodeId, crate::LayoutStyle>,
+    pub styles: crate::StyleTable,
     pub custom_properties: HashMap<NodeId, std::rc::Rc<HashMap<String, String>>>,
     /// The cascade inputs of each retained style (`DomLayout::cascade_signatures`).
     pub signatures: HashMap<NodeId, u64>,
@@ -2542,7 +2545,7 @@ fn accumulate_scrolling_overflow(
     inherited_clip: Option<OverflowClip>,
     fixed: &HashSet<NodeId>,
     rects: &HashMap<NodeId, Rect>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     translates: &HashMap<NodeId, (f32, f32)>,
     transforms: &HashMap<NodeId, crate::Affine2>,
     right: &mut f32,
@@ -2604,7 +2607,7 @@ fn accumulate_scrolling_overflow(
     }
 }
 
-fn is_viewport_overflow_source(id: NodeId, styles: &HashMap<NodeId, crate::LayoutStyle>) -> bool {
+fn is_viewport_overflow_source(id: NodeId, styles: &crate::StyleTable) -> bool {
     styles
         .get(&id)
         .is_some_and(|style| style.overflow_propagated_to_viewport)
@@ -2910,7 +2913,7 @@ fn resolve_inline_percentage_heights(
     taffy_tree: &mut TaffyTree<usize>,
     taffy_root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     definite_height_nodes: &HashSet<NodeId>,
     place: &mut dyn FnMut(&mut TaffyTree<usize>, &[taffy::NodeId], bool),
     // The boxes with a percentage-height style, when indexed.
@@ -3289,7 +3292,7 @@ fn resolve_clip_rects(
     tx: f32,
     ty: f32,
     rects: &HashMap<NodeId, Rect>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     clip_rects: &mut HashMap<NodeId, Option<OverflowClip>>,
     translates: &mut HashMap<NodeId, (f32, f32)>,
     parent_transform: crate::Mat4,
@@ -3525,10 +3528,7 @@ impl ClipStyle {
     }
 
     /// `clip_styles` of every styled node.
-    pub(crate) fn all(
-        tree: &DomTree,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
-    ) -> Vec<Option<ClipStyle>> {
+    pub(crate) fn all(tree: &DomTree, styles: &crate::StyleTable) -> Vec<Option<ClipStyle>> {
         let mut all = vec![None; tree.node_slot_count()];
         for (id, style) in styles {
             if let Some(slot) = all.get_mut(id.index()) {
@@ -3554,7 +3554,7 @@ impl ClipDirty {
         old_rects: &HashMap<NodeId, Rect>,
         rects: &HashMap<NodeId, Rect>,
         fresh: &HashSet<NodeId>,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
         style_changes: Option<ClipStyleChanges<'_>>,
     ) -> Self {
         let slots = tree.node_slot_count();
@@ -5210,32 +5210,90 @@ fn resolve_css_counters(
         {
             let empty = CssCounterState::default();
             let flat = current_flat_tree(tree);
+            // By node index: 0 not known yet, 1 the walk goes there, 2 not.
+            let mut walked_state = vec![0u8; tree.node_slot_count()];
             for &id in fresh {
-                // Only where the walk goes: rendered, outside `display: none`.
-                let mut walked = flat.contains(id);
+                // Only where the walk goes: rendered, outside `display: none`
+                // (decided up the path to the first node already known).
+                let mut path = Vec::new();
                 let mut node = id;
-                while walked && node != tree.document() {
-                    if styles
-                        .get(&node)
-                        .is_some_and(|style| style.display == crate::Display::None)
+                let walked = loop {
+                    match walked_state.get(node.index()).copied() {
+                        Some(1) => break true,
+                        Some(2) => break false,
+                        _ => {}
+                    }
+                    if node == tree.document() {
+                        break true;
+                    }
+                    path.push(node);
+                    if !flat.contains(node)
+                        || styles
+                            .get(&node)
+                            .is_some_and(|style| style.display == crate::Display::None)
                     {
-                        walked = false;
-                    } else if let Some(parent) = rendered_parent(tree, node) {
-                        node = parent;
-                    } else {
-                        walked = false;
+                        break false;
+                    }
+                    match rendered_parent(tree, node) {
+                        Some(parent) => node = parent,
+                        None => break false,
+                    }
+                };
+                // Every node on the path below where it was decided is
+                // decided alike.
+                for &on_path in &path {
+                    if let Some(state) = walked_state.get_mut(on_path.index()) {
+                        *state = if walked { 1 } else { 2 };
                     }
                 }
                 if !walked {
                     continue;
                 }
-                if let Some(style) = styles.get_mut(&id) {
-                    generated_counter_text(style, &empty, true);
-                    generated_counter_text(style, &empty, false);
+                let changes = styles.get(&id).is_some_and(|style| {
+                    generated_counter_text_changes(style, &empty, true)
+                        || generated_counter_text_changes(style, &empty, false)
+                });
+                if changes {
+                    if let Some(style) = styles.get_mut(&id) {
+                        generated_counter_text(style, &empty, true);
+                        generated_counter_text(style, &empty, false);
+                    }
                 }
             }
             return false;
         }
+    }
+    /// Whether `generated_counter_text` would change `style`.
+    fn generated_counter_text_changes(
+        style: &crate::LayoutStyle,
+        counters: &CssCounterState,
+        before: bool,
+    ) -> bool {
+        let pseudo = if before {
+            style.before_pseudo.as_deref()
+        } else {
+            style.after_pseudo.as_deref()
+        };
+        let rendered = pseudo.and_then(|pseudo| {
+            pseudo
+                .generated_content
+                .as_deref()
+                .map(|items| counters.render(items))
+        });
+        if let (Some(pseudo), Some(rendered)) = (pseudo, rendered.as_ref()) {
+            if pseudo.before_content.as_ref() != Some(rendered) {
+                return true;
+            }
+        }
+        let content = pseudo
+            .filter(|pseudo| pseudo.position != Some(taffy::Position::Absolute))
+            .and_then(|pseudo| rendered.as_ref().or(pseudo.before_content.as_ref()));
+        let current = if before {
+            style.before_content.as_ref()
+        } else {
+            style.after_content.as_ref()
+        };
+        current != content
     }
     fn generated_counter_text(
         style: &mut crate::LayoutStyle,
@@ -7275,7 +7333,7 @@ impl NonGeometricStyleCache {
             sheet,
             viewport,
             quirks,
-            styles: StyleMap::untracked(HashMap::default()),
+            styles: StyleMap::untracked(crate::StyleTable::default()),
             custom_properties: HashMap::default(),
             ancestors: HashMap::default(),
             path: Vec::new(),
@@ -8186,10 +8244,8 @@ fn layout_dom_once(
                     retained.definite_heights,
                 )
             }
-            // Sized up front: growing a map of computed styles moves every
-            // (large) style each time it doubles.
             None => (
-                HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
+                crate::StyleTable::with_capacity(tree.len()),
                 HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
                 None,
                 HashMap::default(),
@@ -10271,7 +10327,7 @@ fn layout_dom_once(
                 .filter(|id| styles.contains_key(id))
                 .collect()
         });
-        let repair_candidates = |styles: &HashMap<NodeId, crate::LayoutStyle>| -> Vec<NodeId> {
+        let repair_candidates = |styles: &crate::StyleTable| -> Vec<NodeId> {
             match &touched {
                 Some(touched) => touched.clone(),
                 None => styles.keys().copied().collect(),
@@ -12449,7 +12505,7 @@ fn store_node(store: &crate::ifc::IfcStore, index: usize) -> Option<taffy::NodeI
 fn shaped_item_clip(
     owner: NodeId,
     rects: &HashMap<NodeId, Rect>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     clip_rects: &HashMap<NodeId, Option<OverflowClip>>,
     translates: &HashMap<NodeId, (f32, f32)>,
     viewport: (f32, f32),
@@ -12694,7 +12750,7 @@ enum EffectiveGridChild {
 fn collect_effective_grid_children(
     tree: &DomTree,
     children: &[NodeId],
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     out: &mut Vec<EffectiveGridChild>,
 ) {
     for &child in children {
@@ -12731,7 +12787,7 @@ fn collect_effective_grid_children(
 
 fn effective_grid_child_style(
     child: EffectiveGridChild,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<&crate::LayoutStyle> {
     match child {
         EffectiveGridChild::Dom(node) => styles.get(&node),
@@ -12978,7 +13034,7 @@ fn collect_column_subgrid_descendants(
     dom: NodeId,
     track_count: usize,
     taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     start_mbp: f32,
     end_mbp: f32,
     depth: usize,
@@ -13125,7 +13181,7 @@ fn apply_full_span_column_subgrids<F>(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
     taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     // The elements that may hold such subgrids, when indexed.
     indexed: Option<&[NodeId]>,
     mut measure_max_content: F,
@@ -13356,7 +13412,7 @@ fn resolve_named_placement(
 fn collect_used_auto_margins(
     taffy_tree: &TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     // The boxes with an auto inline margin, when indexed.
     indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> HashMap<NodeId, (f32, f32)> {
@@ -13467,7 +13523,7 @@ fn reparent_inset_positioned_nodes(
     taffy_tree: &mut TaffyTree<usize>,
     taffy_root: taffy::NodeId,
     reverse: &HashMap<NodeId, taffy::NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     static_positions: &HashMap<NodeId, taffy::NodeId>,
     // The absolutely positioned elements (`retain::StyleIndex`), when
     // known: only they and their ancestors are read.
@@ -13642,7 +13698,7 @@ fn ensure_static_probes(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
     taffy_by_dom: &HashMap<NodeId, taffy::NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     positioned: &mut dyn Iterator<Item = NodeId>,
     probes: &mut HashMap<NodeId, taffy::NodeId>,
 ) {
@@ -13745,7 +13801,7 @@ fn reparent_indexed_positioned_nodes(
     taffy_tree: &mut TaffyTree<usize>,
     taffy_root: taffy::NodeId,
     reverse: &HashMap<NodeId, taffy::NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     static_positions: &HashMap<NodeId, taffy::NodeId>,
     positioned: &HashSet<NodeId>,
 ) -> Vec<StaticPositionCandidate> {
@@ -13944,7 +14000,7 @@ fn table_cell_natural_height(
 fn apply_table_row_geometry(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     ifc_items: &IfcRegistry,
 ) -> bool {
     let mut changed = false;
@@ -14286,7 +14342,7 @@ fn multicol_flow_pieces(
     taffy_tree: &TaffyTree<usize>,
     column: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> (Vec<FlowPiece>, Vec<FlowGroup>) {
     #[allow(clippy::too_many_arguments)]
     fn walk(
@@ -14294,7 +14350,7 @@ fn multicol_flow_pieces(
         node: taffy::NodeId,
         base_y: f32,
         id_map: &HashMap<taffy::NodeId, NodeId>,
-        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
         out: &mut Vec<FlowPiece>,
         groups: &mut Vec<FlowGroup>,
         forced_next: &mut bool,
@@ -14549,7 +14605,7 @@ fn apply_multicol_column_heights(
     taffy_tree: &mut TaffyTree<usize>,
     multicol: &[MulticolBuild],
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> bool {
     let mut changed = false;
     for set in multicol.iter().filter(|set| set.flow) {
@@ -14658,7 +14714,7 @@ fn apply_multicol_fragmentation(
     taffy_tree: &mut TaffyTree<usize>,
     multicol: &[MulticolBuild],
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> MulticolFragments {
     let mut fragments = Vec::new();
     let mut used = Vec::new();
@@ -14788,7 +14844,7 @@ fn apply_table_cell_baseline_alignment(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     ifc_items: &IfcRegistry,
     // The boxes of the table cells, when known.
     cells: Option<&[(taffy::NodeId, NodeId)]>,
@@ -14923,7 +14979,7 @@ fn apply_table_cell_block_alignment(
     tree: &DomTree,
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     // The boxes of the table cells, when known.
     cells: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> bool {
@@ -15068,7 +15124,7 @@ fn is_auto_height_column_flex(style: &crate::LayoutStyle) -> bool {
 fn repair_intrinsic_column_flex_negative_margins(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     place: &mut dyn FnMut(&mut TaffyTree<usize>, &[taffy::NodeId], bool),
     // The boxes of auto-height column flex containers, when indexed.
     indexed: Option<&[(taffy::NodeId, NodeId)]>,
@@ -15651,9 +15707,41 @@ pub(crate) fn patch_flat_tree(
             TreeStyleMutation::Text { .. } => {}
         }
     }
+    let root = tree.document();
+    // One inserted or removed subtree: splice it into or out of the previous
+    // walk instead of walking the document again.
+    let tree_mutations: Vec<&TreeStyleMutation> = mutations
+        .iter()
+        .filter_map(|mutation| match mutation {
+            RetainedStyleMutation::Tree(
+                mutation @ (TreeStyleMutation::Insert { .. } | TreeStyleMutation::Remove { .. }),
+            ) => Some(mutation),
+            _ => None,
+        })
+        .collect();
+    if let [mutation] = tree_mutations.as_slice() {
+        let spliced = splice_flat_walk(
+            tree, previous, mutation, &mut spans, &kids, &mut kinds, slots,
+        );
+        if let Some((walk, parents, kinds_present)) = spliced {
+            let flat = std::rc::Rc::new(FlatTree {
+                generation,
+                walk: std::rc::Rc::new(walk),
+                spans,
+                kids,
+                parents,
+                kinds,
+                kinds_present,
+            });
+            if layout_verify_enabled() {
+                verify_flat_tree(tree, &flat);
+            }
+            let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
+            return;
+        }
+    }
     // The walk and the parents from the document down, as `build_flat_tree`
     // makes them; a node no longer reached loses its list.
-    let root = tree.document();
     let limit = tree.len();
     let mut walk = Vec::with_capacity(previous.walk.len());
     let mut kinds_present = 0;
@@ -15722,6 +15810,121 @@ pub(crate) fn patch_flat_tree(
         verify_flat_tree(tree, &flat);
     }
     let _ = FLAT_TREE.try_with(|slot| *slot.borrow_mut() = Some(flat));
+}
+
+/// `patch_flat_tree` for one inserted subtree (not moved from another
+/// parent) or one removed subtree: the walk, parents and kinds present of
+/// the current tree from `previous` and the child lists already patched
+/// into `spans`/`kids`. `None` when the case is not one of those.
+fn splice_flat_walk(
+    tree: &DomTree,
+    previous: &FlatTree,
+    mutation: &TreeStyleMutation,
+    spans: &mut [(u32, u32)],
+    kids: &[NodeId],
+    kinds: &mut [u8],
+    slots: usize,
+) -> Option<(Vec<NodeId>, Vec<Option<NodeId>>, u8)> {
+    let root = tree.document();
+    let children = |id: NodeId, spans: &[(u32, u32)], kids: &'_ [NodeId]| -> Option<Vec<NodeId>> {
+        let &(start, len) = spans.get(id.index())?;
+        (start != u32::MAX).then(|| kids[start as usize..(start + len) as usize].to_vec())
+    };
+    let on_walk = |id: NodeId| id == root || previous.contains(id);
+    // The node after `id`'s subtree in preorder: the next sibling of it or of
+    // its nearest ancestor that has one (`None`: the end of the walk).
+    let following = |id: NodeId, parent: NodeId, spans: &[(u32, u32)], kids: &[NodeId]| {
+        let mut current = id;
+        let mut parent = parent;
+        loop {
+            let siblings = children(parent, spans, kids)?;
+            let position = siblings.iter().position(|&kid| kid == current)?;
+            if let Some(&next) = siblings.get(position + 1) {
+                return Some(Some(next));
+            }
+            if parent == root {
+                return Some(None);
+            }
+            current = parent;
+            parent = previous.parents.get(parent.index()).copied().flatten()?;
+        }
+    };
+    let index_of = |id: NodeId| previous.walk.iter().position(|&node| node == id);
+    let mut parents = previous.parents.clone();
+    parents.resize(slots, None);
+    let mut walk: Vec<NodeId>;
+    match *mutation {
+        TreeStyleMutation::Insert {
+            node,
+            old_parent: None,
+            new_parent,
+        } => {
+            if !on_walk(new_parent) || previous.contains(node) {
+                return None;
+            }
+            // A node its parent's rendered children skip (a comment) is
+            // left to the full walk.
+            let next = following(node, new_parent, spans, kids)?;
+            let at = match next {
+                Some(next) => index_of(next)?,
+                None => previous.walk.len(),
+            };
+            let mut inserted = Vec::new();
+            let mut stack = vec![(node, new_parent)];
+            while let Some((id, parent)) = stack.pop() {
+                inserted.push(id);
+                if let Some(slot) = parents.get_mut(id.index()) {
+                    *slot = Some(parent);
+                }
+                if let Some(kind) = kinds.get_mut(id.index()) {
+                    if *kind == ElementKind::UNKNOWN {
+                        *kind = ElementKind::of(tree, id);
+                    }
+                }
+                if let Some(list) = children(id, spans, kids) {
+                    stack.extend(list.into_iter().rev().map(|child| (child, id)));
+                }
+            }
+            walk = Vec::with_capacity(previous.walk.len() + inserted.len());
+            walk.extend_from_slice(&previous.walk[..at]);
+            walk.extend_from_slice(&inserted);
+            walk.extend_from_slice(&previous.walk[at..]);
+        }
+        TreeStyleMutation::Remove {
+            node, old_parent, ..
+        } => {
+            if !on_walk(old_parent) || !previous.contains(node) {
+                return None;
+            }
+            let start = index_of(node)?;
+            let end = match following(node, old_parent, &previous.spans, &previous.kids)? {
+                Some(next) => index_of(next)?,
+                None => previous.walk.len(),
+            };
+            if end < start {
+                return None;
+            }
+            for &id in &previous.walk[start..end] {
+                if let Some(slot) = parents.get_mut(id.index()) {
+                    *slot = None;
+                }
+                if let Some(span) = spans.get_mut(id.index()) {
+                    *span = (u32::MAX, 0);
+                }
+                if let Some(kind) = kinds.get_mut(id.index()) {
+                    *kind = ElementKind::UNKNOWN;
+                }
+            }
+            walk = Vec::with_capacity(previous.walk.len() - (end - start));
+            walk.extend_from_slice(&previous.walk[..start]);
+            walk.extend_from_slice(&previous.walk[end..]);
+        }
+        _ => return None,
+    }
+    let kinds_present = walk.iter().fold(0, |present, id| {
+        present | kinds.get(id.index()).copied().unwrap_or(0)
+    });
+    Some((walk, parents, kinds_present))
 }
 
 /// `OBSCURA_LAYOUT_VERIFY`: a patched flat tree equals one built from scratch.
@@ -15970,7 +16173,7 @@ fn abspos_inset_content_height(style: &crate::LayoutStyle, cb_height: Option<f32
 /// Such a box never establishes a containing block for in-flow children.
 fn is_non_atomic_inline_box(
     tree: &DomTree,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     id: NodeId,
     style: &crate::LayoutStyle,
 ) -> bool {
@@ -16228,7 +16431,7 @@ fn build_any(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Vec<taffy::NodeId> {
     let is_text = tree
         .with_node(id, |node| {
@@ -16286,7 +16489,7 @@ fn build_flex_grid_children(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Vec<taffy::NodeId> {
     // The container's own `::before`/`::after` are its first and last items.
     let has_pseudo = |kind| flow::pseudo_style(styles, parent, kind).is_some();
@@ -16547,7 +16750,7 @@ fn synthesize_column_rects(
 
 fn synthesize_row_rects(
     tree: &DomTree,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     rects: &mut HashMap<NodeId, Rect>,
 ) {
     let mut rows = Vec::new();
@@ -16789,11 +16992,7 @@ fn synthesize_row_rects(
 /// Number of ancestor tables containing `id`. Table sizing runs outer-first:
 /// an outer table consumes an inner table's intrinsic contributions, then a
 /// root layout establishes the inner table's real cell containing block.
-fn table_ancestor_depth(
-    tree: &DomTree,
-    id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
-) -> usize {
+fn table_ancestor_depth(tree: &DomTree, id: NodeId, styles: &crate::StyleTable) -> usize {
     let mut depth = 0usize;
     let mut cur = id;
     while let Some(p) = rendered_parent(tree, cur) {
@@ -16815,7 +17014,7 @@ fn table_ancestor_depth(
 fn reliable_normal_flow_content_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     initial_cb_width: f32,
     depth: usize,
 ) -> Option<f32> {
@@ -16902,7 +17101,7 @@ fn reliable_normal_flow_content_width(
 fn reliable_declared_content_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     initial_cb_width: f32,
     depth: usize,
 ) -> Option<f32> {
@@ -16988,7 +17187,7 @@ fn reliable_declared_content_width(
 fn reliable_ratio_only_available_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     initial_cb_width: f32,
 ) -> Option<f32> {
     let image = styles.get(&id)?;
@@ -17022,7 +17221,7 @@ fn reliable_ratio_only_available_width(
 fn reliable_table_available_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     initial_cb_width: f32,
 ) -> Option<f32> {
     let table_style = styles.get(&id)?;
@@ -17089,7 +17288,7 @@ fn is_fit_content_candidate(style: &crate::LayoutStyle) -> bool {
 /// parents'): place them before it runs (see `TaffyTree::place_deferred`).
 fn fit_content_nodes(
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     // The fit-content candidates' boxes, when indexed.
     indexed: Option<&[(taffy::NodeId, NodeId)]>,
 ) -> Vec<taffy::NodeId> {
@@ -17110,7 +17309,7 @@ fn fit_content_nodes(
 fn apply_fit_content_widths<F>(
     taffy_tree: &mut TaffyTree<usize>,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     initial_cb_width: f32,
     // The fit-content candidates' boxes, when indexed.
     indexed: Option<&[(taffy::NodeId, NodeId)]>,
@@ -17269,7 +17468,7 @@ where
 fn collect_table_rows(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     rows: &mut Vec<(NodeId, usize)>,
 ) {
     // A `display:none` row or row group generates no box, so it takes no
@@ -17348,7 +17547,7 @@ fn build_anonymous_table_cell(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<taffy::NodeId> {
     let all_blocks = members.iter().all(|member| {
         styles
@@ -17376,11 +17575,7 @@ fn build_anonymous_table_cell(
 
 /// Whether every box a cell generates is block-level (no inline content to
 /// emulate with the flex row stand-in).
-fn cell_has_only_block_children(
-    tree: &DomTree,
-    cell: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
-) -> bool {
+fn cell_has_only_block_children(tree: &DomTree, cell: NodeId, styles: &crate::StyleTable) -> bool {
     let children = rendered_children(tree, cell);
     let mut flattened = Vec::new();
     flatten_contents_children(tree, &children, styles, &mut flattened);
@@ -17456,7 +17651,7 @@ fn collect_css_table(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<CssTable> {
     use crate::TablePart;
     let flatten = |node: NodeId| {
@@ -17917,7 +18112,7 @@ fn resolve_collapsed_table_borders(
     placed: &[(NodeId, usize, usize, usize, usize)],
     nrows: usize,
     ncols: usize,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     table_id: NodeId,
 ) -> CollapsedTableBorders {
     // horizontal[r][c]: the edge above row r in column c (r == nrows is the
@@ -18051,7 +18246,7 @@ fn build_table(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<taffy::NodeId> {
     build_table_box(
         tree, id, None, taffy_tree, id_map, engine, ifc_items, styles,
@@ -18088,11 +18283,7 @@ fn anonymous_table_style(parent: &crate::LayoutStyle) -> crate::LayoutStyle {
 
 /// Whether every box `id` generates is a table cell or row (whitespace
 /// aside), so its content is one anonymous table.
-fn children_form_anonymous_table(
-    tree: &DomTree,
-    id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
-) -> bool {
+fn children_form_anonymous_table(tree: &DomTree, id: NodeId, styles: &crate::StyleTable) -> bool {
     let children = rendered_children(tree, id);
     let mut flattened = Vec::new();
     flatten_contents_children(tree, &children, styles, &mut flattened);
@@ -18134,7 +18325,7 @@ fn build_table_box(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<taffy::NodeId> {
     let style = match &anonymous {
         Some(style) => style,
@@ -19075,7 +19266,7 @@ fn container_auto_inline_size(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> ContainerAutoInlineSize {
     // Grid items are blockified and their float is ignored. Their original
     // inline-block/float provenance must not suppress grid self-alignment.
@@ -19146,7 +19337,7 @@ fn container_auto_block_size(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> ContainerAutoBlockSize {
     // Absolutely positioned descendants are not grid items. Preserve the
     // existing contained intrinsic-height behavior until their independent
@@ -19193,7 +19384,7 @@ fn apply_container_size_containment(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     taffy_style: &mut taffy::Style,
 ) {
     let kind = effective_size_containment(style);
@@ -19264,7 +19455,7 @@ enum DeferredCyclicInlineSource {
 fn definite_row_flex_intrinsic_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<f32> {
     let style = styles.get(&id)?;
     if style.display != crate::Display::Flex
@@ -19651,7 +19842,7 @@ fn is_in_flow_grid_item(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> bool {
     if matches!(style.position, Some(taffy::Position::Absolute)) {
         return false;
@@ -19679,7 +19870,7 @@ fn build(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<taffy::NodeId> {
     retain::build_reusing(
         tree, id, taffy_tree, id_map, engine, ifc_items, styles, build_box,
@@ -19694,7 +19885,7 @@ fn build_box(
     id_map: &mut HashMap<taffy::NodeId, NodeId>,
     engine: &mut crate::inline::TextEngine,
     ifc_items: &mut IfcRegistry,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<taffy::NodeId> {
     // Only the name and native-control flags survive this read. Avoid
     // copying every attribute (including inline data URLs) for each box.
@@ -20423,7 +20614,7 @@ fn needs_column_flex_text_fit_content_cap(
     tree: &DomTree,
     id: NodeId,
     style: &crate::LayoutStyle,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> bool {
     if style.display != crate::Display::Flex
         || style.internal_flex_container
@@ -20507,7 +20698,7 @@ fn needs_column_flex_text_fit_content_cap(
 fn flatten_contents_children(
     tree: &DomTree,
     children: &[NodeId],
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
     out: &mut Vec<NodeId>,
 ) {
     for &cid in children {
@@ -20550,7 +20741,7 @@ const DEFAULT_FLOAT_HEIGHT_ESTIMATE: f32 = 200.0;
 fn max_definite_table_content_width(
     tree: &DomTree,
     id: NodeId,
-    styles: &HashMap<NodeId, crate::LayoutStyle>,
+    styles: &crate::StyleTable,
 ) -> Option<f32> {
     let mut best: Option<f32> = None;
     for descendant in tree.descendants(id) {

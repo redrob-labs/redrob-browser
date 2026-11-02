@@ -361,7 +361,7 @@ impl IfcStore {
     pub(crate) fn standalone(
         &mut self,
         tree: &obscura_dom::tree::DomTree,
-        styles: &crate::HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
         owner: NodeId,
         style: &crate::LayoutStyle,
         text: &str,
