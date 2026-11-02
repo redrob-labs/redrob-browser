@@ -1249,6 +1249,8 @@ pub(crate) struct RetainedStyleMaps {
 /// them, so the next retained layout recomputes clips and transforms only
 /// where a box, a style or the rendered tree changed.
 pub(crate) struct RetainedGeometry {
+    /// `DomLayout::container_nodes` of that layout.
+    pub(crate) container_nodes: Option<Vec<NodeId>>,
     pub(crate) rects: HashMap<NodeId, Rect>,
     pub(crate) clip_rects: HashMap<NodeId, Option<OverflowClip>>,
     pub(crate) translates: HashMap<NodeId, (f32, f32)>,
@@ -3500,6 +3502,20 @@ pub(crate) struct ClipStyle {
 }
 
 impl ClipStyle {
+    /// `clip_reads_rect` of the style this was made of.
+    fn reads_rect(&self) -> bool {
+        let [overflow_hidden, _, _, _, _, is_inline_block, is_replaced_box, _] = self.flags;
+        let ignores_used_box_sizes =
+            self.display == crate::Display::Inline && !is_inline_block && !is_replaced_box;
+        overflow_hidden
+            || self.perspective.is_some()
+            || (!ignores_used_box_sizes
+                && (self.individual_translate.is_some()
+                    || self.individual_rotate.is_some()
+                    || self.individual_scale.is_some()
+                    || !self.transform_ops.is_empty()))
+    }
+
     pub(crate) fn of(style: &crate::LayoutStyle) -> Self {
         Self {
             flags: [
@@ -3563,11 +3579,55 @@ impl ClipDirty {
             subtree: vec![false; slots],
             moved: Vec::new(),
         };
+        let document = tree.document();
+        let mut style_changes = style_changes;
+        if let Some(changes) = style_changes.as_mut() {
+            // Every style that may differ from the one the previous clips
+            // read: compare what the walk reads.
+            changes.clip_styles.resize(slots, None);
+            for &id in fresh.iter().chain(changes.written).chain(changes.recheck) {
+                if id == document {
+                    continue;
+                }
+                let Some(slot) = changes.clip_styles.get_mut(id.index()) else {
+                    continue;
+                };
+                let now = styles.get(&id).map(ClipStyle::of);
+                if *slot != now || !old_rects.contains_key(&id) {
+                    *slot = now;
+                    dirty.mark(tree, id, Self::STYLE);
+                }
+            }
+        } else {
+            for &id in fresh {
+                // The document has no box; a retained layout names it fresh
+                // whenever it restyles anything.
+                if id == document {
+                    continue;
+                }
+                dirty.mark(tree, id, Self::STYLE);
+                if let Some(parent) = rendered_parent(tree, id) {
+                    dirty.mark(tree, parent, Self::STYLE);
+                }
+                for child in rendered_children_ref(tree, id).iter().copied() {
+                    dirty.mark(tree, child, Self::STYLE);
+                }
+            }
+        }
+        // What the clips read of each style, current from here on when
+        // kept: a dense list to ask instead of the styles.
+        let clip_styles = style_changes
+            .as_ref()
+            .map(|changes| changes.clip_styles.as_slice());
+        let reads_rect = |id: &NodeId| match clip_styles.and_then(|all| all.get(id.index())) {
+            Some(Some(clip_style)) => clip_style.reads_rect(),
+            _ => styles.get(id).is_some_and(clip_reads_rect),
+        };
         let mut kept = 0usize;
         for (id, rect) in rects {
             match old_rects.get(id) {
                 Some(old) if old == rect => kept += 1,
-                Some(_) if !styles.get(id).is_some_and(clip_reads_rect) => {
+                Some(_) if !reads_rect(id) => {
                     kept += 1;
                     crate::prof::count(crate::prof::RECT_MOVED);
                     dirty.moved.push(*id);
@@ -3589,40 +3649,6 @@ impl ClipDirty {
                 if !rects.contains_key(id) {
                     dirty.mark(tree, *id, Self::RECT);
                 }
-            }
-        }
-        let document = tree.document();
-        if let Some(changes) = style_changes {
-            // Every style that may differ from the one the previous clips
-            // read: compare what the walk reads.
-            changes.clip_styles.resize(slots, None);
-            for &id in fresh.iter().chain(changes.written).chain(changes.recheck) {
-                if id == document {
-                    continue;
-                }
-                let Some(slot) = changes.clip_styles.get_mut(id.index()) else {
-                    continue;
-                };
-                let now = styles.get(&id).map(ClipStyle::of);
-                if *slot != now || !old_rects.contains_key(&id) {
-                    *slot = now;
-                    dirty.mark(tree, id, Self::STYLE);
-                }
-            }
-            return dirty;
-        }
-        for &id in fresh {
-            // The document has no box; a retained layout names it fresh
-            // whenever it restyles anything.
-            if id == document {
-                continue;
-            }
-            dirty.mark(tree, id, Self::STYLE);
-            if let Some(parent) = rendered_parent(tree, id) {
-                dirty.mark(tree, parent, Self::STYLE);
-            }
-            for child in rendered_children_ref(tree, id).iter().copied() {
-                dirty.mark(tree, child, Self::STYLE);
             }
         }
         dirty
@@ -7778,13 +7804,26 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
         let active_containers = sheet
             .has_container_queries()
             .then(|| {
-                retained
-                    .styles
-                    .iter()
-                    .filter_map(|(node, style)| {
-                        (style.container_type != crate::ContainerType::Normal).then_some(*node)
-                    })
-                    .collect::<HashSet<_>>()
+                let is_container = |style: &crate::LayoutStyle| {
+                    style.container_type != crate::ContainerType::Normal
+                };
+                // The previous layout's container nodes hold every one.
+                match retained
+                    .geometry
+                    .as_ref()
+                    .and_then(|geometry| geometry.container_nodes.as_ref())
+                {
+                    Some(nodes) => nodes
+                        .iter()
+                        .copied()
+                        .filter(|node| retained.styles.get(node).is_some_and(is_container))
+                        .collect::<HashSet<_>>(),
+                    None => retained
+                        .styles
+                        .iter()
+                        .filter_map(|(node, style)| is_container(style).then_some(*node))
+                        .collect::<HashSet<_>>(),
+                }
             })
             .unwrap_or_default();
         // The rendered tree changed only where the mutations inserted and
@@ -8968,7 +9007,19 @@ fn layout_dom_once(
                         .is_some_and(|ancestors| !ancestors.contains(&id));
                 if !hidden_and_clean {
                     for child in style_children(tree, id).into_iter().rev() {
-                        queue.push((child, inh.clone(), path_fresh));
+                        // A child the loop would skip is not queued (nor its
+                        // context copied).
+                        let skipped = prior_definite_known
+                            && !path_fresh
+                            && fresh_styles
+                                .as_ref()
+                                .is_some_and(|fresh| !fresh.contains(&child))
+                            && fresh_ancestors
+                                .as_ref()
+                                .is_some_and(|ancestors| !ancestors.contains(&child));
+                        if !skipped {
+                            queue.push((child, inh.clone(), path_fresh));
+                        }
                     }
                 }
                 continue;
@@ -12710,7 +12761,15 @@ fn propagate_border_spacing(tree: &DomTree, styles: &mut StyleMap) {
             if is_element(tree, cid, "table") {
                 continue;
             }
-            if is_element(tree, cid, "tr") {
+            // Written only when it changes: a write is a copy for the
+            // retained build and a comparison after it.
+            let changes = |s: &crate::LayoutStyle| {
+                s.column_gap != Some(h)
+                    || s.row_gap != Some(v)
+                    || s.column_gap_expression.is_some()
+                    || s.row_gap_expression.is_some()
+            };
+            if is_element(tree, cid, "tr") && styles.get(&cid).is_some_and(changes) {
                 if let Some(s) = styles.get_mut(&cid) {
                     s.column_gap = Some(h);
                     s.row_gap = Some(v);
@@ -12730,9 +12789,11 @@ fn propagate_border_spacing(tree: &DomTree, styles: &mut StyleMap) {
             continue;
         };
         let (h, v) = table_spacing(table_style);
-        if let Some(s) = styles.get_mut(&id) {
-            s.row_gap = Some(v);
-            s.row_gap_expression = None;
+        if table_style.row_gap != Some(v) || table_style.row_gap_expression.is_some() {
+            if let Some(s) = styles.get_mut(&id) {
+                s.row_gap = Some(v);
+                s.row_gap_expression = None;
+            }
         }
         apply_to_rows(tree, id, h, v, styles);
     }
@@ -15376,6 +15437,9 @@ pub(crate) struct FlatTree {
     kinds: Vec<u8>,
     /// The union of `kinds` over the walk.
     kinds_present: u8,
+    /// How this tree differs from the one of generation `.0` it was spliced
+    /// from (`splice_flat_walk`), for `rendered_tree_changes`.
+    spliced_from: Option<(u64, RenderedTreeChanges)>,
 }
 
 /// Elements a few layout passes look for, as bits (see `FlatTree::kinds`).
@@ -15468,6 +15532,7 @@ impl FlatTree {
 }
 
 /// How one rendered tree differs from an earlier one.
+#[derive(Clone)]
 pub(crate) struct RenderedTreeChanges {
     /// Nodes on both whose rendered children differ.
     pub(crate) children_changed: Vec<NodeId>,
@@ -15488,6 +15553,12 @@ pub(crate) fn rendered_tree_changes(old: &FlatTree, new: &FlatTree) -> RenderedT
     if std::ptr::eq(old, new) || std::rc::Rc::ptr_eq(&old.walk, &new.walk) {
         return changes;
     }
+    // Spliced from `old`: the splice knows what it changed.
+    if let Some((base, spliced)) = &new.spliced_from {
+        if *base == old.generation && !layout_verify_enabled() {
+            return spliced.clone();
+        }
+    }
     for &id in new.walk.iter() {
         if !old.contains(id) {
             changes.added.push(id);
@@ -15498,6 +15569,16 @@ pub(crate) fn rendered_tree_changes(old: &FlatTree, new: &FlatTree) -> RenderedT
     changes
         .removed
         .extend(old.walk.iter().copied().filter(|id| !new.contains(*id)));
+    if let Some((base, spliced)) = &new.spliced_from {
+        if *base == old.generation {
+            assert!(
+                spliced.children_changed == changes.children_changed
+                    && spliced.added == changes.added
+                    && spliced.removed == changes.removed,
+                "OBSCURA_LAYOUT_VERIFY: spliced rendered tree changes differ from a comparison"
+            );
+        }
+    }
     changes
 }
 
@@ -15648,6 +15729,7 @@ pub(crate) fn patch_flat_tree(
             parents,
             kinds,
             kinds_present: previous.kinds_present,
+            spliced_from: None,
         });
         if layout_verify_enabled() {
             verify_flat_tree(tree, &flat);
@@ -15723,7 +15805,7 @@ pub(crate) fn patch_flat_tree(
         let spliced = splice_flat_walk(
             tree, previous, mutation, &mut spans, &kids, &mut kinds, slots,
         );
-        if let Some((walk, parents, kinds_present)) = spliced {
+        if let Some((walk, parents, kinds_present, changes)) = spliced {
             let flat = std::rc::Rc::new(FlatTree {
                 generation,
                 walk: std::rc::Rc::new(walk),
@@ -15732,6 +15814,7 @@ pub(crate) fn patch_flat_tree(
                 parents,
                 kinds,
                 kinds_present,
+                spliced_from: Some((previous.generation, changes)),
             });
             if layout_verify_enabled() {
                 verify_flat_tree(tree, &flat);
@@ -15805,6 +15888,7 @@ pub(crate) fn patch_flat_tree(
         parents,
         kinds,
         kinds_present,
+        spliced_from: None,
     });
     if layout_verify_enabled() {
         verify_flat_tree(tree, &flat);
@@ -15824,8 +15908,13 @@ fn splice_flat_walk(
     kids: &[NodeId],
     kinds: &mut [u8],
     slots: usize,
-) -> Option<(Vec<NodeId>, Vec<Option<NodeId>>, u8)> {
+) -> Option<(Vec<NodeId>, Vec<Option<NodeId>>, u8, RenderedTreeChanges)> {
     let root = tree.document();
+    let mut changes = RenderedTreeChanges {
+        children_changed: Vec::new(),
+        added: Vec::new(),
+        removed: Vec::new(),
+    };
     let children = |id: NodeId, spans: &[(u32, u32)], kids: &'_ [NodeId]| -> Option<Vec<NodeId>> {
         let &(start, len) = spans.get(id.index())?;
         (start != u32::MAX).then(|| kids[start as usize..(start + len) as usize].to_vec())
@@ -15889,6 +15978,11 @@ fn splice_flat_walk(
             walk.extend_from_slice(&previous.walk[..at]);
             walk.extend_from_slice(&inserted);
             walk.extend_from_slice(&previous.walk[at..]);
+            // The document is not on the walk.
+            if new_parent != root {
+                changes.children_changed.push(new_parent);
+            }
+            changes.added = inserted;
         }
         TreeStyleMutation::Remove {
             node, old_parent, ..
@@ -15918,13 +16012,17 @@ fn splice_flat_walk(
             walk = Vec::with_capacity(previous.walk.len() - (end - start));
             walk.extend_from_slice(&previous.walk[..start]);
             walk.extend_from_slice(&previous.walk[end..]);
+            if old_parent != root {
+                changes.children_changed.push(old_parent);
+            }
+            changes.removed = previous.walk[start..end].to_vec();
         }
         _ => return None,
     }
     let kinds_present = walk.iter().fold(0, |present, id| {
         present | kinds.get(id.index()).copied().unwrap_or(0)
     });
-    Some((walk, parents, kinds_present))
+    Some((walk, parents, kinds_present, changes))
 }
 
 /// `OBSCURA_LAYOUT_VERIFY`: a patched flat tree equals one built from scratch.
@@ -16028,6 +16126,7 @@ fn build_flat_tree(tree: &DomTree) -> std::rc::Rc<FlatTree> {
         parents,
         kinds,
         kinds_present,
+        spliced_from: None,
     })
 }
 
