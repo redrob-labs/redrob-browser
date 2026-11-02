@@ -514,23 +514,41 @@ impl<C> SetStyleIfChanged for TaffyTree<C> {
 /// The taffy tree of the most recent layout on this thread, kept so the next
 /// layout can copy the cached layout of every subtree that did not change.
 ///
-/// Reuse never trusts node identity: a subtree is reused only when it is
-/// structurally equal to the old one (same taffy styles, same children, leaves
-/// that measure the same), which makes the copied cache valid by taffy's own
-/// contract. DOM ids only pair candidate nodes up.
+/// Reuse never trusts node identity: a copied cache entry is served only where
+/// the new subtree's key (style, children, what leaves measure from; see
+/// `assign_content_keys`) equals the one it was computed under, which makes it
+/// valid by taffy's own contract. DOM ids only pair candidate nodes up.
 struct RetainedTaffy {
     tree: TaffyTree<usize>,
     root: taffy::NodeId,
     dom_of: HashMap<taffy::NodeId, NodeId>,
     by_dom: HashMap<NodeId, taffy::NodeId>,
-    measures: HashMap<usize, crate::inline::MeasureSignature>,
-    /// Template id of every IFC context (see `ifc::Ifc::template_id`).
-    ifc_templates: HashMap<usize, u64>,
 }
 
 thread_local! {
     static RETAINED_TAFFY: std::cell::RefCell<Option<RetainedTaffy>> =
         const { std::cell::RefCell::new(None) };
+}
+
+thread_local! {
+    /// Set while `OBSCURA_LAYOUT_VERIFY` lays the document out from scratch:
+    /// that layout keys no cache entry by subtree, so it also checks the
+    /// entries a layout serves again after a repair pass restores a style.
+    static WITHOUT_SUBTREE_KEYS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with taffy caches emptied on every change, as upstream taffy does.
+pub(crate) fn without_subtree_keys<R>(f: impl FnOnce() -> R) -> R {
+    let previous = WITHOUT_SUBTREE_KEYS.with(|flag| flag.replace(true));
+    let result = f();
+    WITHOUT_SUBTREE_KEYS.with(|flag| flag.set(previous));
+    result
+}
+
+fn subtree_keys_enabled() -> bool {
+    static DISABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    !*DISABLED.get_or_init(|| std::env::var_os("OBSCURA_LAYOUT_NO_SUBTREE_KEYS").is_some())
+        && !WITHOUT_SUBTREE_KEYS.with(std::cell::Cell::get)
 }
 
 fn taffy_reuse_enabled() -> bool {
@@ -544,25 +562,9 @@ fn retain_taffy_tree(
     tree: TaffyTree<usize>,
     root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    engine: &crate::inline::TextEngine,
-    ifc_store: &crate::ifc::IfcStore,
 ) {
     if !taffy_reuse_enabled() {
         return;
-    }
-    let mut measures = HashMap::default();
-    let mut ifc_templates = HashMap::default();
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if let Some(&ctx) = tree.get_node_context(node) {
-            if let Some(signature) = engine.measure_signature(ctx) {
-                measures.insert(ctx, signature);
-            }
-            if let Some(template) = ifc_context_template(ifc_store, ctx) {
-                ifc_templates.insert(ctx, template);
-            }
-        }
-        stack.extend_from_slice(tree.child_slice(node));
     }
     let by_dom = id_map.iter().map(|(taffy, dom)| (*dom, *taffy)).collect();
     let retained = RetainedTaffy {
@@ -570,8 +572,6 @@ fn retain_taffy_tree(
         root,
         dom_of: id_map.clone(),
         by_dom,
-        measures,
-        ifc_templates,
     };
     let _ = RETAINED_TAFFY.try_with(|slot| *slot.borrow_mut() = Some(retained));
 }
@@ -648,145 +648,141 @@ fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
         .any(|value| value.into_raw().is_calc())
 }
 
-/// Pair `new` with `old` and record, bottom-up, every node whose whole subtree
-/// equals its partner's. Returns whether `new`'s subtree equals `old`'s.
-#[allow(clippy::too_many_arguments)]
-fn match_retained_subtree(
+/// A content key no other node of any layout has (see `assign_content_keys`).
+fn unique_content_key() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
+
+/// Key what every node's layout depends on besides its style and children
+/// (`TaffyTree::set_content_key`), so a cache entry is served again exactly
+/// when the subtree it was computed in comes back, in this tree or, after
+/// `seed_from_retained_taffy` copied it, in the next layout's:
+///
+/// - a replaced leaf by what it measures from;
+/// - an inline formatting context by its template (see `ifc::Ifc::template_id`)
+///   when the previous layout's laid-out copy of it can be adopted, which is
+///   what makes its line layout equal;
+/// - every other measured leaf, and every node whose style holds a `calc()`
+///   handle of a fresh computed style (the address of a new expression can be
+///   a freed old one's), by a key of its own.
+fn assign_content_keys(
+    tree: &mut TaffyTree<usize>,
+    root: taffy::NodeId,
+    id_map: &HashMap<taffy::NodeId, NodeId>,
+    engine: &crate::inline::TextEngine,
+    ifc_store: &crate::ifc::IfcStore,
+    fresh: Option<&HashSet<NodeId>>,
+) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        stack.extend_from_slice(tree.child_slice(node));
+        let mut key = 0;
+        if let Some(&ctx) = tree.get_node_context(node) {
+            key = match engine.measure_key(ctx) {
+                Some(key) => key,
+                None => match ifc_context_template(ifc_store, ctx) {
+                    Some(template) if crate::ifc::build::has_previous_laid(template) => {
+                        template ^ 0x6c62_272e_07bb_0142
+                    }
+                    _ => unique_content_key(),
+                },
+            };
+        }
+        let calc_retained = id_map
+            .get(&node)
+            .is_some_and(|dom| fresh.is_some_and(|fresh| !fresh.contains(dom)));
+        if !calc_retained && tree.style(node).is_ok_and(taffy_style_uses_calc) {
+            key ^= unique_content_key();
+        }
+        tree.set_content_key(node, key);
+    }
+}
+
+/// Pair every node of `new`'s subtree with the node of the retained tree it
+/// was built from: the child with the same DOM node, or for an anonymous box
+/// the anonymous child at the same index. `reordered` collects the parents
+/// whose paired children are not all at their old index.
+fn pair_retained_subtree(
     tree: &TaffyTree<usize>,
     new: taffy::NodeId,
     old: &RetainedTaffy,
     old_node: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    engine: &crate::inline::TextEngine,
-    ifc_store: &crate::ifc::IfcStore,
-    fresh: Option<&HashSet<NodeId>>,
-    equal: &mut Vec<(taffy::NodeId, taffy::NodeId)>,
-) -> bool {
-    // A `calc()` handle is the address of an expression owned by the node's
-    // computed style. Equal handles name the same live expression, with the
-    // same em/rem/viewport context, only when that style was retained by the
-    // cascade; a fresh style may reuse a freed address for another value.
-    let calc_retained = || {
-        fresh.is_some_and(|fresh| {
-            id_map
-                .get(&new)
-                .is_some_and(|dom| old.dom_of.get(&old_node) == Some(dom) && !fresh.contains(dom))
-        })
-    };
-    let mut same = match (tree.style(new), old.tree.style(old_node)) {
-        (Ok(a), Ok(b)) => {
-            if a != b {
-                note_taffy_miss(0);
-                false
-            } else if taffy_style_uses_calc(a) && !calc_retained() {
-                note_taffy_miss(1);
-                false
-            } else {
-                true
+    pairs: &mut Vec<(taffy::NodeId, taffy::NodeId)>,
+    reordered: &mut Vec<taffy::NodeId>,
+) {
+    let mut stack = vec![(new, old_node)];
+    while let Some((new, old_node)) = stack.pop() {
+        pairs.push((new, old_node));
+        let children = tree.child_slice(new);
+        let old_children = old.tree.child_slice(old_node);
+        let mut in_order = children.len() == old_children.len();
+        for (index, &child) in children.iter().enumerate() {
+            let partner = match id_map.get(&child) {
+                Some(dom) => old
+                    .by_dom
+                    .get(dom)
+                    .copied()
+                    .filter(|candidate| old.tree.parent(*candidate) == Some(old_node)),
+                None => old_children
+                    .get(index)
+                    .copied()
+                    .filter(|candidate| !old.dom_of.contains_key(candidate)),
+            };
+            in_order &= partner.is_some() && old_children.get(index).copied() == partner;
+            if let Some(partner) = partner {
+                stack.push((child, partner));
             }
         }
-        _ => false,
-    };
-    if same {
-        same = match (
-            tree.get_node_context(new),
-            old.tree.get_node_context(old_node),
-        ) {
-            (None, None) => true,
-            (Some(&a), Some(&b)) => match (engine.measure_signature(a), old.measures.get(&b)) {
-                (Some(a), Some(b)) => a.same_measure(b),
-                // An IFC shaped from the same template as the old one lays
-                // out alike; its line layout is taken from the old IFC.
-                _ => ifc_context_template(ifc_store, a).is_some_and(|template| {
-                    old.ifc_templates.get(&b) == Some(&template)
-                        && crate::ifc::build::has_previous_laid(template)
-                }),
-            },
-            _ => false,
-        };
-        if !same {
-            note_taffy_miss(2);
+        if !in_order {
+            reordered.push(new);
         }
-    }
-    let children = tree.child_slice(new);
-    let old_children = old.tree.child_slice(old_node);
-    if children.len() != old_children.len() {
-        note_taffy_miss(3);
-        same = false;
-    }
-    for (index, &child) in children.iter().enumerate() {
-        let partner = match id_map.get(&child) {
-            Some(dom) => old
-                .by_dom
-                .get(dom)
-                .copied()
-                .filter(|candidate| old.tree.parent(*candidate) == Some(old_node)),
-            None => old_children
-                .get(index)
-                .copied()
-                .filter(|candidate| !old.dom_of.contains_key(candidate)),
-        };
-        match partner {
-            Some(partner) => {
-                let child_same = match_retained_subtree(
-                    tree, child, old, partner, id_map, engine, ifc_store, fresh, equal,
-                );
-                same &= child_same && old_children.get(index) == Some(&partner);
-            }
-            None => {
-                note_taffy_miss(4);
-                same = false;
-            }
-        }
-    }
-    if same {
-        equal.push((new, old_node));
-    }
-    same
-}
-
-thread_local! {
-    /// Self-caused taffy reuse misses by reason, for `OBSCURA_RENDER_TIMING`:
-    /// style, calc, measure, child count, missing partner.
-    static TAFFY_MISSES: std::cell::Cell<[usize; 5]> = const { std::cell::Cell::new([0; 5]) };
-}
-
-fn note_taffy_miss(reason: usize) {
-    if crate::prof::enabled() {
-        TAFFY_MISSES.with(|misses| {
-            let mut value = misses.get();
-            value[reason] += 1;
-            misses.set(value);
-        });
     }
 }
 
-/// Copy the previous layout's cache into every unchanged subtree of the new
-/// taffy tree. Returns (nodes reused, nodes in the tree).
+/// Copy the previous layout's cache and layouts into every node of the new
+/// taffy tree paired with a node of it. Cache entries carry the subtree key
+/// they were computed under, so each serves only where the new subtree equals
+/// the old one, possibly under a style a repair pass sets again later; an
+/// equal inline formatting context also takes the old one's line layout.
+/// Returns (nodes whose subtree equals their partner's, nodes in the old tree).
 fn seed_from_retained_taffy(
     tree: &mut TaffyTree<usize>,
     root: taffy::NodeId,
     id_map: &HashMap<taffy::NodeId, NodeId>,
-    engine: &crate::inline::TextEngine,
     ifc_store: &mut crate::ifc::IfcStore,
-    fresh: Option<&HashSet<NodeId>>,
 ) -> (usize, usize) {
     if !taffy_reuse_enabled() {
         return (0, 0);
     }
-    let Some(old) = RETAINED_TAFFY
+    let Some(mut old) = RETAINED_TAFFY
         .try_with(|slot| slot.borrow_mut().take())
         .ok()
         .flatten()
     else {
         return (0, 0);
     };
-    let mut equal = Vec::new();
-    match_retained_subtree(
-        tree, root, &old, old.root, id_map, engine, ifc_store, fresh, &mut equal,
+    let mut pairs = Vec::new();
+    let mut reordered = Vec::new();
+    pair_retained_subtree(
+        tree,
+        root,
+        &old,
+        old.root,
+        id_map,
+        &mut pairs,
+        &mut reordered,
     );
-    for &(new, old_node) in &equal {
-        let _ = tree.copy_layout_state(new, &old.tree, old_node);
+    let mut equal = 0;
+    for &(new, old_node) in &pairs {
+        let same = tree.subtree_key(new) == old.tree.subtree_key(old_node);
+        let _ = tree.take_layout_state(new, &mut old.tree, old_node);
+        if !same {
+            continue;
+        }
+        equal += 1;
         let Some(&ctx) = tree.get_node_context(new) else {
             continue;
         };
@@ -799,7 +795,12 @@ fn seed_from_retained_taffy(
             }
         }
     }
-    (equal.len(), old.tree.total_node_count())
+    // The copied positions of a reordered parent's children are not the
+    // ones its (and its ancestors') copied final layouts placed them at.
+    for node in reordered {
+        tree.forget_final_layouts_to_root(node);
+    }
+    (equal, old.tree.total_node_count())
 }
 
 fn sorted_debug<T: std::fmt::Debug>(items: impl IntoIterator<Item = T>) -> Vec<String> {
@@ -1765,26 +1766,36 @@ impl DomLayout {
     /// transformed/filter/contain ancestor remains in the document scrolling
     /// coordinate space instead.
     pub fn viewport_fixed_nodes(&self, tree: &DomTree) -> HashSet<NodeId> {
+        const FIXED: u8 = 1;
+        const HAS_FIXED_CB: u8 = 2;
         let mut fixed = HashSet::default();
-        let mut has_fixed_cb: HashMap<NodeId, bool> = HashMap::default();
+        // Per node index: FIXED and HAS_FIXED_CB.
+        let mut state = vec![0u8; tree.node_slot_count()];
 
         for id in rendered_descendants(tree, tree.document()) {
-            let parent = rendered_parent(tree, id);
-            let parent_is_fixed = parent.is_some_and(|parent| fixed.contains(&parent));
-            let ancestor_has_fixed_cb = parent
-                .and_then(|parent| has_fixed_cb.get(&parent).copied())
-                .unwrap_or(false);
+            let parent_state = rendered_parent(tree, id)
+                .and_then(|parent| state.get(parent.index()).copied())
+                .unwrap_or(0);
+            let parent_is_fixed = parent_state & FIXED != 0;
+            let ancestor_has_fixed_cb = parent_state & HAS_FIXED_CB != 0;
             let style = self.styles.get(&id);
             let starts_viewport_fixed =
                 style.is_some_and(|style| style.position_fixed && !ancestor_has_fixed_cb);
 
+            let mut own = 0;
             if parent_is_fixed || starts_viewport_fixed {
                 fixed.insert(id);
+                own |= FIXED;
             }
 
             let establishes_fixed_cb =
                 style.is_some_and(|style| style.containing_block_triggers != 0);
-            has_fixed_cb.insert(id, ancestor_has_fixed_cb || establishes_fixed_cb);
+            if ancestor_has_fixed_cb || establishes_fixed_cb {
+                own |= HAS_FIXED_CB;
+            }
+            if let Some(slot) = state.get_mut(id.index()) {
+                *slot = own;
+            }
         }
 
         fixed
@@ -2147,8 +2158,15 @@ impl DomLayout {
             height: content.1,
         };
         let mut layout = StickyLayout::default();
-        let mut nearest_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::default();
-        let mut inherited_clip_sticky: HashMap<NodeId, Option<NodeId>> = HashMap::default();
+        // Per node index: the nearest sticky box at or above it, and the
+        // sticky box whose clip it inherits.
+        let mut nearest_sticky: Vec<Option<NodeId>> = vec![None; tree.node_slot_count()];
+        let mut inherited_clip_sticky: Vec<Option<NodeId>> = vec![None; tree.node_slot_count()];
+        fn set(slots: &mut [Option<NodeId>], id: NodeId, value: Option<NodeId>) {
+            if let Some(slot) = slots.get_mut(id.index()) {
+                *slot = value;
+            }
+        }
         // Propagate the nearest authored scroll container once in rendered
         // preorder. The boolean distinguishes a supported ScrollTree owner
         // from a real but affine/otherwise unsupported scrolling coordinate
@@ -2189,20 +2207,20 @@ impl DomLayout {
                 *slot = descendants_scrollport;
             }
             let parent_sticky = parent
-                .and_then(|parent| nearest_sticky.get(&parent).copied())
+                .and_then(|parent| nearest_sticky.get(parent.index()).copied())
                 .flatten();
             let inherited_clip = parent.and_then(|parent| {
                 let parent_style = self.styles.get(&parent);
                 if parent_style.is_some_and(|style| style.overflow_hidden) {
-                    nearest_sticky.get(&parent).copied().flatten()
+                    nearest_sticky.get(parent.index()).copied().flatten()
                 } else {
-                    inherited_clip_sticky.get(&parent).copied().flatten()
+                    inherited_clip_sticky.get(parent.index()).copied().flatten()
                 }
             });
             if let Some(owner) = inherited_clip {
                 layout.clip_owners.insert(id, owner);
             }
-            inherited_clip_sticky.insert(id, inherited_clip);
+            set(&mut inherited_clip_sticky, id, inherited_clip);
 
             let scroll_owner = scroll_tree
                 .movement_owner
@@ -2210,7 +2228,7 @@ impl DomLayout {
                 .copied()
                 .flatten();
             let Some(scroll_owner) = scroll_owner else {
-                nearest_sticky.insert(id, None);
+                set(&mut nearest_sticky, id, None);
                 continue;
             };
             let container = scroll_tree.containers[scroll_owner.index()];
@@ -2238,14 +2256,14 @@ impl DomLayout {
                     && supported_coordinate_space
             });
             if !is_sticky {
-                nearest_sticky.insert(id, parent_sticky);
+                set(&mut nearest_sticky, id, parent_sticky);
                 if let Some(owner) = parent_sticky {
                     layout.owners.insert(id, owner);
                 }
                 continue;
             }
             let (Some(style), Some(rect)) = (style, self.rects.get(&id).copied()) else {
-                nearest_sticky.insert(id, parent_sticky);
+                set(&mut nearest_sticky, id, parent_sticky);
                 continue;
             };
             let (tx, ty) = self.translates.get(&id).copied().unwrap_or((0.0, 0.0));
@@ -2350,7 +2368,7 @@ impl DomLayout {
                 rtl_inline: style.direction == Some(taffy::Direction::Rtl),
             });
             layout.owners.insert(id, id);
-            nearest_sticky.insert(id, Some(id));
+            set(&mut nearest_sticky, id, Some(id));
         }
 
         layout
@@ -5026,6 +5044,14 @@ fn element_children(tree: &DomTree, parent: NodeId) -> Vec<NodeId> {
         .collect()
 }
 
+/// Run `f` on the local name of element `node`, without copying it.
+fn with_local_name<R>(tree: &DomTree, node: NodeId, f: impl FnOnce(&str) -> R) -> Option<R> {
+    tree.with_node(node, |node| {
+        node.as_element().map(|element| f(element.local.as_ref()))
+    })
+    .flatten()
+}
+
 fn element_local_name(tree: &DomTree, node: NodeId) -> Option<String> {
     tree.borrow_node(node)
         .and_then(|node| node.as_element().map(|element| element.local.to_string()))
@@ -7236,6 +7262,9 @@ fn layout_dom_once(
     // The leaf context is the index of a cosmic-text inline formatting
     // context in `engine`; leaves without text carry no context.
     let mut taffy_tree: TaffyTree<usize> = crate::new_taffy_tree();
+    if subtree_keys_enabled() {
+        taffy_tree.enable_subtree_keys();
+    }
     let mut id_map: HashMap<taffy::NodeId, NodeId> = HashMap::default();
     let mut engine = crate::inline::TextEngine::for_document_layout(fonts, needs_emoji_font);
     let mut ifc_items = IfcRegistry {
@@ -9242,19 +9271,20 @@ fn layout_dom_once(
                 &styles,
                 &ifc_items.static_positions,
             );
-            let (seeded, previous_nodes) = seed_from_retained_taffy(
+            assign_content_keys(
                 &mut taffy_tree,
                 taffy_root,
                 &id_map,
                 &engine,
-                &mut ifc_items.ifc,
+                &ifc_items.ifc,
                 fresh_styles.as_ref(),
             );
+            let (seeded, previous_nodes) =
+                seed_from_retained_taffy(&mut taffy_tree, taffy_root, &id_map, &mut ifc_items.ifc);
             if crate::prof::enabled() {
                 eprintln!(
-                    "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={} misses(style,calc,measure,children,partner)={:?}",
+                    "[timing] taffy-reuse seeded={seeded} previous={previous_nodes} now={}",
                     taffy_tree.total_node_count(),
-                    TAFFY_MISSES.with(|misses| misses.replace([0; 5]))
                 );
             }
             phase_marks.push(("seed", std::time::Instant::now()));
@@ -10240,7 +10270,8 @@ fn layout_dom_once(
                         .keys()
                         .copied()
                         .filter(|&id| {
-                            matches!(flow::local_name(tree, id).as_deref(), Some("td" | "th"))
+                            with_local_name(tree, id, |local| matches!(local, "td" | "th"))
+                                .unwrap_or(false)
                         })
                         .collect::<HashSet<_>>()
                 },
@@ -10446,8 +10477,6 @@ fn layout_dom_once(
                 std::mem::replace(&mut taffy_tree, crate::new_taffy_tree()),
                 taffy_root,
                 &id_map,
-                &engine,
-                &ifc_items.ifc,
             );
         }
     }
@@ -10824,13 +10853,7 @@ fn shrink_block_level_buttons(
 
 fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
     let is_tag = |id: NodeId, tags: &[&str]| -> bool {
-        match tree
-            .borrow_node(id)
-            .and_then(|n| n.as_element().map(|e| e.local.to_string()))
-        {
-            Some(local) => tags.contains(&local.as_str()),
-            None => false,
-        }
+        with_local_name(tree, id, |local| tags.contains(&local)).unwrap_or(false)
     };
     for tr in rendered_descendants(tree, tree.document()) {
         if !is_tag(tr, &["tr"]) {
@@ -10870,9 +10893,8 @@ fn grow_trailing_auto_cells(tree: &DomTree, styles: &mut HashMap<NodeId, crate::
 /// descendant `<tr>`'s column gap (space between cells within a row), without
 /// crossing into a nested `<table>`'s own scope.
 fn propagate_border_spacing(tree: &DomTree, styles: &mut HashMap<NodeId, crate::LayoutStyle>) {
-    fn local_name(tree: &DomTree, id: NodeId) -> Option<String> {
-        tree.borrow_node(id)
-            .and_then(|n| n.as_element().map(|e| e.local.to_string()))
+    fn is_element(tree: &DomTree, id: NodeId, name: &str) -> bool {
+        with_local_name(tree, id, |local| local == name).unwrap_or(false)
     }
 
     fn apply_to_rows(
@@ -10883,10 +10905,10 @@ fn propagate_border_spacing(tree: &DomTree, styles: &mut HashMap<NodeId, crate::
         styles: &mut HashMap<NodeId, crate::LayoutStyle>,
     ) {
         for cid in tree.children(id) {
-            if local_name(tree, cid).as_deref() == Some("table") {
+            if is_element(tree, cid, "table") {
                 continue;
             }
-            if local_name(tree, cid).as_deref() == Some("tr") {
+            if is_element(tree, cid, "tr") {
                 if let Some(s) = styles.get_mut(&cid) {
                     s.column_gap = Some(h);
                     s.row_gap = Some(v);
@@ -10899,7 +10921,7 @@ fn propagate_border_spacing(tree: &DomTree, styles: &mut HashMap<NodeId, crate::
     }
 
     for id in rendered_descendants(tree, tree.document()) {
-        if local_name(tree, id).as_deref() != Some("table") {
+        if !is_element(tree, id, "table") {
             continue;
         }
         let Some(table_style) = styles.get(&id) else {
@@ -13605,8 +13627,8 @@ fn text_may_need_emoji_font(tree: &DomTree) -> bool {
             obscura_dom::tree::NodeData::Text { contents } => {
                 // Parent first: style and script text is often megabytes.
                 !node.parent.is_some_and(|parent| {
-                    element_local_name(tree, parent)
-                        .is_some_and(|name| name == "style" || name == "script")
+                    with_local_name(tree, parent, |name| name == "style" || name == "script")
+                        .unwrap_or(false)
                 }) && crate::inline::text_may_need_emoji_font(contents)
             }
             _ => false,
@@ -14085,18 +14107,26 @@ fn synthesize_row_rects(
     let mut rows = Vec::new();
     let mut sections = Vec::new();
     let mut table_inline: HashMap<NodeId, Rect> = HashMap::default();
+    #[derive(Clone, Copy)]
+    enum Part {
+        Row,
+        Section,
+        Cell,
+        Other,
+    }
     for id in rendered_descendants(tree, tree.document()) {
-        let local = match tree
-            .borrow_node(id)
-            .and_then(|n| n.as_element().map(|e| e.local.to_string()))
-        {
-            Some(l) => l,
-            None => continue,
+        let Some(part) = with_local_name(tree, id, |local| match local {
+            "tr" => Part::Row,
+            "tbody" | "thead" | "tfoot" => Part::Section,
+            "td" | "th" => Part::Cell,
+            _ => Part::Other,
+        }) else {
+            continue;
         };
-        match local.as_str() {
-            "tr" => rows.push(id),
-            "tbody" | "thead" | "tfoot" => sections.push(id),
-            "td" | "th" => {
+        match part {
+            Part::Row => rows.push(id),
+            Part::Section => sections.push(id),
+            Part::Cell => {
                 let mut ancestor = rendered_parent(tree, id);
                 while let Some(parent) = ancestor {
                     let is_table = tree.borrow_node(parent).is_some_and(|node| {

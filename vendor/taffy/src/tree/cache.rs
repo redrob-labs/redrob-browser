@@ -344,6 +344,11 @@ impl Cache {
         }
     }
 
+    /// Drop the final layout entry, keeping the size results
+    pub(crate) fn forget_final_layout(&mut self) {
+        self.final_layout_entry = None;
+    }
+
     /// Clear all cache entries and reports clear operation outcome ([`ClearState`])
     pub fn clear(&mut self) -> ClearState {
         if self.is_empty {

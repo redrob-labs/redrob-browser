@@ -3915,19 +3915,21 @@ fn verify_against_scratch(
     VERIFYING.with(|flag| flag.set(true));
     let mut fresh_sheets = crate::css::StylesheetCache::default();
     let scratch = crate::inline::without_shaped_item_reuse(|| {
-        prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
-            tree,
-            viewport,
-            base_url,
-            resources,
-            dynamic_fonts,
-            &mut fresh_sheets,
-            None,
-            None,
-            crate::CssMediaType::Screen,
-            animation_sample,
-            &mut timeline,
-        )
+        crate::dom::without_subtree_keys(|| {
+            prepare_dom_with_dynamic_fonts_and_stylesheet_cache_internal(
+                tree,
+                viewport,
+                base_url,
+                resources,
+                dynamic_fonts,
+                &mut fresh_sheets,
+                None,
+                None,
+                crate::CssMediaType::Screen,
+                animation_sample,
+                &mut timeline,
+            )
+        })
     });
     VERIFYING.with(|flag| flag.set(false));
     let Some(mut scratch) = scratch else {
