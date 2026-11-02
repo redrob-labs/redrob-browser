@@ -335,6 +335,11 @@ pub(super) struct BuildReuse {
     pub(super) deferral_memo: super::DeferralMemo,
     /// The elements with properties some passes look for.
     pub(super) index: StyleIndex,
+    /// The box geometry the previous layout read (see `super::collect`).
+    pub(super) collected: Option<super::collect::Collected>,
+    /// The static-position probes, by element (see
+    /// `super::ensure_static_probes`).
+    pub(super) static_probes: HashMap<NodeId, taffy::NodeId>,
     pub(super) kept: usize,
     pub(super) built: usize,
     /// Why boxes were not kept (debug counts).
@@ -367,6 +372,8 @@ impl BuildReuse {
             damage_nodes: Vec::new(),
             deferral_memo: super::DeferralMemo::default(),
             index: StyleIndex::default(),
+            collected: None,
+            static_probes: HashMap::default(),
             kept: 0,
             built: 0,
             misses: [0; 8],
@@ -866,6 +873,8 @@ pub(crate) struct RetainedLayoutTree {
     pending_before: Option<super::stylemap::BeforeWrites>,
     deferral_memo: super::DeferralMemo,
     index: StyleIndex,
+    collected: Option<super::collect::Collected>,
+    static_probes: HashMap<NodeId, taffy::NodeId>,
     /// What the tree was built for.
     pub(super) viewport: (f32, f32),
     pub(super) needs_emoji_font: bool,
@@ -947,6 +956,8 @@ impl RetainedLayoutTree {
         reuse.deferral_memo = std::mem::take(&mut self.deferral_memo);
         reuse.index = std::mem::take(&mut self.index);
         reuse.boxes = std::mem::take(&mut self.boxes);
+        reuse.collected = self.collected.take();
+        reuse.static_probes = std::mem::take(&mut self.static_probes);
         if crate::prof::enabled() {
             eprintln!(
                 "[timing] retained-tree damage nodes={} context={} subtrees={} pending={}",
@@ -1159,6 +1170,8 @@ pub(super) fn retain(
         deferrals: reuse.deferrals,
         deferral_memo: reuse.deferral_memo,
         index: reuse.index,
+        collected: reuse.collected,
+        static_probes: reuse.static_probes,
         pending,
         pending_before,
         viewport,

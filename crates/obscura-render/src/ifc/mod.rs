@@ -245,6 +245,8 @@ pub(crate) struct Ifc {
     pub(crate) epoch: u64,
     /// `fragments` at an origin, under the epoch it was made in.
     pub(crate) fragments_cache: Option<((u64, u32, u32), std::sync::Arc<geom::Fragments>)>,
+    /// `fragments` at the zero origin, under the epoch it was made in.
+    pub(crate) relative_fragments: Option<(u64, std::sync::Arc<geom::Fragments>)>,
 }
 
 /// The next `Ifc::epoch`.

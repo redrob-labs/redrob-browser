@@ -198,6 +198,15 @@ pub trait LayoutPartialTree: TraversePartialTree {
 
     /// Compute the specified node's size or full layout given the specified constraints
     fn compute_child_layout(&mut self, node_id: NodeId, inputs: LayoutInput) -> LayoutOutput;
+
+    /// Where the static position of the absolutely positioned `child` of `container` is, in the
+    /// container's border box, when it is taken from a probe in another part of the tree (see
+    /// `TaffyTree::set_static_probe`): the probe's position, read as the layout that is being
+    /// made placed it
+    fn static_probe_offset(&mut self, child: NodeId, container: NodeId) -> Option<crate::geometry::Point<f32>> {
+        let _ = (child, container);
+        None
+    }
 }
 
 /// Trait used by the `compute_cached_layout` method which allows cached layout results to be stored and retrieved.

@@ -222,6 +222,38 @@ fn page_bench(ctx: &mut Ctx, html: &str) {
     let start = Instant::now();
     let mut prepared = ctx.full(&tree);
     let first = ms(start);
+    // BENCH_DUMP_RECTS=<file>: every element's border box of the first
+    // layout, one `node x y width height` line each, for comparing builds.
+    if let Ok(path) = std::env::var("BENCH_DUMP_RECTS") {
+        // Keyed by element path (`/tag:index` per level, elements only),
+        // the key `GEOM`-style scripts compute in a browser.
+        let rects = &prepared.layout().rects;
+        let mut out = String::new();
+        let mut stack = vec![(tree.document(), String::new())];
+        while let Some((id, key)) = stack.pop() {
+            if let Some(r) = rects.get(&id) {
+                out.push_str(&format!("{key} {} {} {} {}\n", r.x, r.y, r.width, r.height));
+            }
+            let children: Vec<NodeId> = tree
+                .children(id)
+                .into_iter()
+                .filter(|child| {
+                    tree.with_node(*child, |node| node.is_element())
+                        .unwrap_or(false)
+                })
+                .collect();
+            for (index, child) in children.iter().enumerate().rev() {
+                let name = tree
+                    .with_node(*child, |node| match &node.data {
+                        NodeData::Element { name, .. } => name.local.to_string(),
+                        _ => String::new(),
+                    })
+                    .unwrap_or_default();
+                stack.push((*child, format!("{key}/{name}:{index}")));
+            }
+        }
+        std::fs::write(path, out).expect("write rects");
+    }
     let mut warm = Vec::new();
     for _ in 0..2 {
         let start = Instant::now();
