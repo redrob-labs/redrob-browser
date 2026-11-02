@@ -368,6 +368,7 @@ pub fn start(config: Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 static TERMINATE: AtomicBool = AtomicBool::new(false);
 
 /// Run `quit` (on a thread of its own) when the process gets SIGTERM or
@@ -561,4 +562,43 @@ fn userns_allowed() -> bool {
         return false;
     }
     true
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::io::{Read, Write};
+    use std::os::windows::io::FromRawHandle;
+
+    use super::*;
+
+    #[test]
+    fn chromium_gets_its_pipe_ends_as_handle_values() {
+        let Some((
+            DevTools::Pipe {
+                mut commands,
+                mut replies,
+            },
+            handles,
+        )) = windows_pipe()
+        else {
+            panic!("no pipe");
+        };
+        let (r, w) = handles.split_once(',').expect("<read>,<write>");
+        let (r, w): (u32, u32) = (r.parse().unwrap(), w.parse().unwrap());
+        // SAFETY: the handles windows_pipe left for Chromium; the test owns them.
+        let (mut chromium_reads, mut chromium_writes) = unsafe {
+            (
+                std::fs::File::from_raw_handle(r as usize as _),
+                std::fs::File::from_raw_handle(w as usize as _),
+            )
+        };
+        commands.write_all(b"{\"id\":1}\0").unwrap();
+        let mut got = [0u8; 9];
+        chromium_reads.read_exact(&mut got).unwrap();
+        assert_eq!(&got, b"{\"id\":1}\0");
+        chromium_writes.write_all(b"{}\0").unwrap();
+        let mut back = [0u8; 3];
+        replies.read_exact(&mut back).unwrap();
+        assert_eq!(&back, b"{}\0");
+    }
 }

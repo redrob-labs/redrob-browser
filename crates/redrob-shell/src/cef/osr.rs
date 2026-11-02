@@ -620,14 +620,14 @@ mod tests {
     #[test]
     fn pixels_repaint_the_rows_that_changed() {
         let mut layer = Layer::default();
-        let frame = vec![7u8; 4 * 4 * 4];
+        let frame = [7u8; 4 * 4 * 4];
         layer.paint(&[], frame.as_ptr(), 4, 4);
         assert_eq!(
             (layer.width, layer.height, layer.dirty),
             (4, 4, Some((0, 4)))
         );
         layer.dirty = None;
-        let next = vec![9u8; 4 * 4 * 4];
+        let next = [9u8; 4 * 4 * 4];
         let rect = Rect {
             x: 1,
             y: 2,

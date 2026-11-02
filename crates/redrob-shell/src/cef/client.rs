@@ -154,6 +154,12 @@ wrap_client! {
     impl Client {}
 }
 
+/// The platform's cursor handle as CEF's display handler takes it.
+#[cfg(target_os = "macos")]
+type CursorHandle = *mut u8;
+#[cfg(not(target_os = "macos"))]
+type CursorHandle = sys::cef_cursor_handle_t;
+
 fn text(s: Option<&CefString>) -> String {
     s.map(|s| s.to_string()).unwrap_or_default()
 }
@@ -184,7 +190,7 @@ wrap_display_handler! {
         fn on_cursor_change(
             &self,
             _browser: Option<&mut Browser>,
-            _cursor: ::std::os::raw::c_ulong,
+            _cursor: CursorHandle,
             type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
