@@ -70,8 +70,10 @@ fn automatic(server: &str) -> bool {
 
 fn target(server: &str) -> anyhow::Result<Target> {
     if automatic(server) {
-        let record = redrob_engine_client::require_as(APP, IDLE_EXIT_MINUTES)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let record = match redrob_engine_client::current() {
+            Some(r) => r,
+            None => start()?,
+        };
         eprintln!("agent: using the shared Redrob Code server {record}");
         let (host, port) = loopback(&record.url)?;
         stay_attached(&record);
@@ -109,6 +111,40 @@ fn target(server: &str) -> anyhow::Result<Target> {
         }
     );
     Ok(Target { host, port, auth })
+}
+
+/// Start the shared server: `redrob service start --json`, as
+/// `redrob_engine_client::connect_or_start_as` does, but without a console
+/// window on Windows.
+fn start() -> anyhow::Result<redrob_engine_client::Record> {
+    if !redrob_engine_client::installed() {
+        anyhow::bail!("{}", redrob_engine_client::Unavailable::NotInstalled);
+    }
+    let bin = redrob_engine_client::redrob_bin();
+    eprintln!("agent: starting Redrob Code with {}", bin.display());
+    let mut cmd = std::process::Command::new(&bin);
+    cmd.args([
+        "service",
+        "start",
+        "--json",
+        "--idle-exit",
+        &IDLE_EXIT_MINUTES.to_string(),
+    ])
+    .env("REDROB_APP", APP)
+    .stdin(std::process::Stdio::null());
+    let out = crate::startup::no_console(&mut cmd)
+        .output()
+        .map_err(|e| anyhow::anyhow!("could not run {}: {e}", bin.display()))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        anyhow::bail!(
+            "`redrob service start` failed ({}): {}",
+            out.status,
+            err.trim()
+        );
+    }
+    redrob_engine_client::parse_record_output(&String::from_utf8_lossy(&out.stdout))
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// Keep the window attached to the shared server (`POST /api/clients` and a
