@@ -397,8 +397,8 @@ impl Engine {
                 t.at = Some((p, !shown));
             }
         }
-        self.sync(tab);
         let window = self.tab_window.get(&tab).copied().unwrap_or(0);
+        self.sync_window(window);
         for op in ops {
             self.handle(window, tab, op);
         }
@@ -483,8 +483,20 @@ impl Engine {
             .collect();
         // Hide first, then show: two pages never cover each other.
         let (on, off): (Vec<TabId>, Vec<TabId>) = tabs.into_iter().partition(|t| self.shown(*t));
+        #[cfg(target_os = "linux")]
+        let first = on.first().copied();
         for t in off.into_iter().chain(on) {
             self.sync(t);
+        }
+        #[cfg(target_os = "linux")]
+        let page = first
+            .and_then(|t| self.tabs.get(&t))
+            .and_then(|t| Some((t.native?, t.at?.0.rect)));
+        // Drops over the page go to the page on screen, the rest to the
+        // window's chrome (cef/xdnd.rs).
+        #[cfg(target_os = "linux")]
+        if let Some((p, _)) = self.places.get(&window) {
+            crate::cef::xdnd::set_target(p.parent, page);
         }
     }
 
@@ -573,6 +585,10 @@ impl Engine {
                 }
                 t.at = None;
             }
+        }
+        #[cfg(target_os = "linux")]
+        if let Some((p, _)) = self.places.get(&window) {
+            crate::cef::xdnd::forget(p.parent);
         }
         self.places.remove(&window);
         self.active.remove(&window);
@@ -710,6 +726,11 @@ impl Engine {
                 h.set_focus(0);
             }
             self.sync(p);
+        }
+        self.sync_window(window);
+        // The window it left loses its page on screen.
+        if let Some(old) = before.filter(|w| *w != window) {
+            self.sync_window(old);
         }
         self.sync(tab);
     }

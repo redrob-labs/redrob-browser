@@ -233,6 +233,12 @@ impl Browser {
                 repaint_ctx.request_repaint_of(viewport);
             }),
         );
+        // A link or text dropped on a window's chrome (cef/xdnd.rs).
+        #[cfg(target_os = "linux")]
+        {
+            let drop_ctx = ctx.clone();
+            crate::cef::xdnd::set_waker(move || drop_ctx.request_repaint_of(ViewportId::ROOT));
+        }
         // Chromium's work runs in window passes (cef::pump).
         let pump_ctx = ctx.clone();
         crate::cef::set_waker(move |delay| {
@@ -543,6 +549,13 @@ impl Browser {
         }
         while let Ok(req) = self.tab_rx.try_recv() {
             self.tab_request(ctx, req);
+        }
+        #[cfg(target_os = "linux")]
+        for d in crate::cef::xdnd::take_drops() {
+            if let Some(w) = self.windows.iter_mut().find(|w| w.native == Some(d.window)) {
+                w.dropped(d.at, &d.text);
+                ctx.request_repaint_of(w.viewport);
+            }
         }
         while let Ok(url) = self.open_rx.try_recv() {
             let i = self.new_window(None, None);

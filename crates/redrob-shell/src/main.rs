@@ -1315,6 +1315,20 @@ impl Window {
         self.save_session();
     }
 
+    /// A link or text dropped on the window's chrome at `at` (physical
+    /// pixels): on the tab strip it opens in a new tab, elsewhere in the
+    /// tab on screen, as Chrome does.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    fn dropped(&mut self, at: (i32, i32), text: &str) {
+        let scale = self.last_place.map_or(1.0, |(p, _)| p.scale);
+        let url = model::to_url(text);
+        if (at.1 as f32) / scale < 40.0 {
+            self.open_tab(&url, true);
+        } else {
+            self.navigate(url);
+        }
+    }
+
     fn toggle_bookmark(&mut self) {
         if let Some((url, title)) = self
             .model

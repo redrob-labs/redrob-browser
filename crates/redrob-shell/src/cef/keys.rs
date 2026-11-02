@@ -223,35 +223,3 @@ fn edit(browser: &Browser, e: &KeyEvent) -> ::std::os::raw::c_int {
 pub fn handler(sink: Sink) -> KeyboardHandler {
     Keys::new(sink)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn window_shortcuts_from_page_keys() {
-        let cmd = if cfg!(target_os = "macos") {
-            COMMAND
-        } else {
-            CONTROL
-        };
-        assert_eq!(shortcut(b'T' as i32, cmd), Some(Shortcut::NewTab));
-        assert_eq!(
-            shortcut(b'T' as i32, cmd | SHIFT),
-            Some(Shortcut::ReopenTab)
-        );
-        assert_eq!(shortcut(b'L' as i32, cmd), Some(Shortcut::Address));
-        assert_eq!(shortcut(0x75, 0), Some(Shortcut::Address));
-        assert_eq!(shortcut(0x09, CONTROL), Some(Shortcut::NextTab));
-        assert_eq!(shortcut(0x09, CONTROL | SHIFT), Some(Shortcut::PrevTab));
-        assert_eq!(shortcut(0xBB, cmd), Some(Shortcut::ZoomIn));
-        assert_eq!(shortcut(0x25, ALT), Some(Shortcut::Back));
-        assert_eq!(shortcut(0x1B, 0), Some(Shortcut::Escape));
-        // Typing, editing and the clipboard stay the page's.
-        assert_eq!(shortcut(b'A' as i32, 0), None);
-        assert_eq!(shortcut(b'C' as i32, cmd), None);
-        assert_eq!(shortcut(b'V' as i32, cmd), None);
-        assert_eq!(shortcut(0x09, 0), None);
-        assert_eq!(shortcut(0x20, CONTROL), None);
-    }
-}

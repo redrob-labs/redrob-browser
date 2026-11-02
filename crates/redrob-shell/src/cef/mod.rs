@@ -21,6 +21,8 @@ pub mod keys;
 pub mod native;
 #[cfg(target_os = "linux")]
 mod wake;
+#[cfg(target_os = "linux")]
+pub mod xdnd;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
