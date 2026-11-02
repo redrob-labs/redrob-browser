@@ -3443,6 +3443,23 @@ pub(crate) struct ClipDirty {
     own: Vec<u8>,
     /// By node index: the node or a descendant changed.
     subtree: Vec<bool>,
+    /// Nodes whose rect changed but whose clip, translate and transform do
+    /// not depend on it (no overflow clip, transform or perspective of their
+    /// own): the walk keeps their entries, which only their ancestors
+    /// decide; what reads their rects (`derived`) is told of them.
+    pub(crate) moved: Vec<NodeId>,
+}
+
+/// Whether what `resolve_clip_rects` gives a node and its children depends
+/// on the node's own rect.
+fn clip_reads_rect(style: &crate::LayoutStyle) -> bool {
+    style.overflow_hidden
+        || style.perspective.is_some()
+        || (!style.ignores_used_box_sizes()
+            && (style.individual_translate.is_some()
+                || style.individual_rotate.is_some()
+                || style.individual_scale.is_some()
+                || !style.transform_ops.is_empty()))
 }
 
 /// The fields of a style `resolve_clip_rects` reads (for a node and what it
@@ -3529,11 +3546,19 @@ impl ClipDirty {
         let mut dirty = Self {
             own: vec![0; slots],
             subtree: vec![false; slots],
+            moved: Vec::new(),
         };
         for (id, rect) in rects {
-            if old_rects.get(id) != Some(rect) {
-                crate::prof::count(crate::prof::RECT_MOVED);
-                dirty.mark(tree, *id, Self::RECT);
+            match old_rects.get(id) {
+                Some(old) if old == rect => {}
+                Some(_) if !styles.get(id).is_some_and(clip_reads_rect) => {
+                    crate::prof::count(crate::prof::RECT_MOVED);
+                    dirty.moved.push(*id);
+                }
+                _ => {
+                    crate::prof::count(crate::prof::RECT_MOVED);
+                    dirty.mark(tree, *id, Self::RECT);
+                }
             }
         }
         for id in old_rects.keys() {
@@ -8086,6 +8111,7 @@ fn layout_dom_with_web_fonts_pass_limit_and_query_seed(
     )
 }
 
+mod collect;
 pub(crate) mod derived;
 mod flow;
 pub(crate) mod retain;
@@ -11572,26 +11598,49 @@ fn layout_dom_once(
                     .filter(|reuse| reuse.index_valid())
                     .map(|reuse| (&reuse.index.percent_padding, &taffy_by_dom)),
             );
-            let generated_nodes: HashMap<taffy::NodeId, usize> = ifc_items
-                .generated
-                .iter()
-                .enumerate()
-                .map(|(index, generated)| (generated.node, index))
-                .collect();
             generated_rects.resize(ifc_items.generated.len(), None);
-            compute_absolute_rects(
-                &taffy_tree,
+            // Table cells: the table passes pin rows and shift cells
+            // (collapsed half borders, border-spacing) on the whole-pixel
+            // grid, so their rounded rects can sit more than a pixel from the
+            // unrounded boxes, which are Chrome's (a 1px collapsed border puts
+            // a cell 0.5px inside the table). Every box is on the rendered
+            // tree, which knows its cells.
+            let cells = (element_kinds_present(tree) & ElementKind::CELL != 0)
+                .then(|| current_flat_tree(tree));
+            let is_cell = |dom: NodeId| {
+                cells.as_ref().is_some_and(|flat| {
+                    flat.kinds
+                        .get(dom.index())
+                        .is_some_and(|kinds| kinds & ElementKind::CELL != 0)
+                })
+            };
+            let previous_collected = ifc_items
+                .reuse
+                .as_mut()
+                .and_then(|reuse| reuse.collected.take());
+            let (collected, collect_stats) = collect::collect(
+                &mut taffy_tree,
                 taffy_root,
                 initial_cb_x,
-                0.0,
                 &id_map,
-                &mut rects,
-                &mut grid_overflow,
-                &generated_nodes,
-                &mut generated_rects,
+                &is_cell,
+                previous_collected,
             );
+            if crate::prof::enabled() {
+                eprintln!("[timing] collect {collect_stats:?}");
+            }
+            rects = collected.geometry.rects.clone();
+            grid_overflow = collected.geometry.grid_overflow.clone();
+            grid_tracks = collected.geometry.grid_tracks.clone();
+            fractional_sizes = collected.geometry.fractional_sizes.clone();
+            fractional_rects = collected.geometry.fractional_rects.clone();
+            for (slot, generated) in generated_rects.iter_mut().zip(&ifc_items.generated) {
+                *slot = collected.rect_of(generated.node);
+            }
+            if let Some(reuse) = ifc_items.reuse.as_mut() {
+                reuse.collected = Some(collected);
+            }
             phase_marks.push(("x.abs", crate::prof::mark()));
-            grid_tracks = collect_grid_tracks(&taffy_tree, &id_map);
             used_auto_margins = collect_used_auto_margins(
                 &taffy_tree,
                 &id_map,
@@ -11602,39 +11651,7 @@ fn layout_dom_once(
                     .and_then(|reuse| reuse.indexed_boxes(retain::IndexKind::AutoMargin, &styles))
                     .as_deref(),
             );
-            fractional_sizes = collect_fractional_sizes(&taffy_tree, &id_map, &rects);
             phase_marks.push(("x.collect", crate::prof::mark()));
-            fractional_rects = collect_fractional_rects(
-                &taffy_tree,
-                taffy_root,
-                initial_cb_x,
-                &id_map,
-                &rects,
-                &{
-                    // Table cells: the table passes pin rows and shift cells
-                    // (collapsed half borders, border-spacing) on the
-                    // whole-pixel grid, so their rounded rects can sit more
-                    // than a pixel from the unrounded boxes, which are
-                    // Chrome's (a 1px collapsed border puts a cell 0.5px
-                    // inside the table).
-                    if element_kinds_present(tree) & ElementKind::CELL == 0 {
-                        HashSet::default()
-                    } else {
-                        // Every box is on the rendered tree, which knows its
-                        // cells.
-                        let flat = current_flat_tree(tree);
-                        flat.walk
-                            .iter()
-                            .copied()
-                            .filter(|id| {
-                                flat.kinds
-                                    .get(id.index())
-                                    .is_some_and(|kinds| kinds & ElementKind::CELL != 0)
-                            })
-                            .collect::<HashSet<_>>()
-                    }
-                },
-            );
             phase_marks.push(("x.frac", crate::prof::mark()));
             inline_fragments = place_inline_content(
                 &taffy_tree,
@@ -11982,8 +11999,16 @@ fn layout_dom_once(
         );
         if let (Some((previous, changes)), Some(mut changed)) = (derived_changes, walked) {
             // Also outside the document element's subtree, which the walk
-            // does not enter.
-            for &id in changes.children_changed.iter().chain(&changes.added) {
+            // does not enter, and where boxes moved that the walk keeps.
+            let moved = dirty
+                .as_ref()
+                .map_or(&[][..], |dirty| dirty.moved.as_slice());
+            for &id in changes
+                .children_changed
+                .iter()
+                .chain(&changes.added)
+                .chain(moved)
+            {
                 let mut current = Some(id);
                 while let Some(node) = current {
                     match changed.get_mut(node.index()) {
@@ -13227,97 +13252,6 @@ fn resolve_named_placement(
     }
 }
 
-/// Used grid track sizes for every DOM grid container in the laid-out tree.
-fn collect_grid_tracks(
-    taffy_tree: &TaffyTree<usize>,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
-) -> HashMap<NodeId, (Vec<f32>, Vec<f32>)> {
-    id_map
-        .iter()
-        .filter_map(
-            |(&taffy_id, &dom_id)| match taffy_tree.detailed_layout_info(taffy_id) {
-                taffy::tree::DetailedLayoutInfo::Grid(info) => Some((
-                    dom_id,
-                    (info.columns.sizes.clone(), info.rows.sizes.clone()),
-                )),
-                _ => None,
-            },
-        )
-        .collect()
-}
-
-/// Unrounded Taffy sizes snapped to 1/64 px for boxes whose final rect is
-/// the rounded Taffy size (the engine adjusts some rects after layout).
-/// Every DOM box's unrounded Taffy border box in document coordinates,
-/// snapped to 1/64 px, where it agrees with the final whole-pixel rect to
-/// within a pixel on every edge (boxes the engine adjusts after layout keep
-/// their final rect).
-fn collect_fractional_rects(
-    taffy_tree: &TaffyTree<usize>,
-    root: taffy::NodeId,
-    initial_cb_x: f32,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
-    rects: &HashMap<NodeId, Rect>,
-    table_cells: &HashSet<NodeId>,
-) -> HashMap<NodeId, Rect> {
-    // Blink converts CSS lengths to LayoutUnits by truncation (13.9px is
-    // 13.890625); the epsilon keeps float noise on exact values.
-    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
-    let mut out = HashMap::default();
-    // An explicit stack: (node, parent's absolute unrounded origin).
-    let mut stack = vec![(root, initial_cb_x, 0.0f32)];
-    while let Some((node, parent_x, parent_y)) = stack.pop() {
-        let layout = taffy_tree.unrounded_layout(node);
-        let x = parent_x + layout.location.x;
-        let y = parent_y + layout.location.y;
-        if let Some(dom_id) = id_map.get(&node) {
-            if let Some(rounded) = rects.get(dom_id) {
-                let rect = Rect {
-                    x: snap(x),
-                    y: snap(y),
-                    width: snap(layout.size.width),
-                    height: snap(layout.size.height),
-                };
-                let tolerance = if table_cells.contains(dom_id) {
-                    2.0
-                } else {
-                    1.0
-                };
-                let close = (rect.x - rounded.x).abs() < tolerance
-                    && (rect.y - rounded.y).abs() < tolerance
-                    && (rect.width - rounded.width).abs() < tolerance
-                    && (rect.height - rounded.height).abs() < tolerance;
-                if close && rect != *rounded {
-                    out.insert(*dom_id, rect);
-                }
-            }
-        }
-        for &child in taffy_tree.child_slice(node) {
-            stack.push((child, x, y));
-        }
-    }
-    out
-}
-
-fn collect_fractional_sizes(
-    taffy_tree: &TaffyTree<usize>,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
-    rects: &HashMap<NodeId, Rect>,
-) -> HashMap<NodeId, (f32, f32)> {
-    let snap = |value: f32| (value * 64.0 + 1e-3).floor() / 64.0;
-    id_map
-        .iter()
-        .filter_map(|(&taffy_id, &dom_id)| {
-            let rect = rects.get(&dom_id)?;
-            let size = taffy_tree.unrounded_layout(taffy_id).size;
-            let (width, height) = (snap(size.width), snap(size.height));
-            let close = (width - rect.width).abs() < 1.0 && (height - rect.height).abs() < 1.0;
-            (close && (width != rect.width || height != rect.height))
-                .then_some((dom_id, (width, height)))
-        })
-        .collect()
-}
-
 /// Used horizontal margins of every box with an `auto` left or right margin.
 fn collect_used_auto_margins(
     taffy_tree: &TaffyTree<usize>,
@@ -13407,71 +13341,6 @@ fn text_field_content_width(style: &crate::LayoutStyle, font_size: f32, size: f3
     {
         let _ = bold;
         size * font_size * 0.6 + font_size * 1.275
-    }
-}
-
-fn compute_absolute_rects(
-    taffy_tree: &TaffyTree<usize>,
-    taffy_id: taffy::NodeId,
-    abs_x: f32,
-    abs_y: f32,
-    id_map: &HashMap<taffy::NodeId, NodeId>,
-    rects: &mut HashMap<NodeId, Rect>,
-    grid_overflow: &mut HashMap<NodeId, Rect>,
-    generated_nodes: &HashMap<taffy::NodeId, usize>,
-    generated_rects: &mut [Option<Rect>],
-) {
-    if let Ok(layout) = taffy_tree.layout(taffy_id) {
-        let x = abs_x + layout.location.x;
-        let y = abs_y + layout.location.y;
-        let rect = Rect {
-            x,
-            y,
-            width: layout.size.width,
-            height: layout.size.height,
-        };
-
-        if let Some(dom_id) = id_map.get(&taffy_id) {
-            rects.insert(*dom_id, rect);
-            if let taffy::tree::DetailedLayoutInfo::Grid(info) =
-                taffy_tree.detailed_layout_info(taffy_id)
-            {
-                let right = info.columns.end_offset;
-                let bottom = info.rows.end_offset;
-                if right + layout.padding.right > layout.size.width - layout.border.right
-                    || bottom + layout.padding.bottom > layout.size.height - layout.border.bottom
-                {
-                    grid_overflow.insert(
-                        *dom_id,
-                        Rect {
-                            x,
-                            y,
-                            width: right,
-                            height: bottom,
-                        },
-                    );
-                }
-            }
-        }
-        if let Some(index) = generated_nodes.get(&taffy_id) {
-            generated_rects[*index] = Some(rect);
-        }
-
-        {
-            for &child_id in taffy_tree.child_slice(taffy_id) {
-                compute_absolute_rects(
-                    taffy_tree,
-                    child_id,
-                    x,
-                    y,
-                    id_map,
-                    rects,
-                    grid_overflow,
-                    generated_nodes,
-                    generated_rects,
-                );
-            }
-        }
     }
 }
 
