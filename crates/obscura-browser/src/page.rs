@@ -1276,18 +1276,24 @@ impl Page {
         // Page.getFrameTree return a frame the client cannot match,
         // triggering a Target.closeTarget and "Frame has been detached".
         let frame_id = id.clone();
+        // A build with the wreq/BoringSSL transport sends Chrome's TLS and
+        // HTTP/2 fingerprint on every page; rustls's ClientHello is flagged by
+        // DataDome and Cloudflare. `--stealth` adds the Windows Chrome
+        // identity and tracker blocking; without it the page keeps its own
+        // identity (User-Agent, client hints, CDP overrides) on the wire.
         #[cfg(feature = "stealth")]
         let stealth_client = if context.stealth {
-            // The wreq client backing StealthHttpClient does not speak SOCKS5.
-            // Callers must validate the proxy scheme up front and fail loudly
-            // (see obscura-cli) rather than silently rewriting socks5:// to
-            // http://, which only works when the upstream happens to be a
-            // Clash-style mixed-mode proxy and breaks plain SOCKS5 servers
-            // like `ssh -ND` (#160).
             Some(Arc::new(StealthHttpClient::with_proxy(
                 context.cookie_jar.clone(),
                 context.proxy_url.as_deref(),
                 context.allow_private_network,
+            )))
+        } else if obscura_net::impersonate_tls_by_default() {
+            Some(Arc::new(StealthHttpClient::with_identity(
+                context.cookie_jar.clone(),
+                context.proxy_url.as_deref(),
+                context.allow_private_network,
+                http_client.clone(),
             )))
         } else {
             None
@@ -2038,7 +2044,7 @@ impl Page {
         rt.set_session_history(session_history, session_index, session_index);
 
         #[cfg(feature = "stealth")]
-        if self.stealth_client.is_some() {
+        if self.context.stealth && self.stealth_client.is_some() {
             rt.set_stealth(true);
             rt.set_user_agent(obscura_net::STEALTH_USER_AGENT);
             rt.set_platform(
@@ -3509,6 +3515,7 @@ impl Page {
             return;
         }
         let settle_started = std::time::Instant::now();
+        let mut followed = 0;
         // Pump, then give any frame document that finished fetching a realm of
         // its own. Attaching one runs its scripts, which can start timers,
         // fetches and further frames, so keep alternating until no new frame
@@ -3528,14 +3535,23 @@ impl Page {
                     // observable document/network/script activity instead. The
                     // absolute caller budget and V8 watchdog still bound both
                     // asynchronous work and synchronous microtask storms.
-                    let _ = js.run_event_loop_until_quiescent(remaining, 150).await;
+                    let _ = js
+                        .run_event_loop_until_quiescent_or_navigation(remaining, 150)
+                        .await;
                 }
+            }
+            if self.has_pending_navigation() {
+                break;
             }
             #[cfg(feature = "render")]
             {
                 self.queue_pending_render_resources();
             }
-            if !self.advance_frames().await {
+            let frames_moved = self.advance_frames().await;
+            if self.follow_settle_navigation(&mut followed).await {
+                continue;
+            }
+            if !frames_moved {
                 break;
             }
         }
@@ -3565,14 +3581,52 @@ impl Page {
         if duration_ms == 0 {
             return;
         }
-        if let Some(js) = &mut self.js {
-            Self::settle_runtime_for_duration(js, duration_ms).await;
+        // The wait keeps its full wall clock, in slices: between them frame
+        // documents get their realms (a challenge widget lives in one) and a
+        // navigation the page started is followed, as a browser would while
+        // the caller waits. A challenge page that reloads itself into the
+        // site after solving otherwise ends the wait still on the challenge.
+        const SLICE_MS: u64 = 250;
+        let started = tokio::time::Instant::now();
+        let total = tokio::time::Duration::from_millis(duration_ms);
+        let mut followed = 0;
+        loop {
+            let remaining = total.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            let slice = remaining.min(tokio::time::Duration::from_millis(SLICE_MS));
+            if let Some(js) = &mut self.js {
+                Self::settle_runtime_for_duration(js, duration_millis_u64(slice)).await;
+            } else {
+                tokio::time::sleep(slice).await;
+            }
+            self.advance_frames().await;
+            self.follow_settle_navigation(&mut followed).await;
         }
-        // A fixed wait must retain its full wall clock, so frames get their
-        // realms once at the end instead of being interleaved as in `settle`.
-        // Their document scripts still run; only their own deferred work is
-        // left for a later settle.
-        self.advance_frames().await;
+    }
+
+    /// Follows a navigation the document queued while settling (a challenge
+    /// script reloading, a timer assigning `location`, a form submit), up to
+    /// the navigation chain limit so a page that keeps reloading itself
+    /// cannot hold the settle forever. Reports whether one was followed.
+    async fn follow_settle_navigation(&mut self, followed: &mut usize) -> bool {
+        if !self.has_pending_navigation() {
+            return false;
+        }
+        if *followed >= self.navigation_chain_limit() {
+            self.take_pending_navigation();
+            return false;
+        }
+        *followed += 1;
+        match self.process_pending_navigation_outcome().await {
+            Ok(PendingNavigationOutcome::Document) => true,
+            Ok(_) => false,
+            Err(error) => {
+                tracing::warn!("navigation started while settling failed: {error}");
+                false
+            }
+        }
     }
 
     /// Advance one wake-driven browser task for a continuously owned page.
@@ -3650,10 +3704,14 @@ impl Page {
 
     async fn settle_runtime_for_duration(js: &mut ObscuraJsRuntime, duration_ms: u64) {
         let started = tokio::time::Instant::now();
-        let _ = js.run_event_loop_for_duration(duration_ms).await;
+        let _ = js
+            .run_event_loop_for_duration_or_navigation(duration_ms)
+            .await;
         let requested = tokio::time::Duration::from_millis(duration_ms);
         let elapsed = started.elapsed();
-        if elapsed < requested {
+        // A document that is navigating away has nothing left to wait for;
+        // the caller follows the navigation and settles the new document.
+        if elapsed < requested && !js.has_pending_navigation() {
             tokio::time::sleep(requested - elapsed).await;
         }
     }
@@ -4107,11 +4165,22 @@ impl Page {
             // before navigation becomes capture-ready. Known parser resources
             // are filtered by the render cache, so ordinary pages pay only the
             // inexpensive scan on this second pass.
+            // Start their loads without waiting for them: the load event has
+            // already fired, and the page's own timers and frames would stall
+            // behind the wait (YouTube's watch page waited ~0.8 s here before
+            // it could request its comments). Results are applied as they
+            // land by the event-loop pump, and every capture path still
+            // prepares resources itself. A positive
+            // OBSCURA_RENDER_RESOURCE_POST_SCRIPT_WARMUP_MS waits as before.
             let warmup_ms = std::env::var("OBSCURA_RENDER_RESOURCE_POST_SCRIPT_WARMUP_MS")
                 .ok()
                 .and_then(|value| value.parse::<u64>().ok())
-                .unwrap_or(1_000);
-            let _ = self.prepare_screenshot_resources(warmup_ms).await;
+                .unwrap_or(0);
+            if warmup_ms == 0 {
+                self.spawn_pending_render_resources();
+            } else {
+                let _ = self.prepare_screenshot_resources(warmup_ms).await;
+            }
         }
 
         self.lifecycle = LifecycleState::DomContentLoaded;
@@ -8478,10 +8547,15 @@ mod tests {
             }
         }
         drop(advance);
+        // Frame documents are queued in the order they finished loading,
+        // which varies, so remove the iframe of the frame that is loading.
+        let attached = page.frames[0].frame_id();
         page.js
             .as_mut()
             .unwrap()
-            .evaluate("(document.querySelector('iframe').remove(), 1)")
+            .evaluate(&format!(
+                "([...document.querySelectorAll('iframe')].find(f => f._frameId === {attached}).remove(), 1)"
+            ))
             .unwrap();
 
         page.release_detached_frames();
@@ -11368,6 +11442,9 @@ mod tests {
         let mut page = super::Page::new("dynamic-render-warmup".to_string(), context);
         let page_url = format!("http://{address}/page");
         page.navigate(&page_url).await.unwrap();
+        // Navigation only starts the dynamic loads (the page is not held after
+        // its load event); a capture path waits for them, as screenshots do.
+        let _ = page.prepare_screenshot_resources(2000).await;
 
         let mut paths = (0..3)
             .map(|_| {

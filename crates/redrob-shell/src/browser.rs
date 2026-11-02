@@ -1,10 +1,10 @@
-//! The browser process: every window of one profile, on one engine connection.
+//! The browser process: every window of one profile, on one Chromium.
 //!
-//! The engine gives every CDP connection its own pages (docs/AGENT.md), so all
-//! windows share this process's one connection and its one relay. Each window
-//! is an OS window (an egui viewport) drawing its own [`Window`]; a tab is
-//! handed between windows as it is, with its engine target, so its page,
-//! history, scroll position and form state come along without a reload.
+//! Chromium (CEF) runs in this process; all windows share it and its one
+//! relay for agents. Each window is an OS window (an egui viewport) drawing
+//! its own [`Window`]; a tab is handed between windows as it is, with its
+//! Chromium browser, so its page, history, scroll position and form state
+//! come along without a reload.
 //!
 //! What windows share lives here and is lent to the window being drawn: the
 //! profile database, the password vault, bookmarks, history, downloads and
@@ -21,11 +21,10 @@ use egui::ViewportId;
 use crate::cdp::{self, Event, Update, WindowId};
 use crate::model::{self, Bookmark, DownloadItem, HistoryEntry, Model, Tab, TabId};
 use crate::profile::{Bounds, Profile, SavedWindow, SessionWindow};
-use crate::{media_view, relay, theme, updater, vault, Window, NEW_TAB};
+use crate::{relay, theme, updater, vault, Window, NEW_TAB};
 
 /// Everything `main` prepared before the first window opens.
 pub struct Start {
-    pub ws_url: String,
     pub endpoint_file: std::path::PathBuf,
     pub profile: Option<Profile>,
     pub incognito: bool,
@@ -48,8 +47,6 @@ pub enum Request {
 /// A tab on its way to another window, with what its window kept for it.
 pub struct Moved {
     pub tab: Tab,
-    pub media: media_view::TabMedia,
-    pub drm: Option<String>,
     pub login: Option<(String, tokio::sync::oneshot::Sender<serde_json::Value>)>,
 }
 
@@ -62,17 +59,12 @@ struct Shared {
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadItem>,
     closed: Vec<(String, String)>,
-    /// One GPU compositor for all windows, with a page texture per window;
-    /// the reason when there is none.
-    gpu: Option<crate::compositor::Gpu>,
-    gpu_error: String,
 }
 
 impl Shared {
     fn lend(&mut self, w: &mut Window) {
         w.profile = self.profile.take();
         w.vault = self.vault.take();
-        w.gpu = self.gpu.take().ok_or_else(|| self.gpu_error.clone());
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -82,7 +74,6 @@ impl Shared {
     fn reclaim(&mut self, w: &mut Window) {
         self.profile = w.profile.take();
         self.vault = w.vault.take();
-        self.gpu = std::mem::replace(&mut w.gpu, Err(String::new())).ok();
         std::mem::swap(&mut w.model.bookmarks, &mut self.bookmarks);
         std::mem::swap(&mut w.model.history, &mut self.history);
         std::mem::swap(&mut w.model.downloads, &mut self.downloads);
@@ -90,9 +81,18 @@ impl Shared {
     }
 }
 
+/// The process was asked to stop (SIGTERM, Ctrl+C).
+static QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Engine updates for a tab the browser has not placed yet (a popup whose
 /// `Opened` is still on its way) wait here, at most this many.
 const MAX_ORPHANS: usize = 64;
+
+struct TargetWaiter {
+    tab: TabId,
+    reply: tokio::sync::oneshot::Sender<Result<String, String>>,
+    since: Instant,
+}
 
 pub struct Browser {
     /// In the order they opened; the first one drawn in the root viewport,
@@ -101,8 +101,15 @@ pub struct Browser {
     shared: Shared,
     updates: mpsc::Receiver<Update>,
     commands: tokio::sync::mpsc::UnboundedSender<(WindowId, cdp::Command)>,
+    /// What the windows asked of Chromium, run on this thread (cdp.rs).
+    command_rx: tokio::sync::mpsc::UnboundedReceiver<(WindowId, cdp::Command)>,
     open_rx: mpsc::Receiver<Option<String>>,
     login_rx: mpsc::Receiver<relay::LoginRequest>,
+    /// Agents' tab requests (relay.rs).
+    tab_rx: mpsc::Receiver<relay::TabRequest>,
+    /// Agent tabs opened and waiting for their target id, which answers
+    /// `Target.createTarget`.
+    target_waiters: Vec<TargetWaiter>,
     places: relay::Places,
     /// The viewport showing each tab, so an engine update for a tab wakes
     /// only the window it is in.
@@ -118,6 +125,28 @@ pub struct Browser {
     session_saved_at: Instant,
     /// The session was saved for the last time; closing must not overwrite it.
     final_saved: bool,
+}
+
+/// Linux: Xlib has one error handler per process, and winit's keeps the
+/// last error of any connection and panics on it at the next focus change.
+/// Chromium's GTK connection makes harmless errors (its input method asks
+/// where a closed page's window was): those are not winit's, so its hook
+/// takes every error of another connection.
+#[cfg(target_os = "linux")]
+fn ignore_other_x_errors(cc: &eframe::CreationContext<'_>) {
+    use winit::raw_window_handle::{HasDisplayHandle as _, RawDisplayHandle};
+    let Ok(handle) = cc.display_handle() else {
+        return;
+    };
+    let RawDisplayHandle::Xlib(x) = handle.as_raw() else {
+        return;
+    };
+    let Some(ours) = x.display.map(|d| d.as_ptr() as usize) else {
+        return;
+    };
+    winit::platform::x11::register_xlib_error_hook(Box::new(move |display, _event| {
+        display as usize != ours
+    }));
 }
 
 /// The OS window for a browser window: undecorated except on macOS, at
@@ -159,6 +188,8 @@ pub fn window_builder(
 impl Browser {
     pub fn start(cc: &eframe::CreationContext<'_>, start: Start) -> Self {
         let ctx = cc.egui_ctx.clone();
+        #[cfg(target_os = "linux")]
+        ignore_other_x_errors(cc);
         theme::install(&ctx);
         theme::set_preference(
             &ctx,
@@ -175,6 +206,7 @@ impl Browser {
         let (upd_tx, upd_rx) = mpsc::channel();
         let (login_tx, login_rx) = mpsc::channel();
         let (open_tx, open_rx) = mpsc::channel();
+        let (tab_tx, tab_rx) = mpsc::channel();
         let places: relay::Places = Default::default();
         // Background threads wake the root viewport; the other windows are
         // drawn from its frame.
@@ -182,13 +214,43 @@ impl Browser {
         let relay_window = relay::Window {
             login: login_tx,
             open_window: open_tx,
+            // Agent tabs are window tabs: the window opens, shows and closes them.
+            tabs: Some(tab_tx),
             places: places.clone(),
             wake: Arc::new(move || wake_ctx.request_repaint_of(ViewportId::ROOT)),
         };
-        let (ws_url, endpoint_file) = (start.ws_url, start.endpoint_file);
+        let endpoint_file = start.endpoint_file;
         let repaint_ctx = ctx.clone();
         let placement: Arc<Mutex<HashMap<TabId, ViewportId>>> = Default::default();
         let wake_of = placement.clone();
+        // A page changed: redraw the window showing it.
+        let sink = crate::cef::Sink::new(
+            upd_tx.clone(),
+            Arc::new(move |tab: Option<TabId>| {
+                let viewport = tab
+                    .and_then(|t| wake_of.lock().ok()?.get(&t).copied())
+                    .unwrap_or(ViewportId::ROOT);
+                repaint_ctx.request_repaint_of(viewport);
+            }),
+        );
+        // A link or text dropped on a window's chrome (cef/xdnd.rs).
+        #[cfg(target_os = "linux")]
+        {
+            let drop_ctx = ctx.clone();
+            crate::cef::xdnd::set_waker(move || drop_ctx.request_repaint_of(ViewportId::ROOT));
+        }
+        // Chromium's work runs in window passes (cef::pump).
+        let pump_ctx = ctx.clone();
+        crate::cef::set_waker(move |delay| {
+            pump_ctx.request_repaint_after_for(delay, ViewportId::ROOT)
+        });
+        // SIGTERM or Ctrl+C: quit as the menu does, so Chromium writes its
+        // cookies and the session is saved.
+        let quit_ctx = ctx.clone();
+        crate::cef::on_terminate(move || {
+            QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+            quit_ctx.request_repaint_of(ViewportId::ROOT);
+        });
         std::thread::spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -196,24 +258,10 @@ impl Browser {
                 .expect("tokio runtime");
             let errors = upd_tx.clone();
             rt.block_on(async move {
-                if let Err(e) = cdp::run(
-                    ws_url,
-                    endpoint_file,
-                    relay_window,
-                    cmd_rx,
-                    upd_tx,
-                    move |tab: Option<TabId>| {
-                        let viewport = tab
-                            .and_then(|t| wake_of.lock().ok()?.get(&t).copied())
-                            .unwrap_or(ViewportId::ROOT);
-                        repaint_ctx.request_repaint_of(viewport);
-                    },
-                )
-                .await
-                {
+                if let Err(e) = cdp::relay(endpoint_file, relay_window).await {
                     let _ = errors.send(Update {
                         tab: 0,
-                        event: Event::Error(e.to_string()),
+                        event: Event::Error(format!("agent relay: {e}")),
                     });
                 }
             });
@@ -253,13 +301,17 @@ impl Browser {
             },
             None => None,
         };
-        let (gpu, gpu_error) = match cc.wgpu_render_state.as_ref() {
-            Some(state) => match crate::compositor::Gpu::new(state) {
-                Ok(g) => (Some(g), String::new()),
-                Err(e) => (None, e),
-            },
-            None => (None, "no wgpu device".to_string()),
-        };
+        // Per-site choices: the profile's, or memory only for incognito.
+        let sites = profile
+            .as_ref()
+            .filter(|_| !start.incognito)
+            .and_then(|p| crate::profile::SiteSettings::open(&p.dir).ok())
+            .unwrap_or_else(crate::profile::SiteSettings::memory);
+        crate::cef::handlers::configure(crate::cef::handlers::Features {
+            sites,
+            downloads: crate::profile::downloads_dir(),
+        });
+        cdp::init(sink);
         let mut browser = Self {
             windows: Vec::new(),
             shared: Shared {
@@ -269,13 +321,14 @@ impl Browser {
                 history: loaded.history,
                 downloads: Vec::new(),
                 closed: Vec::new(),
-                gpu,
-                gpu_error,
             },
             updates: upd_rx,
             commands: cmd_tx,
+            command_rx: cmd_rx,
             open_rx,
             login_rx,
+            tab_rx,
+            target_waiters: Vec::new(),
             places,
             last_places: HashMap::new(),
             placement,
@@ -308,8 +361,12 @@ impl Browser {
         }
         let first = &mut browser.windows[0];
         match start.start_url {
-            Some(url) => first.open_tab(&model::to_url(&url), true),
-            None if first.model.tabs.is_empty() => first.open_tab(NEW_TAB, true),
+            Some(url) => {
+                first.open_tab(&model::to_url(&url), true);
+            }
+            None if first.model.tabs.is_empty() => {
+                first.open_tab(NEW_TAB, true);
+            }
             None => {}
         }
         browser.session_sig = browser.session_signature();
@@ -339,10 +396,7 @@ impl Browser {
             profile: None,
             last_session_save: Instant::now(),
             show_downloads: false,
-            show_devtools: false,
             internal: Default::default(),
-            media: Default::default(),
-            drm: Default::default(),
             vault: None,
             pending_save: None,
             agent_tx,
@@ -360,9 +414,20 @@ impl Browser {
             focus_address: false,
             focus_page: false,
             error: None,
-            last_size: (0, 0, 0.0),
+            last_place: None,
             address_id: egui::Id::new("address"),
-            autoscroll: Default::default(),
+            prompts: Default::default(),
+            page_focused: false,
+            took_focus: false,
+            window_focused: false,
+            address_focused: false,
+            chrome_keyboard: false,
+            minimized: false,
+            page_shortcuts: Vec::new(),
+            status: None,
+            native: None,
+            native_token: String::new(),
+            native_tries: 0,
             incognito: self.incognito,
             wid,
             viewport,
@@ -376,8 +441,6 @@ impl Browser {
             tab_drag: None,
             top_sites: None,
             new_tab_query: String::new(),
-            // Lent from `Shared` while the window draws.
-            gpu: Err(String::new()),
             last_title: String::new(),
         }
     }
@@ -485,12 +548,133 @@ impl Browser {
                 ctx.request_repaint_of(self.windows[i].viewport);
             }
         }
+        while let Ok(req) = self.tab_rx.try_recv() {
+            self.tab_request(ctx, req);
+        }
+        #[cfg(target_os = "linux")]
+        for d in crate::cef::xdnd::take_drops() {
+            if let Some(w) = self.windows.iter_mut().find(|w| w.native == Some(d.window)) {
+                w.dropped(d.at, &d.text);
+                ctx.request_repaint_of(w.viewport);
+            }
+        }
+        // The 한/영 key for the window in front (cef/xdnd.rs, ime.rs).
+        #[cfg(target_os = "linux")]
+        if crate::ime::has_raw_keys() {
+            if let Some(i) = self.focused_index() {
+                ctx.request_repaint_of(self.windows[i].viewport);
+            }
+        }
         while let Ok(url) = self.open_rx.try_recv() {
             let i = self.new_window(None, None);
             let w = &mut self.windows[i];
             match url {
-                Some(u) => w.open_tab(&model::to_url(&u), true),
-                None => w.open_tab(NEW_TAB, true),
+                Some(u) => {
+                    w.open_tab(&model::to_url(&u), true);
+                }
+                None => {
+                    w.open_tab(NEW_TAB, true);
+                }
+            }
+        }
+    }
+
+    /// The window and index of the tab with this DevTools target id.
+    fn find_target(&self, target: &str) -> Option<(usize, usize)> {
+        if target.is_empty() {
+            return None;
+        }
+        self.windows.iter().enumerate().find_map(|(i, w)| {
+            w.model
+                .tabs
+                .iter()
+                .position(|t| t.target_id == target)
+                .map(|j| (i, j))
+        })
+    }
+
+    /// An agent's `Target.createTarget`, `activateTarget` or `closeTarget`.
+    fn tab_request(&mut self, ctx: &egui::Context, req: relay::TabRequest) {
+        match req {
+            relay::TabRequest::Open {
+                url,
+                background,
+                new_window,
+                reply,
+            } => {
+                // The window's own pages (passwords, settings) are the person's.
+                if crate::internal::is_internal(&url) {
+                    let _ = reply.send(Err(format!("{url} is not for agents")));
+                    return;
+                }
+                let i = if new_window {
+                    self.new_window(None, None)
+                } else {
+                    match self.focused_index() {
+                        Some(i) => i,
+                        None => {
+                            let _ = reply.send(Err("the browser has no window".into()));
+                            return;
+                        }
+                    }
+                };
+                let w = &mut self.windows[i];
+                let id = w.open_tab(&url, new_window || !background);
+                if let Some(t) = w.model.tab_mut(id) {
+                    t.agent = true;
+                }
+                w.op(id, cdp::Op::Agent);
+                w.session_dirty = true;
+                ctx.request_repaint_of(w.viewport);
+                self.target_waiters.push(TargetWaiter {
+                    tab: id,
+                    reply,
+                    since: Instant::now(),
+                });
+            }
+            relay::TabRequest::Activate { target, reply } => {
+                let found = self.find_target(&target);
+                if let Some((i, j)) = found {
+                    let w = &mut self.windows[i];
+                    w.select_tab(j);
+                    ctx.request_repaint_of(w.viewport);
+                }
+                let _ = reply.send(found.is_some());
+            }
+            relay::TabRequest::Close { target, reply } => {
+                let found = self.find_target(&target);
+                if let Some((i, j)) = found {
+                    let w = &mut self.windows[i];
+                    w.close_tab(j);
+                    ctx.request_repaint_of(w.viewport);
+                }
+                let _ = reply.send(found.is_some());
+            }
+        }
+    }
+
+    /// Answer agents whose new tab now has its target id.
+    fn answer_waiters(&mut self) {
+        if self.target_waiters.is_empty() {
+            return;
+        }
+        let ids: HashMap<TabId, String> = self
+            .windows
+            .iter()
+            .flat_map(|w| w.model.tabs.iter().map(|t| (t.id, t.target_id.clone())))
+            .collect();
+        for w in std::mem::take(&mut self.target_waiters) {
+            match ids.get(&w.tab) {
+                Some(t) if !t.is_empty() => {
+                    let _ = w.reply.send(Ok(t.clone()));
+                }
+                None => {
+                    let _ = w.reply.send(Err("the tab closed".into()));
+                }
+                Some(_) if w.since.elapsed() > Duration::from_secs(15) => {
+                    let _ = w.reply.send(Err("Chromium did not open the tab".into()));
+                }
+                Some(_) => self.target_waiters.push(w),
             }
         }
     }
@@ -512,23 +696,31 @@ impl Browser {
             w.maximized = v.maximized.unwrap_or(false);
             v.focused == Some(true)
         });
+        // Linux: whether the chrome (its focus window, cef/native.rs) has
+        // the keyboard comes from X; winit's focus also covers the page.
+        let focused = match w.native {
+            Some(n) if cfg!(target_os = "linux") => crate::cef::native::chrome_has_keyboard(n),
+            _ => focused,
+        };
+        w.chrome_keyboard = focused;
         if focused {
             self.focused = w.wid;
         }
-        if crate::compositor::tracing() {
-            eprintln!("redrob-browser: pass window={}", w.wid);
-        }
         self.shared.lend(w);
+        crate::ime::before_pass(&ctx, focused);
         w.frame(ui);
+        crate::ime::after_pass(&ctx, focused);
+        // The page has the keyboard: its window is the one in front (the
+        // window itself then reads as unfocused).
+        if std::mem::take(&mut w.took_focus) {
+            self.focused = w.wid;
+        }
         self.shared.reclaim(w);
     }
 
     /// A window closed. The last one stays in the saved session, as in
-    /// Chrome; any other leaves it, and its tabs close in the engine.
+    /// Chrome; any other leaves it, and its tabs close in Chromium.
     fn close_window(&mut self, i: usize) {
-        if let Some(gpu) = &mut self.shared.gpu {
-            gpu.release(self.windows[i].wid);
-        }
         if self.windows.len() == 1 {
             self.save_session();
             self.final_saved = true;
@@ -536,8 +728,9 @@ impl Browser {
             return;
         }
         let mut w = self.windows.remove(i);
+        // Its pages leave its native window before that is destroyed.
+        let _ = w.commands.send(cdp::Command::Detach);
         for t in std::mem::take(&mut w.model.tabs) {
-            w.media.drop_tab(t.id);
             w.op(t.id, cdp::Op::Close);
         }
         self.save_session();
@@ -556,24 +749,15 @@ impl Browser {
                 }
                 Request::Detach { moved, at } => {
                     let i = self.new_window(Some(from), at);
-                    let Moved {
-                        tab,
-                        media,
-                        drm,
-                        login,
-                    } = *moved;
+                    let Moved { tab, login } = *moved;
                     let w = &mut self.windows[i];
                     let id = tab.id;
-                    w.media.put_tab(media);
-                    if let Some(key_system) = drm {
-                        w.drm.requested(id, key_system);
-                    }
                     if let Some(login) = login {
                         w.agent_logins.insert(id, login);
                     }
                     w.model.insert_tab(tab, true);
-                    // Activate from the new window: the engine gives the
-                    // target that window's page size and keeps it on screen.
+                    // Activate from the new window: Chromium gives the
+                    // page that window's size and keeps it on screen.
                     w.activated();
                 }
                 Request::Quit => {
@@ -589,13 +773,14 @@ impl Browser {
     fn publish_places(&mut self) {
         let mut now = HashMap::new();
         for (n, w) in self.windows.iter().enumerate() {
-            for t in &w.model.tabs {
+            for (j, t) in w.model.tabs.iter().enumerate() {
                 if !t.target_id.is_empty() {
                     now.insert(
                         t.target_id.clone(),
                         relay::TabPlace {
                             window: n as u32 + 1,
                             agent: t.agent,
+                            active: j == w.model.active,
                         },
                     );
                 }
@@ -701,19 +886,36 @@ fn lock(b: &Mutex<Browser>) -> MutexGuard<'_, Browser> {
 impl eframe::App for App {
     fn on_exit(&mut self) {
         lock(&self.0).save_session();
+        // While the windows still exist: Chromium ends the process from its
+        // X11 error handler once they are gone, before `main` could stop it.
+        cdp::close_all(Duration::from_secs(3));
+        crate::cef::shutdown();
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let me = self.0.clone();
         lock(&self.0).root_pass(ui, &me);
     }
+
+    /// eframe runs no pass for a minimized window, only this: Chromium
+    /// still has to run its pages, downloads and agents' DevTools calls.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().minimized == Some(true)) {
+            let mut b = lock(&self.0);
+            b.route(ctx);
+            b.after(ctx);
+        }
+    }
 }
 
 impl Browser {
     /// What every pass does after drawing its window.
     fn after(&mut self, ctx: &egui::Context) {
+        self.sync_minimized(ctx);
         let windows = self.windows.len();
         self.handle_requests(ctx);
+        // The windows' commands go to Chromium, and Chromium does its work.
+        cdp::process(&mut self.command_rx);
         if self.windows.is_empty() {
             ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Close);
             return;
@@ -723,7 +925,31 @@ impl Browser {
             ctx.request_repaint_of(ViewportId::ROOT);
         }
         self.publish_places();
+        self.answer_waiters();
         self.save_if_changed(ctx);
+    }
+
+    /// A minimized window's page is hidden to Chromium (no painting, timers
+    /// slowed), as Chrome's is: its page is a child window, which Chromium
+    /// does not see minimized with its parent.
+    fn sync_minimized(&mut self, ctx: &egui::Context) {
+        let infos = ctx.input(|i| i.raw.viewports.clone());
+        for w in &mut self.windows {
+            let m = infos
+                .get(&w.viewport)
+                .and_then(|v| v.minimized)
+                .unwrap_or(false);
+            if m == w.minimized {
+                continue;
+            }
+            w.minimized = m;
+            if let Some((place, visible)) = w.last_place {
+                let _ = w.commands.send(cdp::Command::Place {
+                    place,
+                    visible: visible && !m,
+                });
+            }
+        }
     }
 
     /// A pass of a window's own viewport.
@@ -743,6 +969,11 @@ impl Browser {
 
     fn root_pass(&mut self, ui: &mut egui::Ui, me: &Arc<Mutex<Browser>>) {
         let ctx = ui.ctx().clone();
+        if QUIT.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            if let Some(w) = self.windows.first_mut() {
+                w.requests.push(Request::Quit);
+            }
+        }
         self.route(&ctx);
 
         if let Some(i) = self

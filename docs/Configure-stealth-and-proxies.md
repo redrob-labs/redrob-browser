@@ -9,21 +9,25 @@ obscura mcp --stealth
 
 `--stealth` is a global flag, so it works before or after the subcommand and applies to `fetch`, `serve`, `scrape`, and `mcp`. In a `scrape` run each worker inherits it.
 
-What `--stealth` changes:
+Every release build sends Chrome's TLS and HTTP/2 fingerprint (the wreq/BoringSSL
+transport: ClientHello, ALPN, cipher and extension order, HTTP/2 settings), with or
+without `--stealth`. The request keeps the engine's own identity: the User-Agent of the
+host OS (or `--user-agent`), the matching `sec-ch-ua*` client hints and any CDP
+overrides. `OBSCURA_IMPERSONATE_TLS=0` falls back to the rustls transport.
 
-- Uses the wreq HTTP client with browser-matching TLS fingerprints (ClientHello, ALPN, cipher order).
-- Loads a tracker blocklist that drops requests to known analytics and fingerprinting endpoints.
-- Bundles webpki roots instead of relying on the system store.
+What `--stealth` adds:
 
-Requires a build that includes the stealth feature. Use a `-stealth` archive
-with rendering or a `-no-render-stealth` archive without it. To build the
-rendering variant yourself:
+- The Windows Chrome identity on the wire and in `navigator`, whatever the host OS.
+- A tracker blocklist that drops requests to known analytics and fingerprinting endpoints.
+
+A source build gets the Chrome transport with the `stealth` feature:
 
 ```bash
 cargo build --release -p obscura-cli --bins --features render,stealth
 ```
 
-Omit rendering with `cargo build --release -p obscura-cli --bins --no-default-features --features stealth`.
+Without the feature (`--features render` alone) the transport is reqwest/rustls and
+`--stealth` only blocks trackers.
 
 ## What stealth handles
 

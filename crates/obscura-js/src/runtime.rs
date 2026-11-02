@@ -696,6 +696,7 @@ impl ObscuraJsRuntime {
                 extensions: vec![build_extension()],
                 module_loader: Some(module_loader),
                 startup_snapshot: Some(SNAPSHOT),
+                op_metrics_factory_fn: crate::op_profile::factory(),
                 ..Default::default()
             });
 
@@ -707,6 +708,12 @@ impl ObscuraJsRuntime {
                 // lookup free for pages that have no frames.
                 op_state.put(Rc::new(RefCell::new(crate::ops::RealmStates::default())));
             }
+
+            // Replaces deno_core's callback, which ours delegates to after
+            // dropping engine frames from the stack.
+            runtime
+                .v8_isolate()
+                .set_prepare_stack_trace_callback(crate::stack::prepare_stack_trace_callback);
 
             let isolate_handle = runtime.v8_isolate().thread_safe_handle();
             let heap_limit_state = std::sync::Arc::new(HeapLimitState::default());
@@ -4230,6 +4237,14 @@ impl ObscuraJsRuntime {
     /// the watchdog terminates it. A well-behaved page returns as soon as the
     /// loop goes idle.
     pub async fn run_event_loop_bounded(&mut self, budget_ms: u64) -> Result<(), String> {
+        self.run_event_loop_bounded_inner(budget_ms, false).await
+    }
+
+    async fn run_event_loop_bounded_inner(
+        &mut self,
+        budget_ms: u64,
+        stop_at_navigation: bool,
+    ) -> Result<(), String> {
         #[cfg(feature = "render")]
         self.service_render_resources();
         if budget_ms == 0 {
@@ -4253,7 +4268,9 @@ impl ObscuraJsRuntime {
             synchronous_budget + std::time::Duration::from_millis(WATCHDOG_SCHEDULING_MARGIN_MS),
         );
         let result = loop {
-            if tokio::time::Instant::now() >= deadline {
+            if tokio::time::Instant::now() >= deadline
+                || (stop_at_navigation && self.has_pending_navigation())
+            {
                 break Ok(());
             }
             // Timer-driven page script observes resources that landed during
@@ -4307,6 +4324,20 @@ impl ObscuraJsRuntime {
             return Ok(());
         }
         self.run_event_loop_bounded(budget_ms).await
+    }
+
+    /// Like `run_event_loop_for_duration`, but returns as soon as the page has
+    /// queued a navigation (a timer assigning `location`, `location.reload()`):
+    /// the document is going away, and a challenge cookie set just before the
+    /// reload can expire while the old document idles out the interval.
+    pub async fn run_event_loop_for_duration_or_navigation(
+        &mut self,
+        budget_ms: u64,
+    ) -> Result<(), String> {
+        if budget_ms == 0 {
+            return Ok(());
+        }
+        self.run_event_loop_bounded_inner(budget_ms, true).await
     }
 
     /// Return after a poll that delivers browser tasks. If the first poll
@@ -4461,6 +4492,27 @@ impl ObscuraJsRuntime {
         budget_ms: u64,
         quiet_ms: u64,
     ) -> Result<(), String> {
+        self.run_event_loop_until_quiescent_inner(budget_ms, quiet_ms, false)
+            .await
+    }
+
+    /// `run_event_loop_until_quiescent` that also returns once the page has
+    /// queued a navigation, so the caller can follow it right away.
+    pub async fn run_event_loop_until_quiescent_or_navigation(
+        &mut self,
+        budget_ms: u64,
+        quiet_ms: u64,
+    ) -> Result<(), String> {
+        self.run_event_loop_until_quiescent_inner(budget_ms, quiet_ms, true)
+            .await
+    }
+
+    async fn run_event_loop_until_quiescent_inner(
+        &mut self,
+        budget_ms: u64,
+        quiet_ms: u64,
+        stop_at_navigation: bool,
+    ) -> Result<(), String> {
         if budget_ms == 0 {
             return Ok(());
         }
@@ -4495,6 +4547,9 @@ impl ObscuraJsRuntime {
             let Some(_remaining) = deadline.checked_duration_since(now) else {
                 break Ok(());
             };
+            if stop_at_navigation && self.has_pending_navigation() {
+                break Ok(());
+            }
             let next_generation = self.activity_generation();
             // One-shot timers up to two quiet windows away are commonly app
             // hydration/debounce work (`setTimeout(render, 200)`). Intervals
@@ -6995,9 +7050,11 @@ mod tests {
             rt.evaluate("__workerReplies").unwrap(),
             serde_json::json!(["started"])
         );
+        // The worker's onerror gets an ErrorEvent whose message is Chrome's
+        // "Uncaught <name>: <message>" text.
         assert_eq!(
             rt.evaluate("__workerErrors").unwrap(),
-            serde_json::json!(["initialization failed"])
+            serde_json::json!(["Uncaught Error: initialization failed"])
         );
         rt.execute_script(
             "worker-cleanup",
@@ -14870,7 +14927,9 @@ mod tests {
     fn script_registered_url_font_reaches_render_resource_collection() {
         let loads = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let loader_loads = std::sync::Arc::clone(&loads);
-        let font = include_bytes!("../../obscura-render/assets/liberation-serif.ttf").to_vec();
+        // A sans face: the fallback for an unknown family is Liberation Serif,
+        // so a serif fixture would measure the same before and after.
+        let font = include_bytes!("../../obscura-render/assets/liberation-sans.ttf").to_vec();
         let mut rt = parser_image_runtime(
             r#"<html><body style="margin:0">
                 <span id="sample" style="display:inline-block;width:max-content;
@@ -15135,7 +15194,8 @@ mod tests {
         ).unwrap();
         assert_eq!(
             rt.evaluate("box.style.opacity").unwrap(),
-            serde_json::json!(".2")
+            // Chrome serializes the authored `.2` as "0.2".
+            serde_json::json!("0.2")
         );
         assert_eq!(
             rt.evaluate("box.getAnimations()[0] === __animation")
@@ -15165,7 +15225,8 @@ mod tests {
         rt.execute_script("cancel", "__animation.cancel()").unwrap();
         assert_eq!(
             rt.evaluate("box.style.opacity").unwrap(),
-            serde_json::json!(".2")
+            // Chrome serializes the authored `.2` as "0.2".
+            serde_json::json!("0.2")
         );
         assert_eq!(
             rt.evaluate("getComputedStyle(box).opacity").unwrap(),
@@ -16246,7 +16307,7 @@ mod tests {
         // a 2x devicePixelContentBoxSize surface.
         rt.execute_script(
             "deterministic-high-resolution-screen",
-            "Date.now = () => 0; Math.random = () => 2 / 0xFFFFFFFF;",
+            "globalThis.__obscura_fp_seed = 2;",
         )
         .unwrap();
         rt.run_page_init();
@@ -24764,7 +24825,7 @@ mod tests {
     #[cfg(feature = "stealth")]
     #[tokio::test(flavor = "current_thread")]
     async fn stealth_same_origin_fetch_sends_origin_for_non_get_methods() {
-        let (mut rt, origin, requests) = raw_request_runtime(6);
+        let (rt, origin, requests) = raw_request_runtime(6);
         rt.set_stealth_client(std::sync::Arc::new(obscura_net::StealthHttpClient::new(
             std::sync::Arc::new(obscura_net::CookieJar::new()),
         )));

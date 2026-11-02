@@ -644,6 +644,9 @@ impl Resolve for SsrfGuardResolver {
 /// cache on most Linux hosts, so every new connection paid a full DNS round
 /// trip (250ms for en.wikipedia.org from this host). Chrome keeps host-cache
 /// entries for about a minute; this matches it.
+/// HTTP/2 SETTINGS_MAX_HEADER_LIST_SIZE Chrome advertises (256 KiB).
+pub const CHROME_MAX_HEADER_LIST_SIZE: u32 = 256 * 1024;
+
 const DNS_CACHE_TTL: Duration = Duration::from_secs(60);
 const DNS_CACHE_CAPACITY: usize = 512;
 
@@ -846,7 +849,7 @@ fn reject_oversized_content_length(
 /// and the response dropped (cancelling the rest of the transfer) instead
 /// of failing the request.
 async fn read_reqwest_body_bounded(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     url: &Url,
     limit: usize,
     truncate: bool,
@@ -854,6 +857,19 @@ async fn read_reqwest_body_bounded(
     if !truncate {
         reject_oversized_content_length(response.headers(), url, limit)?;
     }
+    let url = url.clone();
+    crate::on_transport(async move {
+        read_reqwest_body_bounded_here(response, &url, limit, truncate).await
+    })
+    .await
+}
+
+async fn read_reqwest_body_bounded_here(
+    mut response: reqwest::Response,
+    url: &Url,
+    limit: usize,
+    truncate: bool,
+) -> Result<Vec<u8>, ObscuraNetError> {
     let capacity = response
         .content_length()
         .and_then(|length| usize::try_from(length).ok())
@@ -1035,7 +1051,7 @@ fn response_cache_lifetime(response: &Response) -> Option<Duration> {
 /// User-Agent string, using Chromium's per-major-version GREASE algorithm so
 /// the non-stealth HTTP path agrees with navigator.userAgentData instead of
 /// shipping a fixed Linux/Chrome-145 hint that contradicts a Windows profile.
-fn chrome_client_hints(ua: &str) -> (String, String) {
+pub(crate) fn chrome_client_hints(ua: &str) -> (String, String) {
     let major: usize = ua
         .split("Chrome/")
         .nth(1)
@@ -1126,6 +1142,9 @@ impl ObscuraHttpClient {
                     // grow with the link so large images and downloads are not
                     // capped at the 64 KiB initial window per round trip.
                     .http2_adaptive_window(true)
+                    // hyper's default 16 KiB header list limit resets YouTube's
+                    // response stream (PROTOCOL_ERROR); Chrome accepts 256 KiB.
+                    .http2_max_header_list_size(CHROME_MAX_HEADER_LIST_SIZE)
                     .pool_idle_timeout(Duration::from_secs(90))
                     // SSRF guard: reject hostnames that resolve to a private/loopback IP.
                     .dns_resolver(Arc::new(SsrfGuardResolver::new(self.allow_private_network)));
@@ -1655,7 +1674,7 @@ impl ObscuraHttpClient {
 
             let in_flight = InFlightGuard::new(&self.in_flight);
             let sent_at = Instant::now();
-            let resp = req_builder.send().await.map_err(|e| {
+            let resp = crate::on_transport(req_builder.send()).await.map_err(|e| {
                 ObscuraNetError::Network(format!("{}: {}", current_url, error_chain(&e)))
             })?;
             let headers_ms = sent_at.elapsed().as_millis();

@@ -10,12 +10,9 @@ pub struct Tab {
     pub url: String,
     pub title: String,
     pub loading: bool,
-    /// The page as the engine last sent it, with the window's scroll offsets.
-    pub scene: crate::compositor::TabScene,
     /// Opened by the agent rather than the person; shown with a marker.
     pub agent: bool,
-    pub devtools: crate::devtools::State,
-    /// CDP target id, known once the window attached to the tab.
+    /// Chromium's DevTools target id, known once the tab's browser exists.
     pub target_id: String,
 }
 
@@ -26,9 +23,7 @@ impl Tab {
             url: url.to_string(),
             title: String::new(),
             loading: url != "about:blank",
-            scene: crate::compositor::TabScene::new(),
             agent: false,
-            devtools: Default::default(),
             target_id: String::new(),
         }
     }

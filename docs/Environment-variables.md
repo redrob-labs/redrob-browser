@@ -105,6 +105,17 @@ blocking enabled. Non-stealth transport settings and SSRF protection are unchang
 OBSCURA_BLOCK_TRACKERS=0 obscura --stealth fetch https://example.com
 ```
 
+### `OBSCURA_IMPERSONATE_TLS`
+
+Builds with the `stealth` feature (every release) send Chrome's TLS and HTTP/2
+fingerprint on every request, with or without `--stealth`. Set this to `0`,
+`false`, `no`, or `off` to use the reqwest/rustls transport instead when
+`--stealth` is not given. Read when a page is created.
+
+```bash
+OBSCURA_IMPERSONATE_TLS=0 obscura fetch https://example.com
+```
+
 ### `OBSCURA_TIMEZONE`
 
 Pins the process timezone before V8/ICU reads it, so `Date` (`getTimezoneOffset`, `toString`) and `Intl.DateTimeFormat` report one consistent zone. Default `Europe/Berlin`. Set it to match the exit IP's region.

@@ -1410,6 +1410,11 @@ fn distribute_space_up_to_limits(
         let iteration_item_incurred_increase =
             f32_min(min_increase_limit, space_to_distribute / track_distribution_proportion_sum);
 
+        // A track a hair below its limit gets an increase too small to change
+        // its f32 size, while the space still shrinks by it; the loop would
+        // then spin for millions of rounds (BBC's home page never finished
+        // layout). Stop once a round grows no track.
+        let mut grew = false;
         for track in tracks.iter_mut().filter(|track| track_is_affected(track)) {
             let current_size = track_affected_property(track) + track.item_incurred_increase;
             let limit = track_limit(track);
@@ -1418,9 +1423,14 @@ fn distribute_space_up_to_limits(
             }
             let increase = iteration_item_incurred_increase * track_distribution_proportion(track);
             if increase > 0.0 && current_size + increase <= limit + THRESHOLD {
+                let before = track.item_incurred_increase;
                 track.item_incurred_increase += increase;
+                grew |= track.item_incurred_increase != before;
                 space_to_distribute -= increase;
             }
+        }
+        if !grew {
+            break;
         }
     }
 

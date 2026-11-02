@@ -3,7 +3,7 @@
 //
 // Ported from the Redrob Launcher setup (redrob-labs/redrob-launcher, installer/windows/), itself from the
 // Redrob Canvas setup; all our own code. The window, the language screen and the design-system rules are
-// the launcher's. What differs: the payload is Redrob Browser's folder (the programs, the GStreamer runtime
+// the launcher's. What differs: the payload is Redrob Browser's folder (the programs, the CEF runtime
 // and the Visual C++ runtime), there is no URL scheme or App Paths entry, and an install over Redrob
 // Browser 0.1.x removes that version's MSI first.
 //

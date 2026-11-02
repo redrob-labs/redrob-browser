@@ -16,6 +16,14 @@
 #![allow(clippy::style, clippy::complexity, clippy::perf, dead_code)]
 use taffy::prelude::*;
 
+/// The maps and sets of this crate. Every layout pass fills several keyed by
+/// node id, and SipHash was a tenth of a relayout; foldhash is several times
+/// faster and still seeded per map, so page-chosen keys cannot be aimed at
+/// collisions.
+pub type HashMap<K, V> = std::collections::HashMap<K, V, foldhash::fast::RandomState>;
+/// See [`HashMap`].
+pub type HashSet<K> = std::collections::HashSet<K, foldhash::fast::RandomState>;
+
 pub mod css;
 pub mod video_header;
 
@@ -33,7 +41,11 @@ pub mod prof {
     pub const SHEET_SOURCES: usize = 5;
     pub const RETAIN_CHECKS: usize = 6;
     pub const STYLE_PLAN: usize = 7;
-    const NAMES: [&str; 8] = [
+    pub const IFC_LAYOUT: usize = 8;
+    pub const STYLE_SHARE_HIT: usize = 9;
+    pub const STYLE_SHARE_MISS: usize = 10;
+    pub const STYLE_UNCHANGED: usize = 11;
+    const NAMES: [&str; 12] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -42,9 +54,13 @@ pub mod prof {
         "sheet_sources",
         "retain_checks",
         "style_plan",
+        "ifc_layout",
+        "style_share_hit",
+        "style_share_miss",
+        "style_unchanged",
     ];
-    static NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-    static COUNTS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    static NANOS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
+    static COUNTS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
@@ -66,6 +82,15 @@ pub mod prof {
         if enabled() {
             COUNTS[slot].fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// A phase mark: now, and how many inline formatting contexts were laid
+    /// out so far.
+    pub fn mark() -> (std::time::Instant, u64) {
+        (
+            std::time::Instant::now(),
+            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed),
+        )
     }
 
     /// Format and reset every counter.
@@ -1418,6 +1443,19 @@ pub enum TextOrientation {
     Sideways,
 }
 
+/// An intrinsic `width` keyword (CSS Sizing 3 §3.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum IntrinsicWidth {
+    /// `fit-content`: max-content clamped between min-content and the
+    /// available space.
+    #[default]
+    FitContent,
+    /// `max-content`: the widest the content can be, ignoring available space.
+    MaxContent,
+    /// `min-content`: the narrowest the content can be.
+    MinContent,
+}
+
 /// The subset of CSS that influences box layout. Expanded in later phases.
 /// `PartialEq` lets paint damage tell an unchanged style from a changed one.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1503,6 +1541,9 @@ pub struct LayoutStyle {
     /// so `width` remains `Auto` while the DOM layout convergence pass applies
     /// the CSS shrink-to-fit formula from min/max-content measurements.
     pub width_fit_content: bool,
+    /// Which intrinsic keyword `width_fit_content` stands for: the shrink-to-
+    /// fit `fit-content` clamp, or the bare `max-content`/`min-content` size.
+    pub width_intrinsic: IntrinsicWidth,
     pub height: Dimension,
     /// Which box edge `width`/`height` and min/max sizes describe. CSS starts
     /// at `content-box`; many modern reset sheets opt into `border-box`.
@@ -1718,6 +1759,10 @@ pub struct LayoutStyle {
     /// `font_size` (px) during the inheritance pass against the parent and
     /// root font-sizes. `None` when font-size was absolute or unset.
     pub font_size_raw: Option<Dimension>,
+    /// No element from the root to this one (inclusive) set `font-size`, so
+    /// it is still the `medium` keyword. Recorded by the inheritance pass so
+    /// a retained style can seed it for a freshly cascaded descendant.
+    pub font_size_keyword_path: bool,
     /// Deferred functional `font-size` (`clamp()`, `min()`, `max()`, `calc()`).
     /// These expressions must see the live viewport and parent font size;
     /// eagerly treating `9vw` as the number 9 made responsive headings pin to
@@ -1817,8 +1862,8 @@ pub struct LayoutStyle {
     /// so children placed by name (`grid-column: content-start / content-end`,
     /// widely used by the Guardian and other editorial grids) are resolved to
     /// numeric lines against these maps in `dom::resolve_grid_areas`.
-    pub grid_col_line_names: Option<std::collections::HashMap<String, i16>>,
-    pub grid_row_line_names: Option<std::collections::HashMap<String, i16>>,
+    pub grid_col_line_names: Option<crate::HashMap<String, i16>>,
+    pub grid_row_line_names: Option<crate::HashMap<String, i16>>,
     /// Raw `grid-column`/`grid-row` value when it references a named line (so it
     /// cannot be resolved to a `taffy::Line` until the parent's line-name map is
     /// known). Resolved in the same later pass; numeric/`span` values still fill
@@ -1905,6 +1950,15 @@ pub struct LayoutStyle {
     /// resolves against the absolute box's real containing block. Owned
     /// here for the lifetime of every layout of this style.
     pub(crate) inset_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
+    /// calc() paddings with a percentage (top/right/bottom/left), handed to
+    /// Taffy so the percentage resolves against the final containing-block
+    /// width. `padding` holds the style pass's estimate until layout syncs it.
+    pub(crate) padding_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 4],
+    /// calc() sizes with a percentage (width, height, min/max width, min/max
+    /// height) of an absolutely positioned box, handed to Taffy so they
+    /// resolve against the real containing block (the positioned ancestor's
+    /// padding box), which the style pass cannot know.
+    pub(crate) size_calc: [Option<std::sync::Arc<crate::style::GridCalcExpression>>; 6],
 
     /// `overflow`/-x/-y other than `visible`: clips this element's descendants
     /// to its border box during paint. This is what makes the ubiquitous
@@ -2669,10 +2723,10 @@ pub struct WaapiAnimation {
 /// Node ids are document-scoped, so navigation must replace this value.
 #[derive(Debug, Clone, Default)]
 pub struct AnimationTimelineState {
-    display_suppressed: std::collections::HashSet<obscura_dom::tree::NodeId>,
-    instances: std::collections::HashMap<obscura_dom::tree::NodeId, AnimationInstance>,
-    start_candidates: std::collections::HashMap<obscura_dom::tree::NodeId, f32>,
-    subtree_start_candidates: std::collections::HashMap<obscura_dom::tree::NodeId, f32>,
+    display_suppressed: crate::HashSet<obscura_dom::tree::NodeId>,
+    instances: crate::HashMap<obscura_dom::tree::NodeId, AnimationInstance>,
+    start_candidates: crate::HashMap<obscura_dom::tree::NodeId, f32>,
+    subtree_start_candidates: crate::HashMap<obscura_dom::tree::NodeId, f32>,
     waapi: std::collections::BTreeMap<u64, WaapiAnimation>,
 }
 
@@ -2735,7 +2789,7 @@ impl AnimationTimelineState {
     /// Exact set of nodes currently targeted by registered Web Animations.
     /// The render preparation boundary additionally filters disconnected
     /// targets against the current DOM before producing restyle damage.
-    pub fn waapi_nodes(&self) -> std::collections::HashSet<obscura_dom::tree::NodeId> {
+    pub fn waapi_nodes(&self) -> crate::HashSet<obscura_dom::tree::NodeId> {
         self.waapi
             .values()
             .map(|animation| animation.node)
@@ -2772,6 +2826,25 @@ impl AnimationTimelineState {
             .collect();
         out.sort_by_key(|(node, ..)| node.index());
         out
+    }
+
+    /// `css_animations` for one element: an element runs at most one
+    /// instance, and getComputedStyle asks about its own target on every read.
+    pub fn css_animation_of(
+        &self,
+        node: obscura_dom::tree::NodeId,
+        document_time_ms: f32,
+    ) -> Option<(String, bool, f32)> {
+        self.instances.get(&node).map(|instance| {
+            let current = instance
+                .hold_time_ms
+                .unwrap_or_else(|| (document_time_ms - instance.start_ms).max(0.0));
+            (
+                instance.key.name.clone(),
+                instance.script_paused || instance.was_paused,
+                current,
+            )
+        })
     }
 
     /// Script control of one CSS animation instance (CSSAnimation): pause,
@@ -3136,7 +3209,12 @@ fn initialize_grid_calc_contexts(
 }
 
 pub(crate) fn new_taffy_tree<NodeContext>() -> TaffyTree<NodeContext> {
-    let mut tree = TaffyTree::new();
+    new_taffy_tree_with_capacity(16)
+}
+
+/// `new_taffy_tree` with room for `capacity` nodes before it grows.
+pub(crate) fn new_taffy_tree_with_capacity<NodeContext>(capacity: usize) -> TaffyTree<NodeContext> {
+    let mut tree = TaffyTree::with_capacity(capacity);
     // Every opaque handle is backed by an Arc retained in the LayoutStyle
     // map/input tree, which outlives all computations on `tree`.
     tree.set_calc_resolver(crate::style::resolve_grid_calc);
@@ -3249,6 +3327,31 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
         width: dimension(style.max_width),
         height: dimension(style.max_height),
     };
+    if style.position == Some(taffy::Position::Absolute) && !style.position_fixed {
+        let calc = |index: usize| {
+            style.size_calc[index]
+                .as_ref()
+                .map(|calc| taffy::Dimension::calc(std::sync::Arc::as_ptr(calc).cast()))
+        };
+        if let Some(value) = calc(0) {
+            s.size.width = value;
+        }
+        if let Some(value) = calc(1) {
+            s.size.height = value;
+        }
+        if let Some(value) = calc(2) {
+            s.min_size.width = value;
+        }
+        if let Some(value) = calc(3) {
+            s.min_size.height = value;
+        }
+        if let Some(value) = calc(4) {
+            s.max_size.width = value;
+        }
+        if let Some(value) = calc(5) {
+            s.max_size.height = value;
+        }
+    }
     // Two definite replaced axes size independently of the preferred ratio.
     // Keep the decoded ratio in LayoutStyle for object fitting, but do not let
     // Taffy transfer min/max constraints to the other authored axis. Percentage
@@ -3366,6 +3469,19 @@ pub(crate) fn to_taffy_style(style: &LayoutStyle) -> Style {
 
     s.margin = rect_auto(style.margin, style.margin_auto);
     s.padding = rect_lp_percent(style.padding, style.padding_percent);
+    for (index, side) in [
+        &mut s.padding.top,
+        &mut s.padding.right,
+        &mut s.padding.bottom,
+        &mut s.padding.left,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if let Some(calc) = &style.padding_calc[index] {
+            *side = taffy::style::LengthPercentage::calc(std::sync::Arc::as_ptr(calc).cast());
+        }
+    }
     s.border = rect_lp(style.border);
     if style.ignores_used_box_sizes() {
         // Block-axis margins on an ordinary non-replaced inline neither move

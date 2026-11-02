@@ -408,7 +408,41 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
             );
         });
     }
+    about(ui, act);
 }
+
+/// The version, and the licences of Chromium and everything it is built
+/// from (`CREDITS.html` in the bundle).
+fn about(ui: &mut egui::Ui, act: &mut Actions) {
+    theme::card(ui, t("About Redrob Browser"), "", |ui| {
+        ui.label(
+            egui::RichText::new(tf(
+                "Version {0}, with Chromium {1}",
+                &[&env!("CARGO_PKG_VERSION"), &CHROMIUM_VERSION],
+            ))
+            .color(theme::palette(ui).ink_secondary),
+        );
+        let credits = crate::bundle::credits_file()
+            .and_then(|p| url::Url::from_file_path(p).ok())
+            .map(String::from);
+        match credits {
+            Some(url) => {
+                if theme::button(ui, t("Open-source licences"), false).clicked() {
+                    act.open_new_tab = Some(url);
+                }
+            }
+            None => {
+                ui.label(
+                    egui::RichText::new(t("The licences come with the installed browser."))
+                        .color(theme::palette(ui).ink_secondary),
+                );
+            }
+        }
+    });
+}
+
+/// The Chromium the `cef` crate brings (`156.3.0+156.0.15` is Chromium 156).
+const CHROMIUM_VERSION: &str = "156";
 
 /// The first letter or digit of `text`, upper-cased, for a list badge.
 fn badge_letter(text: &str) -> String {

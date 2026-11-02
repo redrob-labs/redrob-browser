@@ -22,7 +22,7 @@ fn fixed_coordinate_walk_does_not_copy_dom_payloads() {
     let (actual, bytes) = allocations::measure(|| laid.viewport_fixed_nodes(&tree));
     assert_eq!(
         actual,
-        HashSet::from([fixed, child]),
+        HashSet::from_iter([fixed, child]),
         "fixed descendants share viewport coordinates; closed details content does not render"
     );
     assert!(

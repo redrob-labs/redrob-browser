@@ -22,7 +22,7 @@
 //! When unsure the answer is bigger, never smaller: `None` means "repaint
 //! everything".
 
-use std::collections::{HashMap, HashSet};
+use crate::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::hash::Hasher;
 
@@ -133,7 +133,7 @@ impl DamageSnapshot {
         let globals = globals.finish();
         let mut full = !self.started || globals != self.globals || !background_same;
         // Boxes painting a resource whose bytes changed.
-        let mut resource_users = HashSet::new();
+        let mut resource_users = HashSet::default();
         if !full {
             match changed_resources {
                 Some([]) => {}
@@ -148,8 +148,9 @@ impl DamageSnapshot {
         // Styles: compare with the previous frame, cloning only changes. An
         // unchanged epoch has the same styles and text.
         let same_epoch = self.started && self.epoch == prepared.paint_epoch;
-        let mut restyled: HashSet<NodeId> = HashSet::new();
-        let mut live: HashSet<NodeId> = HashSet::with_capacity(laid.styles.len());
+        let mut restyled: HashSet<NodeId> = HashSet::default();
+        let mut live: HashSet<NodeId> =
+            HashSet::with_capacity_and_hasher(laid.styles.len(), Default::default());
         let walk = &self.walk;
         let mut check_style =
             |id: NodeId, owner: NodeId, styles: &mut HashMap<NodeId, LayoutStyle>| {
@@ -180,8 +181,9 @@ impl DamageSnapshot {
         }
 
         // Boxes.
-        let mut items: HashMap<Key, Item> = HashMap::with_capacity(self.items.len());
-        let mut generated: HashMap<NodeId, Rect> = HashMap::new();
+        let mut items: HashMap<Key, Item> =
+            HashMap::with_capacity_and_hasher(self.items.len(), Default::default());
+        let mut generated: HashMap<NodeId, Rect> = HashMap::default();
         for g in &laid.generated_boxes {
             add_rect(&mut generated, g.host, g.rect);
         }
@@ -304,7 +306,7 @@ fn users_of(
         needles.push(forms);
     }
     let mut found = vec![false; needles.len()];
-    let mut users = HashSet::new();
+    let mut users = HashSet::default();
     let mut check = |text: &str, owner: NodeId, users: &mut HashSet<NodeId>| {
         for (i, forms) in needles.iter().enumerate() {
             if forms.iter().any(|form| text.contains(form.as_str())) {
@@ -420,7 +422,7 @@ fn walk(tree: &DomTree, prepared: &PreparedRender, activity: u64) -> Walk {
         activity,
         ..Walk::default()
     };
-    let mut data: HashMap<NodeId, Fnv> = HashMap::new();
+    let mut data: HashMap<NodeId, Fnv> = HashMap::default();
     let mut visited: Vec<bool> = Vec::new();
     let document = tree.document();
     // (node, nearest box, nearest block-level box)

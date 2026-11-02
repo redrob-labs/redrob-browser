@@ -22,6 +22,18 @@ pub(crate) fn compute_inline_layout(
     inputs: LayoutInput,
     block_ctx: Option<&mut BlockContext<'_>>,
 ) -> LayoutOutput {
+    let started = crate::prof::start();
+    let output = compute_inline_layout_uncounted(host, node, inputs, block_ctx);
+    crate::prof::stop(crate::prof::IFC_LAYOUT, started);
+    output
+}
+
+fn compute_inline_layout_uncounted(
+    host: &mut Host<'_>,
+    node: NodeId,
+    inputs: LayoutInput,
+    block_ctx: Option<&mut BlockContext<'_>>,
+) -> LayoutOutput {
     let Some(index) = host
         .context(node)
         .copied()
@@ -309,6 +321,13 @@ fn percentage_sized_atomics(host: &Host<'_>, ifc: &Ifc, children: &[NodeId]) -> 
 }
 
 #[allow(clippy::too_many_lines)]
+/// `OBSCURA_IFC_DEBUG`: trace every line break. Read once; the line loop
+/// runs for every line of every paragraph.
+fn ifc_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("OBSCURA_IFC_DEBUG").is_some())
+}
+
 fn layout_ifc(
     host: &mut Host<'_>,
     node: NodeId,
@@ -715,7 +734,7 @@ fn layout_ifc(
                     // A line whose content does not fit beside the floats
                     // moves down to the next band (CSS 2.2 §9.5).
                     let used = data.metrics.advance - data.metrics.hanging_advance;
-                    if std::env::var_os("OBSCURA_IFC_DEBUG").is_some() {
+                    if ifc_debug_enabled() {
                         eprintln!(
                             "[ifc] line used={used} slot={slot:?} active={has_active_floats} floats={floats_this_line} y={}..{}",
                             data.line_y_start, data.line_y_end
@@ -1051,23 +1070,40 @@ fn place_inline_boxes(
     content_box_inset: Rect<f32>,
     container_border: Rect<f32>,
 ) {
-    let mut positions: Vec<(usize, f32, f32, f32, f32)> = Vec::new();
+    let mut positions: Vec<(usize, f32, f32, f32, f32, bool)> = Vec::new();
     for line in ifc.layout.lines() {
         let metrics = *line.metrics();
+        // Whether in-flow content precedes the current item on this line.
+        let mut after_content = false;
         for item in line.items() {
-            if let PositionedLayoutItem::InlineBox(ibox) = item {
-                positions.push((
-                    ibox.id as usize,
-                    ibox.x,
-                    ibox.y,
-                    metrics.block_min_coord,
-                    metrics.block_max_coord,
-                ));
+            match item {
+                PositionedLayoutItem::InlineBox(ibox) => {
+                    positions.push((
+                        ibox.id as usize,
+                        ibox.x,
+                        ibox.y,
+                        metrics.block_min_coord,
+                        metrics.block_max_coord,
+                        after_content,
+                    ));
+                    if ifc
+                        .boxes
+                        .get(ibox.id as usize)
+                        .is_some_and(|ibox| matches!(ibox.kind, BoxKind::Atomic { .. }))
+                    {
+                        after_content = true;
+                    }
+                }
+                PositionedLayoutItem::GlyphRun(run) => {
+                    if run.advance() > 0.0 {
+                        after_content = true;
+                    }
+                }
             }
         }
     }
     let content_size = final_size - content_box_inset.sum_axes();
-    for (index, x, y, line_top, line_bottom) in positions {
+    for (index, x, y, line_top, line_bottom, after_content) in positions {
         let Some(ibox) = ifc.boxes.get(index).copied() else {
             continue;
         };
@@ -1146,11 +1182,20 @@ fn place_inline_boxes(
                 );
             }
             BoxKind::OutOfFlow => {
-                let static_position = Point {
-                    x: x + container_pb.left,
-                    y: line_top + line_box_top,
+                // A box that was block-level is placed as a hypothetical
+                // block: at the content-box start edge, on this line when
+                // nothing precedes it there, else below the line.
+                let static_position = if ibox.static_block {
+                    Point {
+                        x: container_pb.left,
+                        y: if after_content { line_bottom } else { line_top } + line_box_top,
+                    }
+                } else {
+                    Point {
+                        x: x + container_pb.left,
+                        y: line_top + line_box_top,
+                    }
                 };
-                let _ = line_bottom;
                 place_out_of_flow(
                     host,
                     child,

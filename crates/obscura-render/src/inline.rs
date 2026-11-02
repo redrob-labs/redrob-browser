@@ -169,21 +169,6 @@ pub(crate) fn without_shaped_item_reuse<R>(f: impl FnOnce() -> R) -> R {
     result
 }
 
-/// What a replaced leaf's measure function depends on, so a later layout can
-/// tell that it measures exactly as before.
-#[derive(Clone)]
-pub(crate) enum MeasureSignature {
-    Replaced(ReplacedItem),
-}
-
-impl MeasureSignature {
-    pub(crate) fn same_measure(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Replaced(a), Self::Replaced(b)) => a == b,
-        }
-    }
-}
-
 pub(crate) const REPLACED_CONTEXT_BIT: usize = 1usize << (usize::BITS - 1);
 
 #[derive(Clone, Copy, PartialEq)]
@@ -214,6 +199,31 @@ pub(crate) struct ReplacedItem {
 }
 
 impl ReplacedItem {
+    /// A hash of every field: equal items measure alike.
+    fn measure_key(&self) -> u64 {
+        use std::hash::BuildHasher;
+        let bits = |value: Option<f32>| value.map(f32::to_bits);
+        foldhash::fast::FixedState::default().hash_one((
+            (
+                self.independent_axes,
+                self.ratio_only,
+                self.zero_inline_min_content,
+            ),
+            [
+                bits(self.intrinsic_width),
+                bits(self.intrinsic_height),
+                bits(self.preferred_width),
+                bits(self.preferred_height),
+                bits(self.min_width),
+                bits(self.min_height),
+                bits(self.max_width),
+                bits(self.max_height),
+                bits(self.ratio_only_available_width),
+            ],
+            self.preferred_ratio.to_bits(),
+        ))
+    }
+
     fn from_style(width: f32, height: f32, style: &LayoutStyle) -> Self {
         Self::from_intrinsic(
             crate::ReplacedIntrinsic::from_dimensions(width, height),
@@ -410,14 +420,15 @@ impl TextEngine {
     }
 
     /// The measure signature of taffy context `idx`.
-    pub(crate) fn measure_signature(&self, idx: usize) -> Option<MeasureSignature> {
+    /// A key of what the replaced leaf `idx` measures from (see
+    /// `TaffyTree::set_content_key`); `None` for other contexts.
+    pub(crate) fn measure_key(&self, idx: usize) -> Option<u64> {
         if idx & REPLACED_CONTEXT_BIT == 0 {
             return None;
         }
         self.replaced
             .get(idx & !REPLACED_CONTEXT_BIT)
-            .copied()
-            .map(MeasureSignature::Replaced)
+            .map(ReplacedItem::measure_key)
     }
 
     /// Register a replaced element (img/svg/canvas/video) as a measured leaf.
