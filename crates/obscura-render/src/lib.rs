@@ -42,7 +42,9 @@ pub mod prof {
     pub const RETAIN_CHECKS: usize = 6;
     pub const STYLE_PLAN: usize = 7;
     pub const IFC_LAYOUT: usize = 8;
-    const NAMES: [&str; 9] = [
+    pub const STYLE_SHARE_HIT: usize = 9;
+    pub const STYLE_SHARE_MISS: usize = 10;
+    const NAMES: [&str; 11] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -52,9 +54,11 @@ pub mod prof {
         "retain_checks",
         "style_plan",
         "ifc_layout",
+        "style_share_hit",
+        "style_share_miss",
     ];
-    static NANOS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
-    static COUNTS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
+    static NANOS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+    static COUNTS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();

@@ -1844,6 +1844,15 @@ struct ShadowScopeDeclarations {
     important: String,
 }
 
+/// The author rules an element matches, in cascade order: what
+/// `Stylesheet::apply_matched_rules_without_scopes` applies. Equal matches
+/// with equal inputs apply alike (see `dom::StyleShareCache`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct MatchedRules {
+    normal: Vec<(u32, usize, usize)>,
+    important: Vec<(u32, usize, usize)>,
+}
+
 pub(crate) struct ShadowSlottedScope<'a> {
     pub sheet: &'a Stylesheet,
     pub host: NodeId,
@@ -4143,6 +4152,34 @@ impl Stylesheet {
             &mut shadow_scope_declarations.important,
             &shadow_host_declarations.important,
         );
+        let (normal_matched, important_matched) =
+            self.collect_matched_rules(tree, matcher, nid, id, classes, local, &mut evaluator);
+        self.apply_matched_rules(
+            nid,
+            style,
+            parent_props,
+            inline_css,
+            &shadow_scope_declarations,
+            &normal_matched,
+            &important_matched,
+            animation_sample,
+            animation_timeline,
+            ancestor_display_none,
+        )
+    }
+
+    /// Author rules matching `nid`, (normal, important), each in cascade order.
+    #[allow(clippy::too_many_arguments)]
+    fn collect_matched_rules(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[String],
+        local: &str,
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+    ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
         // Keep the two cascade priorities separate from the outset. A typical
         // stylesheet has very few important declarations, so cloning and
         // sorting every matching normal-only rule into an empty important pass
@@ -4171,7 +4208,7 @@ impl Stylesheet {
                                 rule.container_condition_id,
                                 nid,
                                 ContainerQuerySubjectKind::Element,
-                                &mut evaluator,
+                                evaluator,
                             )
                         {
                             let matched = (rule.specificity, rule.order, i);
@@ -4264,6 +4301,89 @@ impl Stylesheet {
             });
         }
 
+        (normal_matched, important_matched)
+    }
+
+    /// Whether applying `matched` (with `inline_css`) to an element gives a
+    /// result that depends only on its inputs, not on the element itself: no
+    /// CSS animation samples the timeline under the element's identity.
+    pub(crate) fn matched_rules_are_shareable(
+        &self,
+        matched: &MatchedRules,
+        inline_css: Option<&str>,
+    ) -> bool {
+        self.keyframes.is_empty()
+            || !(matched
+                .normal
+                .iter()
+                .any(|&(_, _, i)| self.rules[i].normal_flags.has_animation)
+                || matched
+                    .important
+                    .iter()
+                    .any(|&(_, _, i)| self.rules[i].important_flags.has_animation)
+                || inline_css.is_some_and(|css| css.to_ascii_lowercase().contains("animation")))
+    }
+
+    /// The author rules matching `nid`, normal and important, each in
+    /// cascade order (the winner last), when the element has no shadow scope
+    /// and no container query can apply: the first half of `apply`, for a
+    /// caller that may reuse the result of applying the same rules before.
+    pub(crate) fn matched_rules_without_scopes(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[String],
+        local: &str,
+    ) -> MatchedRules {
+        let (normal, important) =
+            self.collect_matched_rules(tree, matcher, nid, id, classes, local, &mut None);
+        MatchedRules { normal, important }
+    }
+
+    /// The second half of `apply`: apply rules already matched (and inline
+    /// declarations) to `style`. Reads nothing from the tree; the animation
+    /// timeline is the only state it changes.
+    pub(crate) fn apply_matched_rules_without_scopes(
+        &self,
+        nid: NodeId,
+        style: &mut LayoutStyle,
+        parent_props: &HashMap<String, String>,
+        inline_css: Option<&str>,
+        matched: &MatchedRules,
+        animation_sample: crate::AnimationSample,
+        animation_timeline: &mut crate::AnimationTimelineState,
+        ancestor_display_none: bool,
+    ) -> Option<HashMap<String, String>> {
+        self.apply_matched_rules(
+            nid,
+            style,
+            parent_props,
+            inline_css,
+            &ShadowScopeDeclarations::default(),
+            &matched.normal,
+            &matched.important,
+            animation_sample,
+            animation_timeline,
+            ancestor_display_none,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_matched_rules(
+        &self,
+        nid: NodeId,
+        style: &mut LayoutStyle,
+        parent_props: &HashMap<String, String>,
+        inline_css: Option<&str>,
+        shadow_scope_declarations: &ShadowScopeDeclarations,
+        normal_matched: &[(u32, usize, usize)],
+        important_matched: &[(u32, usize, usize)],
+        animation_sample: crate::AnimationSample,
+        animation_timeline: &mut crate::AnimationTimelineState,
+        ancestor_display_none: bool,
+    ) -> Option<HashMap<String, String>> {
         let (inline_normal, inline_important) = inline_css
             .map(crate::style::partition_declarations)
             .unwrap_or_default();
@@ -4322,7 +4442,7 @@ impl Stylesheet {
             if shadow_normal_flags.has_custom_properties {
                 collect_custom(&shadow_scope_declarations.normal);
             }
-            for &(_, _, i) in &normal_matched {
+            for &(_, _, i) in normal_matched {
                 let rule = &self.rules[i];
                 if rule.normal_flags.has_custom_properties {
                     collect_custom(&rule.normal_decls);
@@ -4331,7 +4451,7 @@ impl Stylesheet {
             if inline_normal_flags.has_custom_properties {
                 collect_custom(&inline_normal);
             }
-            for &(_, _, i) in &important_matched {
+            for &(_, _, i) in important_matched {
                 let rule = &self.rules[i];
                 if rule.important_flags.has_custom_properties {
                     collect_custom(&rule.important_decls);
@@ -4458,7 +4578,7 @@ impl Stylesheet {
                 inherited_color_scheme_dark,
             );
         }
-        for &(_, _, i) in &normal_matched {
+        for &(_, _, i) in normal_matched {
             let rule = &self.rules[i];
             if !rule.normal_flags.has_color_scheme {
                 continue;
@@ -4480,7 +4600,7 @@ impl Stylesheet {
                 inherited_color_scheme_dark,
             );
         }
-        for &(_, _, i) in &important_matched {
+        for &(_, _, i) in important_matched {
             let rule = &self.rules[i];
             if !rule.important_flags.has_color_scheme {
                 continue;
@@ -4523,7 +4643,7 @@ impl Stylesheet {
             shadow_normal_flags.has_var,
         );
         crate::style::apply_declarations_with_locked_color_scheme(style, &expanded);
-        for &(_, _, i) in &normal_matched {
+        for &(_, _, i) in normal_matched {
             let rule = &self.rules[i];
             let expanded =
                 substitute_declarations(&rule.normal_decls, props, rule.normal_flags.has_var);
@@ -4549,7 +4669,7 @@ impl Stylesheet {
             let mut animation_style = style.clone();
             // The winning display declaration participates in animation
             // eligibility, including !important and shadow-scope declarations.
-            for &(_, _, i) in &important_matched {
+            for &(_, _, i) in important_matched {
                 let rule = &self.rules[i];
                 let expanded = substitute_declarations(
                     &rule.important_decls,
@@ -4629,7 +4749,7 @@ impl Stylesheet {
                 .iter()
                 .any(|&(_, _, i)| self.rules[i].important_flags.has_opacity);
 
-        for &(_, _, i) in &important_matched {
+        for &(_, _, i) in important_matched {
             let rule = &self.rules[i];
             let expanded =
                 substitute_declarations(&rule.important_decls, props, rule.important_flags.has_var);

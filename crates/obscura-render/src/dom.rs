@@ -3406,6 +3406,94 @@ fn apply_picture_source_hints(
     style.aspect_ratio_is_intrinsic = style.aspect_ratio.is_some();
 }
 
+/// What applying author rules to an element reads besides the style it
+/// starts from: the sheet, the matched rules in cascade order, the inline
+/// declarations, the inherited custom properties (by identity) and whether an
+/// ancestor is `display:none`.
+#[derive(PartialEq)]
+struct StyleShareKey {
+    sheet: *const crate::css::Stylesheet,
+    matched: crate::css::MatchedRules,
+    inline: Option<String>,
+    parent_props: std::rc::Rc<HashMap<String, String>>,
+    ancestor_display_none: bool,
+}
+
+impl StyleShareKey {
+    fn hash(&self) -> u64 {
+        use std::hash::BuildHasher;
+        foldhash::fast::FixedState::default().hash_one((
+            self.sheet as usize,
+            &self.matched,
+            &self.inline,
+            std::rc::Rc::as_ptr(&self.parent_props) as usize,
+            self.ancestor_display_none,
+        ))
+    }
+}
+
+/// Style sharing within one cascade pass. Siblings and repeated components
+/// (list items, comment threads, video tiles) match the same rules from the
+/// same starting style under the same inherited custom properties; applying
+/// the declarations again would give the same style, so the first result is
+/// cloned instead. An entry holds its parent property map, so the identity in
+/// the key cannot be reused by another map during the pass.
+#[derive(Default)]
+pub(crate) struct StyleShareCache {
+    entries: HashMap<u64, Vec<StyleShareEntry>>,
+    len: usize,
+}
+
+struct StyleShareEntry {
+    key: StyleShareKey,
+    input: crate::LayoutStyle,
+    output: crate::LayoutStyle,
+    props: Option<std::rc::Rc<HashMap<String, String>>>,
+}
+
+impl StyleShareCache {
+    /// Entries kept per pass; a document with more distinct styles keeps
+    /// cascading the rest normally.
+    const CAPACITY: usize = 4096;
+
+    fn get(
+        &self,
+        key: &StyleShareKey,
+        input: &crate::LayoutStyle,
+    ) -> Option<(
+        crate::LayoutStyle,
+        Option<std::rc::Rc<HashMap<String, String>>>,
+    )> {
+        self.entries
+            .get(&key.hash())?
+            .iter()
+            .find(|entry| entry.key == *key && entry.input == *input)
+            .map(|entry| (entry.output.clone(), entry.props.clone()))
+    }
+
+    fn insert(
+        &mut self,
+        key: StyleShareKey,
+        input: crate::LayoutStyle,
+        output: crate::LayoutStyle,
+        props: Option<std::rc::Rc<HashMap<String, String>>>,
+    ) {
+        if self.len >= Self::CAPACITY {
+            return;
+        }
+        self.len += 1;
+        self.entries
+            .entry(key.hash())
+            .or_default()
+            .push(StyleShareEntry {
+                key,
+                input,
+                output,
+                props,
+            });
+    }
+}
+
 /// Compute the UA + author style for every element in preorder, maintaining
 /// `matcher`'s ancestor filter as we descend so descendant-combinator rules
 /// fast-reject correctly. Non-element nodes (text, comments) are skipped but
@@ -3433,6 +3521,7 @@ fn cascade_node_style(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
     ancestor_display_none: bool,
+    share: Option<&mut StyleShareCache>,
 ) -> Option<(
     std::rc::Rc<HashMap<String, String>>,
     Option<f32>,
@@ -3679,25 +3768,87 @@ fn cascade_node_style(
             }
             assigned_slot = tree.assigned_slot(slot);
         }
-        let effective_props = sheet.apply_with_shadow_scopes_at_animation_time(
-            shadow_host_sheet.map(|sheet| &**sheet),
-            &slotted_scopes,
-            tree,
-            matcher,
-            id,
-            node_id,
-            &classes,
-            elem.local.as_ref(),
-            &mut style,
-            parent_props,
-            node.get_attribute("style"),
-            container_evaluator.as_deref_mut(),
-            animation_sample,
-            animation_timeline,
-            ancestor_display_none,
-        );
-        if let Some(m) = effective_props {
-            this_props = std::rc::Rc::new(m);
+        let share = share.filter(|_| {
+            shadow_host_sheet.is_none()
+                && slotted_scopes.is_empty()
+                && container_evaluator.is_none()
+                && animation_timeline
+                    .waapi_for_node(id, animation_sample.time)
+                    .next()
+                    .is_none()
+        });
+        if let Some(share) = share {
+            let matched = sheet.matched_rules_without_scopes(
+                tree,
+                matcher,
+                id,
+                node_id,
+                &classes,
+                elem.local.as_ref(),
+            );
+            let inline = node.get_attribute("style");
+            let shareable = sheet.matched_rules_are_shareable(&matched, inline);
+            let key = StyleShareKey {
+                sheet: sheet as *const crate::css::Stylesheet,
+                matched,
+                inline: inline.map(str::to_owned),
+                parent_props: parent_props.clone(),
+                ancestor_display_none,
+            };
+            match shareable.then(|| share.get(&key, &style)).flatten() {
+                Some((shared, props)) => {
+                    crate::prof::count(crate::prof::STYLE_SHARE_HIT);
+                    style = shared;
+                    if let Some(props) = props {
+                        this_props = props;
+                    }
+                    // What applying the rules does to the timeline of an
+                    // element without CSS animations.
+                    animation_timeline.clear_animation(id, animation_sample);
+                }
+                None => {
+                    crate::prof::count(crate::prof::STYLE_SHARE_MISS);
+                    let input = shareable.then(|| style.clone());
+                    let effective_props = sheet.apply_matched_rules_without_scopes(
+                        id,
+                        &mut style,
+                        parent_props,
+                        inline,
+                        &key.matched,
+                        animation_sample,
+                        animation_timeline,
+                        ancestor_display_none,
+                    );
+                    let effective_props = effective_props.map(std::rc::Rc::new);
+                    if let Some(props) = effective_props.as_ref() {
+                        this_props = props.clone();
+                    }
+                    if let Some(input) = input {
+                        share.insert(key, input, style.clone(), effective_props);
+                    }
+                }
+            }
+        } else {
+            let effective_props = sheet.apply_with_shadow_scopes_at_animation_time(
+                shadow_host_sheet.map(|sheet| &**sheet),
+                &slotted_scopes,
+                tree,
+                matcher,
+                id,
+                node_id,
+                &classes,
+                elem.local.as_ref(),
+                &mut style,
+                parent_props,
+                node.get_attribute("style"),
+                container_evaluator.as_deref_mut(),
+                animation_sample,
+                animation_timeline,
+                ancestor_display_none,
+            );
+            if let Some(m) = effective_props {
+                this_props = std::rc::Rc::new(m);
+            }
         }
         custom_properties.insert(id, this_props.clone());
         style.is_replaced_box |= style.content_image.is_some();
@@ -3803,6 +3954,7 @@ fn cascade_walk(
     inherited_color_scheme_dark: bool,
     fresh_styles: Option<&HashSet<NodeId>>,
     fresh_ancestors: Option<&HashSet<NodeId>>,
+    mut share: Option<&mut StyleShareCache>,
 ) {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum MatcherBase {
@@ -3907,6 +4059,7 @@ fn cascade_walk(
                     visit.color_scheme_dark,
                     fresh_styles,
                     visit.display_none,
+                    share.as_deref_mut(),
                 )
                 else {
                     continue;
@@ -5969,6 +6122,7 @@ impl NonGeometricStyleCache {
                 dark,
                 None,
                 ancestor_display_none,
+                None,
             )?;
             props = next_props;
             cell_padding = next_padding;
@@ -6677,7 +6831,13 @@ fn layout_dom_once(
     let mut matcher = tree.matcher();
     let (mut styles, mut custom_properties, fresh_styles) = match retained {
         Some((retained, fresh)) => (retained.styles, retained.custom_properties, Some(fresh)),
-        None => (HashMap::default(), HashMap::default(), None),
+        // Sized up front: growing a map of computed styles moves every
+        // (large) style each time it doubles.
+        None => (
+            HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
+            HashMap::with_capacity_and_hasher(tree.len(), Default::default()),
+            None,
+        ),
     };
     let root_props = std::rc::Rc::new(HashMap::default());
     let mut evaluator =
@@ -6716,6 +6876,7 @@ fn layout_dom_once(
         false,
         fresh_styles.as_ref(),
         fresh_ancestors.as_ref(),
+        Some(&mut StyleShareCache::default()),
     );
     resolve_css_counters(tree, &mut styles);
     let cascade_time = t1.elapsed();
