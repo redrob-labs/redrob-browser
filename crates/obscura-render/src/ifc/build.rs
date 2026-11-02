@@ -142,7 +142,9 @@ pub(crate) struct IfcReuseKey {
 
 /// A shaped IFC as `create` made it, before any line layout.
 pub(crate) struct IfcTemplate {
-    key: IfcReuseKey,
+    /// Boxed: the key holds whole computed styles, and templates move
+    /// between stores (and grow their vectors) every layout.
+    key: Box<IfcReuseKey>,
     ifc: Box<Ifc>,
 }
 
@@ -740,7 +742,18 @@ impl IfcStore {
             if let Some(template) = take_template(
                 tree, styles, fonts, root, root_style, anonymous, items, &params,
             ) {
-                let mut ifc = template.ifc.clone();
+                // The previous layout's laid-out IFC of this template has
+                // the same content; its line layout is what a reused Taffy
+                // layout needs (see `Ifc::adopt_layout_of`) and any other
+                // layout breaks its lines again. Take it rather than copy
+                // the template.
+                let mut ifc = match take_previous_laid(template.ifc.template_id) {
+                    Some(mut laid) => {
+                        laid.reused_laid = true;
+                        laid
+                    }
+                    None => template.ifc.clone(),
+                };
                 let mut nodes = items.iter().filter_map(|item| match item {
                     Item::Atomic { node, .. }
                     | Item::Float { node, .. }
@@ -1265,6 +1278,7 @@ impl IfcStore {
             logical_size: (0.0, 0.0),
             clip: None,
             marker,
+            reused_laid: false,
             template_id: if key.is_some() {
                 NEXT_TEMPLATE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             } else {
@@ -1273,7 +1287,7 @@ impl IfcStore {
         });
         if let Some(key) = key {
             self.templates.push(IfcTemplate {
-                key,
+                key: Box::new(key),
                 ifc: ifc.clone(),
             });
         }

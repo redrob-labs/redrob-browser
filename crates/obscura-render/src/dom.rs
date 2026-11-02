@@ -593,6 +593,33 @@ fn ifc_context_template(store: &crate::ifc::IfcStore, ctx: usize) -> Option<u64>
         .filter(|&id| id != 0)
 }
 
+/// `is_css_whitespace(&tree.text_content(id))` without copying the text of a
+/// character data node.
+pub(crate) fn text_is_css_whitespace(tree: &DomTree, id: NodeId) -> bool {
+    use obscura_dom::tree::NodeData;
+    tree.with_node(id, |node| match &node.data {
+        NodeData::Text { contents } | NodeData::Comment { contents } => {
+            Some(crate::ifc::build::is_css_whitespace(contents))
+        }
+        NodeData::ProcessingInstruction { data, .. } => {
+            Some(crate::ifc::build::is_css_whitespace(data))
+        }
+        _ => None,
+    })
+    .flatten()
+    .unwrap_or_else(|| crate::ifc::build::is_css_whitespace(&tree.text_content(id)))
+}
+
+/// Whether the IFC a Taffy node context names is a previous layout's
+/// laid-out IFC taken over whole (see `ifc::Ifc::reused_laid`).
+fn ifc_reuses_laid(store: &crate::ifc::IfcStore, ctx: usize) -> bool {
+    ctx & crate::ifc::IFC_CONTEXT_BIT != 0
+        && ctx & crate::inline::REPLACED_CONTEXT_BIT == 0
+        && store
+            .get(ctx & !crate::ifc::IFC_CONTEXT_BIT)
+            .is_some_and(|ifc| ifc.reused_laid)
+}
+
 fn taffy_style_uses_calc(style: &taffy::Style) -> bool {
     let track = |track: &taffy::TrackSizingFunction| {
         track.min.into_raw().is_calc() || track.max.into_raw().is_calc()
@@ -689,7 +716,10 @@ fn assign_content_keys(
             key = match engine.measure_key(ctx) {
                 Some(key) => key,
                 None => match ifc_context_template(ifc_store, ctx) {
-                    Some(template) if crate::ifc::build::has_previous_laid(template) => {
+                    Some(template)
+                        if ifc_reuses_laid(ifc_store, ctx)
+                            || crate::ifc::build::has_previous_laid(template) =>
+                    {
                         template ^ 0x6c62_272e_07bb_0142
                     }
                     _ => unique_content_key(),
@@ -14698,7 +14728,7 @@ fn build_flex_grid_children(
         EffectiveGridChild::Dom(node) => {
             tree.borrow_node(*node)
                 .is_some_and(|node| node.is_element())
-                || !crate::ifc::build::is_css_whitespace(&tree.text_content(*node))
+                || !text_is_css_whitespace(tree, *node)
         }
         EffectiveGridChild::Generated { .. } => true,
     });
@@ -15745,12 +15775,11 @@ fn cell_has_only_block_children(
             continue;
         };
         if !node.is_element() {
-            if matches!(node.data, obscura_dom::tree::NodeData::Text { .. })
-                && !tree
-                    .text_content(child)
+            if node.text_content_of_text_node().is_some_and(|text| {
+                !text
                     .trim_matches([' ', '\t', '\n', '\r', '\x0c'])
                     .is_empty()
-            {
+            }) {
                 return false;
             }
             continue;
@@ -15831,7 +15860,7 @@ fn collect_css_table(
     let kind = |node: NodeId| {
         let is_element = tree.borrow_node(node).is_some_and(|n| n.is_element());
         if !is_element {
-            return if crate::ifc::build::is_css_whitespace(&tree.text_content(node)) {
+            return if text_is_css_whitespace(tree, node) {
                 Kind::Skip
             } else {
                 Kind::Other
@@ -16458,12 +16487,11 @@ fn children_form_anonymous_table(
             continue;
         };
         if !node.is_element() {
-            if matches!(node.data, obscura_dom::tree::NodeData::Text { .. })
-                && !tree
-                    .text_content(child)
+            if node.text_content_of_text_node().is_some_and(|text| {
+                !text
                     .trim_matches([' ', '\t', '\n', '\r', '\x0c'])
                     .is_empty()
-            {
+            }) {
                 return false;
             }
             continue;
@@ -18550,7 +18578,7 @@ fn build(
         dom_children = flat;
         dom_children.retain(|&cid| {
             tree.borrow_node(cid).is_some_and(|n| n.is_element())
-                || !crate::ifc::build::is_css_whitespace(&tree.text_content(cid))
+                || !text_is_css_whitespace(tree, cid)
         });
         dom_children.sort_by_key(|cid| styles.get(cid).map(|style| style.order).unwrap_or(0));
         // Main-axis auto margins absorb positive free space before

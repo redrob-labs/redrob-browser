@@ -236,6 +236,10 @@ pub(crate) struct Ifc {
     /// The [`build::IfcTemplate`] this IFC was shaped as (0: none). Two
     /// IFCs of one template have the same content and lay out alike.
     pub(crate) template_id: u64,
+    /// This is the previous layout's laid-out IFC of its template, taken
+    /// over whole (see `IfcStore::create`): it already has the line layout
+    /// `adopt_layout_of` would give it.
+    pub(crate) reused_laid: bool,
 }
 
 impl Ifc {
