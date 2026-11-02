@@ -1,21 +1,27 @@
 //! In-place update. When `updater` finds a newer release, the window can fetch
 //! the package for this platform into the profile folder, check its SHA-256
-//! against the release's `SHA256SUMS.txt`, and put the new files where the
-//! running ones are:
+//! against the release's `SHA256SUMS.txt`, and unpack it beside the running
+//! copy. A package is the whole bundle: the programs and the CEF runtime
+//! (libcef, its resources, `locales/`, `CREDITS.html`, `bundle-manifest.txt`;
+//! `bundle.rs`), so an update replaces all of it or nothing:
 //!
-//! - Linux: the `.tar.gz` is unpacked into a folder next to the binaries and
-//!   each of the three binaries is renamed over the old one (the old file is
-//!   kept as `<name>.old`).
+//! - Linux and Windows: the archive is unpacked into `.redrob-update` inside
+//!   the install folder and checked against its manifest. The swap moves
+//!   every entry of the old bundle into `.redrob-previous` and the new ones
+//!   into place, undoing every move when one fails (`bundle::replace`).
 //! - macOS: the `.zip` holds `Redrob Browser.app`; it is unpacked next to the
-//!   running bundle, checked with `codesign --verify --deep --strict`, and
-//!   swapped in, the old bundle kept as `Redrob Browser.app.old`.
-//! - Windows: the running `.exe` files are renamed to `.exe.old` (Windows
-//!   allows renaming a running program) and the new ones moved in.
+//!   running bundle and checked with `codesign --verify --deep --strict`. The
+//!   swap renames the running app to `Redrob Browser.app.old` and the new one
+//!   into its place, putting the old one back when the second rename fails.
 //!
-//! The new version runs after "Restart to update", which saves the session,
-//! closes the window, and starts the window binary again once the engine has
-//! stopped. When the install folder cannot be written (a system package, a
-//! read-only volume) the window offers the download page instead.
+//! The swap waits for "Restart to update", which saves the session and closes
+//! the window; once CEF has shut down and the engine stopped,
+//! `restart_if_requested` swaps and starts the new window. Swapping earlier
+//! would let the running browser start renderer or GPU processes from the
+//! new bundle (or, on Windows, fail on its open `.pak` files). When the swap
+//! fails the old bundle is back in place and the old window starts again.
+//! When the install folder cannot be written (a system package, a read-only
+//! volume) the window offers the download page instead.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -32,14 +38,39 @@ use crate::updater::{Available, DOWNLOAD_PREFIX};
 
 const USER_AGENT: &str = concat!("redrob-browser/", env!("CARGO_PKG_VERSION"));
 
-/// The window binary to start after the window has closed and the engine stopped.
-static RESTART: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// The staged update to swap in after the window has closed and the engine stopped.
+static RESTART: Mutex<Option<Staged>> = Mutex::new(None);
 
 enum Msg {
     Progress(String),
-    Ready(PathBuf),
+    Ready(Staged),
     Failed(String),
 }
+
+/// An update unpacked and checked beside the running copy, not yet in place.
+#[derive(Clone)]
+pub struct Staged {
+    kind: StagedKind,
+    /// The window binary to start once the new bundle is in place.
+    exe: PathBuf,
+}
+
+#[derive(Clone)]
+enum StagedKind {
+    Folder {
+        dir: PathBuf,
+        staging: PathBuf,
+        new_root: PathBuf,
+    },
+    Bundle {
+        app: PathBuf,
+        staging: PathBuf,
+        new_app: PathBuf,
+    },
+}
+
+const STAGING: &str = ".redrob-update";
+const PREVIOUS: &str = ".redrob-previous";
 
 /// Where the running copy lives and which files an update replaces.
 struct Install {
@@ -60,7 +91,7 @@ enum Kind {
 pub struct SelfUpdate {
     offer: Option<(Available, PathBuf)>,
     rx: Option<mpsc::Receiver<Msg>>,
-    ready: Option<PathBuf>,
+    ready: Option<Staged>,
 }
 
 impl SelfUpdate {
@@ -109,7 +140,7 @@ impl SelfUpdate {
                 ctx.request_repaint();
             };
             match run(&available, &dir, &send) {
-                Ok(exe) => send(Msg::Ready(exe)),
+                Ok(staged) => send(Msg::Ready(staged)),
                 Err(e) => send(Msg::Failed(format!("{e:#}"))),
             }
         });
@@ -122,8 +153,8 @@ impl SelfUpdate {
         while let Ok(m) = rx.try_recv() {
             match m {
                 Msg::Progress(s) => notice = Some(s),
-                Msg::Ready(exe) => {
-                    self.ready = Some(exe);
+                Msg::Ready(staged) => {
+                    self.ready = Some(staged);
                     notice = Some(t("The update is installed. Restart to use it.").to_string());
                 }
                 Msg::Failed(e) => {
@@ -139,18 +170,31 @@ impl SelfUpdate {
         notice
     }
 
-    /// Start the new window after this one exits; the caller closes the window.
+    /// Swap in the update and start the new window after this one exits; the
+    /// caller closes the window.
     pub fn restart(&self) {
-        if let Some(exe) = &self.ready {
-            *RESTART.lock().unwrap_or_else(|e| e.into_inner()) = Some(exe.clone());
+        if let Some(staged) = &self.ready {
+            *RESTART.lock().unwrap_or_else(|e| e.into_inner()) = Some(staged.clone());
         }
     }
 }
 
-/// Call from `main` after the window closed and the engine stopped.
+/// Call from `main` once the window closed, CEF shut down and the engine
+/// stopped: swaps in the staged bundle and starts its window. When the swap
+/// fails, the old bundle is back in place and the old window starts again.
 pub fn restart_if_requested() {
-    let exe = RESTART.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some(exe) = exe {
+    let staged = RESTART.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(staged) = staged {
+        let exe = match staged.commit() {
+            Ok(exe) => exe,
+            Err(e) => {
+                eprintln!("redrob-browser: the update was not installed: {e:#}");
+                match std::env::current_exe() {
+                    Ok(exe) => exe,
+                    Err(_) => return,
+                }
+            }
+        };
         if let Err(e) = crate::startup::no_console(&mut Command::new(&exe))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -162,7 +206,7 @@ pub fn restart_if_requested() {
     }
 }
 
-fn run(a: &Available, dir: &Path, send: &dyn Fn(Msg)) -> anyhow::Result<PathBuf> {
+fn run(a: &Available, dir: &Path, send: &dyn Fn(Msg)) -> anyhow::Result<Staged> {
     let install =
         locate().ok_or_else(|| anyhow::anyhow!("{}", t("this copy cannot be updated in place")))?;
     let name = asset_name(&a.url)?;
@@ -187,9 +231,9 @@ fn run(a: &Available, dir: &Path, send: &dyn Fn(Msg)) -> anyhow::Result<PathBuf>
     }
 
     send(Msg::Progress(t("Installing the update...").to_string()));
-    let exe = install.apply(&archive)?;
+    let staged = install.stage(&archive)?;
     let _ = fs::remove_file(&archive);
-    Ok(exe)
+    Ok(staged)
 }
 
 fn get(url: &str) -> anyhow::Result<ureq::Response> {
@@ -310,42 +354,50 @@ fn writable(dir: &Path) -> bool {
 }
 
 impl Install {
-    /// Put the package's files in place; returns the window binary to start.
-    fn apply(&self, archive: &Path) -> anyhow::Result<PathBuf> {
+    /// Unpack the package beside the running copy and check it is whole;
+    /// nothing of the running copy changes yet.
+    fn stage(&self, archive: &Path) -> anyhow::Result<Staged> {
         match &self.kind {
             Kind::Folder { dir } => {
-                let staging = dir.join(format!(".redrob-update-{}", std::process::id()));
+                let staging = dir.join(STAGING);
                 let _ = fs::remove_dir_all(&staging);
+                let _ = fs::remove_dir_all(dir.join(PREVIOUS));
                 fs::create_dir_all(&staging)?;
-                let result = (|| -> anyhow::Result<PathBuf> {
+                let result = (|| -> anyhow::Result<Staged> {
                     unpack(archive, &staging)?;
                     let window = binaries()[2].clone();
-                    let from = find_dir_with(&staging, &window)
+                    let new_root = find_dir_with(&staging, &window)
                         .ok_or_else(|| anyhow::anyhow!("the package has no {window}"))?;
-                    let pairs: Vec<(PathBuf, PathBuf)> = binaries()
-                        .iter()
-                        .map(|b| (from.join(b), dir.join(b)))
-                        .collect();
-                    for (new, _) in &pairs {
+                    for b in binaries() {
+                        let new = new_root.join(&b);
                         if !new.is_file() {
-                            anyhow::bail!("the package has no {}", new.display());
+                            anyhow::bail!("the package has no {b}");
                         }
-                        make_executable(new)?;
+                        make_executable(&new)?;
                     }
-                    swap_files(&pairs)?;
-                    Ok(dir.join(window))
+                    crate::bundle::check_complete(&new_root)?;
+                    Ok(Staged {
+                        kind: StagedKind::Folder {
+                            dir: dir.clone(),
+                            staging: staging.clone(),
+                            new_root,
+                        },
+                        exe: dir.join(window),
+                    })
                 })();
-                let _ = fs::remove_dir_all(&staging);
+                if result.is_err() {
+                    let _ = fs::remove_dir_all(&staging);
+                }
                 result
             }
             Kind::Bundle { app, exe_name } => {
                 let parent = app
                     .parent()
                     .ok_or_else(|| anyhow::anyhow!("the app has no folder"))?;
-                let staging = parent.join(format!(".redrob-update-{}", std::process::id()));
+                let staging = parent.join(STAGING);
                 let _ = fs::remove_dir_all(&staging);
                 fs::create_dir_all(&staging)?;
-                let result = (|| -> anyhow::Result<PathBuf> {
+                let result = (|| -> anyhow::Result<Staged> {
                     unpack(archive, &staging)?;
                     let new_app = fs::read_dir(&staging)?
                         .filter_map(Result::ok)
@@ -355,6 +407,8 @@ impl Install {
                     if !new_app.join("Contents/MacOS").join(exe_name).is_file() {
                         anyhow::bail!("the new app has no {}", Path::new(exe_name).display());
                     }
+                    // The seal covers every file of the app, the CEF framework
+                    // and helper apps included, so a verified app is whole.
                     let status = Command::new("/usr/bin/codesign")
                         .args(["--verify", "--deep", "--strict"])
                         .arg(&new_app)
@@ -364,21 +418,68 @@ impl Install {
                     if !status.success() {
                         anyhow::bail!("{}", t("the new app's signature did not verify"));
                     }
-                    let mut backup = app.clone().into_os_string();
-                    backup.push(".old");
-                    let backup = PathBuf::from(backup);
-                    let _ = fs::remove_dir_all(&backup);
-                    fs::rename(app, &backup)?;
-                    if let Err(e) = fs::rename(&new_app, app) {
-                        let _ = fs::rename(&backup, app);
-                        return Err(e.into());
-                    }
-                    Ok(app.join("Contents/MacOS").join(exe_name))
+                    Ok(Staged {
+                        kind: StagedKind::Bundle {
+                            app: app.clone(),
+                            staging: staging.clone(),
+                            new_app,
+                        },
+                        exe: app.join("Contents/MacOS").join(exe_name),
+                    })
                 })();
-                let _ = fs::remove_dir_all(&staging);
+                if result.is_err() {
+                    let _ = fs::remove_dir_all(&staging);
+                }
                 result
             }
         }
+    }
+}
+
+impl Staged {
+    /// Put the staged bundle in place of the running one; returns the window
+    /// binary to start. On failure the old bundle is back in place.
+    fn commit(self) -> anyhow::Result<PathBuf> {
+        match self.kind {
+            StagedKind::Folder {
+                dir,
+                staging,
+                new_root,
+            } => {
+                #[cfg(target_os = "linux")]
+                keep_sandbox_helper(&dir, &new_root);
+                let r = crate::bundle::replace(&dir, &new_root, &dir.join(PREVIOUS));
+                if r.is_err() && !dir.join("chrome-sandbox").exists() {
+                    let _ = fs::rename(new_root.join("chrome-sandbox"), dir.join("chrome-sandbox"));
+                }
+                let _ = fs::remove_dir_all(&staging);
+                r?;
+                // What cannot go yet (on Windows, the DLLs this process still
+                // has loaded) goes when the next update is staged.
+                let _ = fs::remove_dir_all(dir.join(PREVIOUS));
+            }
+            StagedKind::Bundle {
+                app,
+                staging,
+                new_app,
+            } => {
+                let mut backup = app.clone().into_os_string();
+                backup.push(".old");
+                let backup = PathBuf::from(backup);
+                let _ = fs::remove_dir_all(&backup);
+                let r = (|| -> std::io::Result<()> {
+                    fs::rename(&app, &backup)?;
+                    if let Err(e) = fs::rename(&new_app, &app) {
+                        let _ = fs::rename(&backup, &app);
+                        return Err(e);
+                    }
+                    Ok(())
+                })();
+                let _ = fs::remove_dir_all(&staging);
+                r?;
+            }
+        }
+        Ok(self.exe)
     }
 }
 
@@ -436,50 +537,26 @@ fn make_executable(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn old_path(target: &Path) -> PathBuf {
-    let mut s = target.as_os_str().to_os_string();
-    s.push(".old");
-    PathBuf::from(s)
-}
-
-/// Replace each target with its new file, keeping `<target>.old`. On Unix the
-/// rename over the target is atomic and the old file is kept as a hard link;
-/// on Windows a running program cannot be replaced but can be renamed, so the
-/// target moves to `.old` first. A failure puts back what was already swapped.
-fn swap_files(pairs: &[(PathBuf, PathBuf)]) -> anyhow::Result<()> {
-    let mut done: Vec<&PathBuf> = Vec::new();
-    for (new, target) in pairs {
-        let backup = old_path(target);
-        let step = (|| -> std::io::Result<()> {
-            let _ = fs::remove_file(&backup);
-            if cfg!(windows) {
-                fs::rename(target, &backup)?;
-                if let Err(e) = fs::rename(new, target) {
-                    let _ = fs::rename(&backup, target);
-                    return Err(e);
-                }
-            } else {
-                if fs::hard_link(target, &backup).is_err() {
-                    fs::copy(target, &backup)?;
-                }
-                fs::rename(new, target)?;
-            }
-            Ok(())
-        })();
-        if let Err(e) = step {
-            for t in done.into_iter().rev() {
-                let b = old_path(t);
-                if cfg!(windows) {
-                    let _ = fs::remove_file(t);
-                }
-                let _ = fs::rename(&b, t);
-            }
-            return Err(anyhow::anyhow!(
-                "could not replace {}: {e}",
-                target.display()
-            ));
-        }
-        done.push(target);
+/// A `chrome-sandbox` someone made the set-user-ID root helper (only root can)
+/// stays one across an update that ships the same helper: the old file moves
+/// into the new bundle instead of the unprivileged copy from the archive.
+#[cfg(target_os = "linux")]
+fn keep_sandbox_helper(dir: &Path, new_root: &Path) {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let old = dir.join("chrome-sandbox");
+    let new = new_root.join("chrome-sandbox");
+    let Ok(m) = fs::metadata(&old) else { return };
+    if m.uid() != 0 || m.permissions().mode() & 0o4000 == 0 {
+        return;
     }
-    Ok(())
+    let same = match (fs::read(&old), fs::read(&new)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same {
+        // A rename over the archive's copy: the new bundle always has one.
+        if fs::rename(&old, &new).is_err() {
+            eprintln!("redrob-browser: chrome-sandbox could not be kept; set it up again after the update");
+        }
+    }
 }

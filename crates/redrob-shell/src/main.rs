@@ -13,6 +13,7 @@ mod account;
 mod agent_bridge;
 mod autoscroll;
 mod browser;
+mod bundle;
 mod cdp;
 mod cef;
 mod compositor;
