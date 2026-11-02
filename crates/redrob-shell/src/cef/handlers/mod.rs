@@ -5,7 +5,6 @@
 //! The window draws what they report with `ui::Prompts`; ops the engine does
 //! not handle itself go to [`run_op`].
 
-pub mod clipboard;
 pub mod context_menu;
 pub mod cookies;
 pub mod download;
@@ -85,17 +84,7 @@ pub(crate) fn on_ui(job: impl FnOnce() + Send + 'static) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
-/// Whether `op` is a feature op [`run_op`] answers.
-pub fn is_feature(op: &Op) -> bool {
-    use crate::cef::input::Edit;
-    match op {
-        Op::Find { .. } | Op::StopFind | Op::Zoom(_) | Op::Print => true,
-        Op::Edit(Edit::Copy | Edit::Cut | Edit::Paste) => clipboard::OWN,
-        _ => false,
-    }
-}
-
-/// Handle a feature op (find, zoom, print, Linux copy and paste) for `browser`.
+/// Handle a feature op (find, zoom, print) for `browser`.
 pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
     match op {
         Op::Find {
@@ -110,15 +99,6 @@ pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
             sink.send(browser.identifier(), Event::Zoom(percent));
         }
         Op::Print => print::print(sink, browser),
-        Op::Edit(e) => {
-            use crate::cef::input::Edit;
-            match e {
-                Edit::Copy => clipboard::copy(sink, browser, false),
-                Edit::Cut => clipboard::copy(sink, browser, true),
-                Edit::Paste => clipboard::paste(browser),
-                _ => {}
-            }
-        }
         _ => {}
     }
 }

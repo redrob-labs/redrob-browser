@@ -4,17 +4,25 @@
 //! `cdp::Update` comes out. This module answers that contract with CEF
 //! instead of the Obscura child process.
 //!
-//! CEF runs in the window process with windowless (off-screen) rendering
-//! and an external message pump: the eframe loop calls [`pump`] every pass
-//! and whenever CEF asks for it, so every CEF callback runs on the window's
-//! own thread. Renderer, GPU and utility processes are this executable
+//! CEF runs in the window process, on the window's own thread: the eframe
+//! loop calls [`pump`] every pass and whenever Chromium has work, so every
+//! CEF callback runs on the window's thread. On Windows and macOS CEF says
+//! when through its external message pump. On Linux Chromium keeps its own
+//! glib message loop, which [`pump`] runs until idle, and the window learns
+//! of its work from glib's descriptors (wake.rs): the external pump returns
+//! from every nested run loop (drag and drop) within 10 ms. Each tab's page
+//! is a native child window of its browser window (native.rs). Renderer, GPU and utility processes are this executable
 //! started again with `--type=...`; [`subprocess`] runs them.
 
 pub mod app;
 pub mod client;
 pub mod handlers;
-pub mod input;
-pub mod osr;
+pub mod keys;
+pub mod native;
+#[cfg(target_os = "linux")]
+mod wake;
+#[cfg(target_os = "linux")]
+pub mod xdnd;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -87,11 +95,6 @@ impl Sink {
     pub fn send_global(&self, event: Event) {
         let _ = self.tx.send(Update { tab: 0, event });
         (self.wake)(None);
-    }
-
-    /// Redraw the window showing `tab` (a new frame, a cursor change).
-    pub fn repaint(&self, tab: TabId) {
-        (self.wake)(Some(tab));
     }
 }
 
@@ -325,8 +328,7 @@ pub fn start(config: Config) -> anyhow::Result<()> {
 
     let resources = resources_dir();
     let mut settings = cef::Settings {
-        windowless_rendering_enabled: 1,
-        external_message_pump: 1,
+        external_message_pump: (!cfg!(target_os = "linux")) as _,
         no_sandbox: (!sandbox_usable()) as _,
         root_cache_path: CefString::from(config.root.to_string_lossy().as_ref()),
         cache_path: CefString::from(
@@ -491,10 +493,19 @@ pub fn pump() {
     PUMPS.fetch_add(1, Ordering::Relaxed);
     *PUMP_DUE.lock().unwrap_or_else(|e| e.into_inner()) = None;
     cef::do_message_loop_work();
+    #[cfg(target_os = "linux")]
+    wake::after_pump();
     IN_PUMP.set(false);
     // A pass now and then even when CEF scheduled none, so nothing it
-    // forgot to ask for stalls; CEF asks for every pass it needs.
-    schedule(Duration::from_millis(200));
+    // forgot to ask for stalls. On Linux this is also when Chromium's
+    // delayed tasks run (glib cannot tell when they are due between
+    // pumps; everything posted, and every X11 event, wakes it at once):
+    // often while Chromium is busy, rarely once it has been idle a while.
+    #[cfg(target_os = "linux")]
+    let every = if wake::busy_lately() { 100 } else { 1000 };
+    #[cfg(not(target_os = "linux"))]
+    let every = 200;
+    schedule(Duration::from_millis(every));
 }
 
 /// Stop Chromium. Every browser must be closed first (`cdp::close_all`).

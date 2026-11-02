@@ -52,7 +52,13 @@ wrap_app! {
             if cfg!(target_os = "linux") {
                 // The profile's own key, not the desktop's secret service.
                 value("password-store", "basic");
+                // Pages are child windows of the X11 browser window
+                // (XWayland under Wayland).
+                value("ozone-platform", "x11");
             }
+            // Middle-click autoscroll, as Chrome on Windows has it; Chromium
+            // turns it on there only.
+            value("enable-blink-features", "MiddleClickAutoscroll");
         }
 
         fn browser_process_handler(&self) -> Option<BrowserProcessHandler> {

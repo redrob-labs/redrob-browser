@@ -195,18 +195,6 @@ fn run(
         Command::CopyImageAddress => sink.send(id, Event::Clipboard(t.image.clone())),
         Command::Undo => edit(|f| f.undo()),
         Command::Redo => edit(|f| f.redo()),
-        // Linux: the window's clipboard, not Chromium's (clipboard.rs).
-        // The selection as Chromium reported it with the menu: by now the
-        // window's menu has the focus and the page may have dropped it.
-        Command::Cut | Command::Copy if super::clipboard::OWN => {
-            if !t.selection.is_empty() {
-                sink.send(id, Event::Clipboard(t.selection.clone()));
-            }
-            if c == Command::Cut {
-                edit(|f| f.del());
-            }
-        }
-        Command::Paste if super::clipboard::OWN => super::clipboard::paste(browser),
         Command::Cut => edit(|f| f.cut()),
         Command::Copy => edit(|f| f.copy()),
         Command::Paste => edit(|f| f.paste()),
@@ -252,8 +240,9 @@ pub fn inspect(browser: &Browser, at: Option<(i32, i32)>) {
     );
 }
 
-fn flag(bits: u32, f: u32) -> bool {
-    bits & f != 0
+/// Whether flag `f` is set in `bits` (CEF's flags are u32, i32 on Windows).
+fn flag<T: std::ops::BitAnd<Output = T> + PartialEq + Default + Copy>(bits: T, f: T) -> bool {
+    bits & f != T::default()
 }
 
 wrap_context_menu_handler! {
@@ -278,8 +267,8 @@ wrap_context_menu_handler! {
                 callback.cancel();
                 return 1;
             }
-            let types: u32 = params.type_flags().as_ref().0;
-            let edit: u32 = params.edit_state_flags().as_ref().0;
+            let types = params.type_flags().as_ref().0;
+            let edit = params.edit_state_flags().as_ref().0;
             let image = params.media_type() == ContextMenuMediaType::IMAGE
                 && params.has_image_contents() != 0;
             let target = Target {

@@ -2,18 +2,20 @@
 //! context menu, the find bar, the zoom badge and their shortcuts.
 //!
 //! The window passes every `Update` through `Prompts::take` (it keeps the
-//! events it does not know), sends the ops `Prompts::keys` returns, and calls
-//! `Prompts::show` once per frame with the page's rectangle.
+//! events it does not know), sends the ops `Prompts::shortcut` returns, draws
+//! `Prompts::bars` in its chrome above the page and `Prompts::overlays`
+//! over the page, each frame.
 
 use std::time::{Duration, Instant};
 
-use egui::{Align2, Key, Modifiers};
+use egui::Key;
 
 use super::context_menu::{Entry, Menu};
 use super::jsdialog::{Dialog, Kind as DialogKind};
 use super::permission::{Answer, Prompt};
 use super::zoom::Step;
 use crate::cdp::{Event, Op};
+use crate::cef::keys::Shortcut;
 use crate::i18n::{current, Lang};
 use crate::model::TabId;
 
@@ -152,11 +154,6 @@ impl Prompts {
         None
     }
 
-    /// Whether the page's context menu is open.
-    pub fn menu_open(&self) -> bool {
-        self.menu.is_some()
-    }
-
     /// Whether the page should take the keyboard focus back (once).
     pub fn take_refocus(&mut self) -> bool {
         std::mem::take(&mut self.refocus)
@@ -180,12 +177,10 @@ impl Prompts {
         }
     }
 
-    /// Find, zoom and print shortcuts for the tab on screen.
-    pub fn keys(&mut self, ctx: &egui::Context, active: TabId) -> Vec<Op> {
-        let cmd = Modifiers::COMMAND;
-        let mut ops = Vec::new();
-        ctx.input_mut(|i| {
-            if i.consume_key(cmd, Key::F) {
+    /// Find, zoom, print and Escape for the tab on screen (cef/keys.rs).
+    pub fn shortcut(&mut self, s: Shortcut, active: TabId) -> Option<Op> {
+        match s {
+            Shortcut::Find => {
                 match self.find.as_mut() {
                     Some(f) if f.tab == active => f.focus = true,
                     _ => {
@@ -199,48 +194,65 @@ impl Prompts {
                         })
                     }
                 }
+                None
             }
-            let next = i.consume_key(cmd, Key::G) || i.consume_key(Modifiers::NONE, Key::F3);
-            let prev = i.consume_key(cmd | Modifiers::SHIFT, Key::G)
-                || i.consume_key(Modifiers::SHIFT, Key::F3);
-            if let Some(f) = self
+            Shortcut::FindNext | Shortcut::FindPrev => self
                 .find
                 .as_ref()
                 .filter(|f| f.tab == active && !f.text.is_empty())
-            {
-                if next || prev {
-                    ops.push(find_op(&f.text, !prev, true));
+                .map(|f| find_op(&f.text, s == Shortcut::FindNext, true)),
+            Shortcut::ZoomIn => Some(Op::Zoom(Step::In)),
+            Shortcut::ZoomOut => Some(Op::Zoom(Step::Out)),
+            Shortcut::ZoomReset => Some(Op::Zoom(Step::Reset)),
+            Shortcut::Print => Some(Op::Print),
+            Shortcut::Escape => {
+                // The page's context menu first, then the find bar.
+                if let Some((_, m)) = self.menu.take() {
+                    m.choose(None);
+                    return None;
                 }
+                if self.find.as_ref().is_some_and(|f| f.tab == active) {
+                    self.find = None;
+                    self.refocus = true;
+                    return Some(Op::StopFind);
+                }
+                None
             }
-            if i.consume_key(cmd, Key::Plus) || i.consume_key(cmd, Key::Equals) {
-                ops.push(Op::Zoom(Step::In));
-            }
-            if i.consume_key(cmd, Key::Minus) {
-                ops.push(Op::Zoom(Step::Out));
-            }
-            if i.consume_key(cmd, Key::Num0) {
-                ops.push(Op::Zoom(Step::Reset));
-            }
-            if i.consume_key(cmd, Key::P) {
-                ops.push(Op::Print);
-            }
-        });
+            _ => None,
+        }
+    }
+
+    /// Whether the window's own controls need the keyboard: a page dialog
+    /// waits for an answer, or the find bar was just opened.
+    pub fn wants_keyboard(&self, active: TabId) -> bool {
+        self.dialogs
+            .iter()
+            .any(|(t, d, _)| *t == active && d.is_open())
+            || self
+                .find
+                .as_ref()
+                .is_some_and(|f| f.tab == active && f.focus)
+    }
+
+    /// The bars above the page for the tab on screen: its dialog and the
+    /// find bar. Drawn in the window's chrome, outside the page (the page
+    /// is a native window nothing can be drawn over).
+    pub fn bars(&mut self, ui: &mut egui::Ui, active: TabId) -> Vec<Op> {
+        let mut ops = Vec::new();
+        self.dialogs.retain(|(_, d, _)| d.is_open());
+        self.show_dialog(ui, active);
+        self.show_find(ui, active, &mut ops);
         ops
     }
 
-    /// Draw what the tab on screen has open. `page` is where the page is
-    /// drawn, in points; page coordinates from CEF are CSS pixels, which the
-    /// window draws one to one with points. Returns ops for that tab.
-    pub fn show(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) -> Vec<Op> {
-        let mut ops = Vec::new();
+    /// What floats over the page for the tab on screen, each in a small
+    /// window of its own (popup.rs): the permission prompt, the page's
+    /// context menu, the zoom level. `page` is the page area, in points.
+    pub fn overlays(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) {
         self.permissions.retain(|(_, p)| p.is_open());
-        self.dialogs.retain(|(_, d, _)| d.is_open());
         self.show_permission(ctx, active, page);
-        self.show_dialog(ctx, active, page);
         self.show_menu(ctx, active, page);
-        self.show_find(ctx, active, page, &mut ops);
         self.show_zoom(ctx, active, page);
-        ops
     }
 
     fn show_permission(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) {
@@ -249,18 +261,19 @@ impl Prompts {
         };
         let mut answer = None;
         let p = &self.permissions[i].1;
-        egui::Window::new("permission")
-            .id(egui::Id::new(("permission", p.prompt_id)))
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_pos(page.min + egui::vec2(12.0, 8.0))
-            .show(ctx, |ui| {
+        let at = crate::popup::to_screen(ctx, page.min + egui::vec2(12.0, 4.0));
+        crate::popup::show(
+            ctx,
+            egui::Id::new(("permission", p.prompt_id)),
+            at,
+            360.0,
+            false,
+            |ui| {
                 ui.set_max_width(340.0);
                 ui.horizontal(|ui| {
                     ui.strong(trf("{0} wants to", &p.origin));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("✕").on_hover_text(tr("Close")).clicked() {
+                        if ui.small_button("✕").clicked() {
                             answer = Some(Answer::Dismiss);
                         }
                     });
@@ -280,14 +293,15 @@ impl Prompts {
                         answer = Some(Answer::Block);
                     }
                 });
-            });
+            },
+        );
         if let Some(a) = answer {
             let (_, p) = self.permissions.remove(i);
             p.answer(a);
         }
     }
 
-    fn show_dialog(&mut self, ctx: &egui::Context, active: TabId, page: egui::Rect) {
+    fn show_dialog(&mut self, ui: &mut egui::Ui, active: TabId) {
         let Some(i) = self.dialogs.iter().position(|(t, _, _)| *t == active) else {
             return;
         };
@@ -305,36 +319,20 @@ impl Prompts {
             ),
             _ => (trf("{0} says", &d.origin), d.message.clone()),
         };
-        // The page is blocked while the dialog is open: dim it.
-        egui::Area::new(egui::Id::new("dialog-dim"))
-            .fixed_pos(page.min)
-            .order(egui::Order::Middle)
-            .show(ctx, |ui| {
-                ui.painter()
-                    .rect_filled(page, 0.0, egui::Color32::from_black_alpha(60));
-                ui.allocate_rect(page, egui::Sense::click());
-            });
-        egui::Window::new(title)
-            .id(egui::Id::new("page-dialog"))
-            .collapsible(false)
-            .resizable(false)
-            .order(egui::Order::Foreground)
-            .pivot(Align2::CENTER_TOP)
-            .fixed_pos(egui::pos2(page.center().x, page.min.y + 24.0))
-            .show(ctx, |ui| {
-                ui.set_max_width(420.0);
+        crate::theme::bar(ui, crate::theme::Bar::Brand, |ui| {
+            ui.vertical(|ui| {
+                ui.strong(&title);
                 ui.label(&message);
-                if let DialogKind::Prompt { .. } = d.kind {
-                    let r = ui.text_edit_singleline(text);
-                    if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        done = Some(true);
-                    }
-                    if !r.has_focus() && done.is_none() {
-                        r.request_focus();
-                    }
-                }
-                ui.add_space(6.0);
                 ui.horizontal(|ui| {
+                    if let DialogKind::Prompt { .. } = d.kind {
+                        let r = ui.add(egui::TextEdit::singleline(text).desired_width(320.0));
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            done = Some(true);
+                        }
+                        if !r.has_focus() && done.is_none() {
+                            r.request_focus();
+                        }
+                    }
                     let ok = match d.kind {
                         DialogKind::BeforeUnload { reload: true } => tr("Reload"),
                         DialogKind::BeforeUnload { reload: false } => tr("Leave"),
@@ -347,14 +345,15 @@ impl Prompts {
                         done = Some(false);
                     }
                 });
-                ui.input(|i| {
-                    if i.key_pressed(Key::Escape) {
-                        done = Some(d.kind == DialogKind::Alert);
-                    } else if i.key_pressed(Key::Enter) && done.is_none() {
-                        done = Some(true);
-                    }
-                });
             });
+        });
+        ui.input(|i| {
+            if i.key_pressed(Key::Escape) {
+                done = Some(d.kind == DialogKind::Alert);
+            } else if i.key_pressed(Key::Enter) && done.is_none() {
+                done = Some(true);
+            }
+        });
         if let Some(ok) = done {
             let (_, d, text) = self.dialogs.remove(i);
             d.answer(ok, &text);
@@ -372,51 +371,43 @@ impl Prompts {
             }
             return;
         }
-        let at = page.min + egui::vec2(menu.at.0 as f32, menu.at.1 as f32);
+        let at = crate::popup::to_screen(
+            ctx,
+            page.min + egui::vec2(menu.at.0 as f32, menu.at.1 as f32),
+        );
         let mut chosen = None;
-        let mut close = false;
-        let r = egui::Area::new(egui::Id::new("page-context-menu"))
-            .fixed_pos(at)
-            .order(egui::Order::Foreground)
-            .constrain(true)
-            .show(ctx, |ui| {
-                egui::Frame::menu(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(200.0);
-                    for e in &menu.entries {
-                        match e {
-                            Entry::Separator => {
-                                ui.separator();
-                            }
-                            Entry::Item { command, enabled } => {
-                                let b = egui::Button::new(tr(command.label()))
-                                    .frame(false)
-                                    .min_size(egui::vec2(ui.available_width(), 0.0));
-                                if ui.add_enabled(*enabled, b).clicked() {
-                                    chosen = Some(*command);
-                                }
-                            }
+        crate::popup::menu_at(ctx, egui::Id::new("page-context-menu"), at, |ui| {
+            for e in &menu.entries {
+                match e {
+                    Entry::Separator => {
+                        ui.separator();
+                    }
+                    Entry::Item { command, enabled } => {
+                        let b = egui::Button::new(tr(command.label()))
+                            .frame(false)
+                            .min_size(egui::vec2(ui.available_width(), 0.0));
+                        if ui.add_enabled(*enabled, b).clicked() {
+                            chosen = Some(*command);
                         }
                     }
-                });
-            });
-        if r.response.clicked_elsewhere() || ctx.input(|i| i.key_pressed(Key::Escape)) {
-            close = true;
-        }
-        if chosen.is_some() || close {
+                }
+            }
+        });
+        if chosen.is_some() {
             if let Some((_, m)) = self.menu.take() {
                 m.choose(chosen);
             }
-            self.refocus = true;
         }
     }
 
-    fn show_find(
-        &mut self,
-        ctx: &egui::Context,
-        active: TabId,
-        page: egui::Rect,
-        ops: &mut Vec<Op>,
-    ) {
+    /// Close the page's context menu without choosing (a click elsewhere).
+    pub fn close_menu(&mut self) {
+        if let Some((_, m)) = self.menu.take() {
+            m.choose(None);
+        }
+    }
+
+    fn show_find(&mut self, ui: &mut egui::Ui, active: TabId, ops: &mut Vec<Op>) {
         let Some(f) = self.find.as_mut() else {
             return;
         };
@@ -426,71 +417,61 @@ impl Prompts {
             return;
         }
         let mut close = false;
-        egui::Window::new("find")
-            .id(egui::Id::new("find-bar"))
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .pivot(Align2::RIGHT_TOP)
-            .fixed_pos(egui::pos2(page.max.x - 12.0, page.min.y + 8.0))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    let r = ui.add(
-                        egui::TextEdit::singleline(&mut f.text)
-                            .hint_text(tr("Find in page"))
-                            .desired_width(200.0),
-                    );
-                    if f.focus {
-                        r.request_focus();
-                        f.focus = false;
-                    }
-                    let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                    let back = ui.input(|i| i.modifiers.shift);
-                    if f.text != f.sent {
-                        f.sent = f.text.clone();
-                        ops.push(if f.text.is_empty() {
-                            Op::StopFind
-                        } else {
-                            find_op(&f.text, true, false)
-                        });
-                        if f.text.is_empty() {
-                            f.count = 0;
-                            f.active = 0;
-                        }
-                    } else if enter && !f.text.is_empty() {
-                        ops.push(find_op(&f.text, !back, true));
-                        r.request_focus();
-                    }
-                    if !f.text.is_empty() {
-                        if f.count == 0 {
-                            ui.weak(tr("No results"));
-                        } else {
-                            ui.weak(format!("{}/{}", f.active, f.count));
-                        }
-                    }
-                    let any = !f.text.is_empty();
-                    if ui
-                        .add_enabled(any, egui::Button::new("⏶"))
-                        .on_hover_text(tr("Previous"))
-                        .clicked()
-                    {
-                        ops.push(find_op(&f.text, false, true));
-                    }
-                    if ui
-                        .add_enabled(any, egui::Button::new("⏷"))
-                        .on_hover_text(tr("Next"))
-                        .clicked()
-                    {
-                        ops.push(find_op(&f.text, true, true));
-                    }
-                    if ui.button("✕").on_hover_text(tr("Close")).clicked()
-                        || (r.has_focus() || r.lost_focus())
-                            && ui.input(|i| i.key_pressed(Key::Escape))
-                    {
-                        close = true;
-                    }
+        crate::theme::bar(ui, crate::theme::Bar::Info, |ui| {
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut f.text)
+                    .hint_text(tr("Find in page"))
+                    .desired_width(240.0),
+            );
+            if f.focus {
+                r.request_focus();
+                f.focus = false;
+            }
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            let back = ui.input(|i| i.modifiers.shift);
+            if f.text != f.sent {
+                f.sent = f.text.clone();
+                ops.push(if f.text.is_empty() {
+                    Op::StopFind
+                } else {
+                    find_op(&f.text, true, false)
                 });
-            });
+                if f.text.is_empty() {
+                    f.count = 0;
+                    f.active = 0;
+                }
+            } else if enter && !f.text.is_empty() {
+                ops.push(find_op(&f.text, !back, true));
+                r.request_focus();
+            }
+            if !f.text.is_empty() {
+                if f.count == 0 {
+                    ui.weak(tr("No results"));
+                } else {
+                    ui.weak(format!("{}/{}", f.active, f.count));
+                }
+            }
+            let any = !f.text.is_empty();
+            if ui
+                .add_enabled(any, egui::Button::new("⏶"))
+                .on_hover_text(tr("Previous"))
+                .clicked()
+            {
+                ops.push(find_op(&f.text, false, true));
+            }
+            if ui
+                .add_enabled(any, egui::Button::new("⏷"))
+                .on_hover_text(tr("Next"))
+                .clicked()
+            {
+                ops.push(find_op(&f.text, true, true));
+            }
+            if ui.button("✕").on_hover_text(tr("Close")).clicked()
+                || (r.has_focus() || r.lost_focus()) && ui.input(|i| i.key_pressed(Key::Escape))
+            {
+                close = true;
+            }
+        });
         if close {
             self.find = None;
             ops.push(Op::StopFind);
@@ -507,16 +488,12 @@ impl Prompts {
             self.zoom = None;
             return;
         }
-        egui::Area::new(egui::Id::new("zoom-badge"))
-            .pivot(Align2::RIGHT_TOP)
-            .fixed_pos(egui::pos2(page.max.x - 12.0, page.min.y + 8.0))
-            .order(egui::Order::Foreground)
-            .interactable(false)
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(trf("Zoom: {0}%", &percent));
-                });
-            });
+        let text = trf("Zoom: {0}%", &percent);
+        let w = 140.0;
+        let pos = crate::popup::to_screen(ctx, egui::pos2(page.max.x - w - 12.0, page.min.y + 8.0));
+        crate::popup::show(ctx, egui::Id::new("zoom-badge"), pos, w, true, |ui| {
+            ui.label(text);
+        });
         ctx.request_repaint_after(shown.saturating_sub(at.elapsed()));
     }
 }
@@ -597,28 +574,26 @@ mod tests {
 
     #[test]
     fn find_and_zoom_shortcuts() {
-        let ctx = egui::Context::default();
         let mut p = Prompts::default();
-        let press = |key| egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::COMMAND,
-        };
-        let mut input = egui::RawInput::default();
-        input.events = vec![
-            press(Key::F),
-            press(Key::Plus),
-            press(Key::Num0),
-            press(Key::P),
-        ];
-        let mut ops = Vec::new();
-        let _ = ctx.run_ui(input, |ui| ops = p.keys(ui.ctx(), 7));
-        assert!(p.find.as_ref().is_some_and(|f| f.tab == 7));
-        assert!(matches!(ops[0], Op::Zoom(Step::In)));
-        assert!(matches!(ops[1], Op::Zoom(Step::Reset)));
-        assert!(matches!(ops[2], Op::Print));
+        assert!(p.shortcut(Shortcut::Find, 7).is_none());
+        assert!(p.find.as_ref().is_some_and(|f| f.tab == 7 && f.focus));
+        assert!(p.wants_keyboard(7));
+        assert!(matches!(
+            p.shortcut(Shortcut::ZoomIn, 7),
+            Some(Op::Zoom(Step::In))
+        ));
+        assert!(matches!(
+            p.shortcut(Shortcut::ZoomReset, 7),
+            Some(Op::Zoom(Step::Reset))
+        ));
+        assert!(matches!(p.shortcut(Shortcut::Print, 7), Some(Op::Print)));
+        // Escape closes the find bar and gives the page its keyboard back.
+        assert!(matches!(
+            p.shortcut(Shortcut::Escape, 7),
+            Some(Op::StopFind)
+        ));
+        assert!(p.find.is_none());
+        assert!(p.take_refocus());
     }
 
     #[test]
