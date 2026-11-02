@@ -443,6 +443,12 @@ impl Engine {
         if before == Some((place, shown)) {
             return;
         }
+        trace(format_args!(
+            "tab {tab}: {:?} -> {:?} shown {shown} (window {:#x})",
+            before.map(|(p, s)| (p.rect, s)),
+            place.rect,
+            child.0
+        ));
         if before.is_some_and(|(p, _)| p.parent != place.parent) {
             native::reparent(child, place);
         }
@@ -619,6 +625,7 @@ impl Engine {
                 }
             }
             Op::Focus(true) => {
+                trace(format_args!("focus page {tab}"));
                 if let Some(child) = self.tabs.get(&tab).and_then(|t| t.native) {
                     native::focus(child);
                 }
@@ -708,6 +715,14 @@ impl Engine {
     }
 }
 
+/// `REDROB_TRACE=1`: what the engine does with pages and the keyboard.
+pub fn trace(what: std::fmt::Arguments<'_>) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("REDROB_TRACE").is_some()) {
+        eprintln!("redrob-browser: {what}");
+    }
+}
+
 fn run(window: WindowId, cmd: Command) {
     // Take the engine out while a command runs: CEF calls made for it may
     // run callbacks that look at it.
@@ -717,6 +732,7 @@ fn run(window: WindowId, cmd: Command) {
     match cmd {
         Command::Place { place, visible } => e.set_place(window, place, visible),
         Command::FocusWindow => {
+            trace(format_args!("focus window {window}"));
             if let Some(tab) = e.active.get(&window).copied() {
                 if let Some(h) = e.tabs.get(&tab).and_then(|t| t.browser.host()) {
                     h.set_focus(0);

@@ -502,6 +502,7 @@ impl Window {
                     continue;
                 }
                 Event::Focused => {
+                    cdp::trace(format_args!("page {tab} took the keyboard"));
                     if on_screen {
                         self.page_focused = true;
                         self.took_focus = true;

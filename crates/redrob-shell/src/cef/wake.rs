@@ -1,13 +1,15 @@
-//! Linux: wake the window loop when Chromium's X11 connection or its glib
-//! main context has work.
+//! Linux: run glib's main context for Chromium, and wake the window loop
+//! when it has work.
 //!
 //! Chromium runs on the window thread through the external message pump
-//! (`cef::pump`). Its own posted tasks ask for a pass, but X11 events for
-//! its windows (input, expose, the clipboard's selection requests) and
-//! other threads waking glib's main context arrive on file descriptors it
-//! only reads while pumping. After each pump, [`after_pump`] asks glib
-//! which descriptors and timeout its main context waits on, and a watcher
-//! thread polls them and asks for a pass as soon as one is readable.
+//! (`cef::pump`), which runs Chromium's own tasks only. Its X11 connection
+//! (input and expose for its windows, the clipboard's selection requests)
+//! and the input method's D-Bus replies are glib sources on the default
+//! main context, which the program's loop has to run, as cefclient's glib
+//! loop does. After each pump [`after_pump`] runs the main context's ready
+//! sources, then asks glib which descriptors and timeout it waits on, and a
+//! watcher thread polls them and asks for a pass as soon as one is
+//! readable.
 //!
 //! glib comes from the process (libcef loads it); its functions are looked
 //! up at run time, so the build needs no glib.
@@ -33,6 +35,7 @@ struct Glib {
     prepare: unsafe extern "C" fn(Ctx, *mut c_int) -> c_int,
     query: unsafe extern "C" fn(Ctx, c_int, *mut c_int, *mut GPollFd, c_int) -> c_int,
     check: unsafe extern "C" fn(Ctx, c_int, *mut GPollFd, c_int) -> c_int,
+    iteration: unsafe extern "C" fn(Ctx, c_int) -> c_int,
 }
 
 fn glib() -> Option<&'static Glib> {
@@ -54,6 +57,9 @@ fn glib() -> Option<&'static Glib> {
                 prepare: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_prepare")?),
                 query: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_query")?),
                 check: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_check")?),
+                iteration: std::mem::transmute::<*mut c_void, _>(sym(
+                    "g_main_context_iteration",
+                )?),
             })
         }
     })
@@ -82,13 +88,21 @@ pub fn after_pump() {
     let mut fds = vec![GPollFd::default(); 32];
     let (ready, timeout, n) = {
         // SAFETY: the default main context, owned by this thread (the one
-        // Chromium pumps on), not inside an iteration now. prepare, query
-        // and check make one complete cycle without dispatching; the next
-        // pump dispatches what is ready.
+        // Chromium pumps on), not inside an iteration now. After running
+        // what is ready, prepare, query and check make one more cycle
+        // without dispatching, to learn what to wait on; the next pass
+        // dispatches what that found ready.
         unsafe {
             let ctx = (g.default)();
             if (g.acquire)(ctx) == 0 {
                 return;
+            }
+            // What is ready now (X11 events, D-Bus replies), without
+            // blocking; a bounded number of rounds, the rest next pass.
+            for _ in 0..16 {
+                if (g.iteration)(ctx, 0) == 0 {
+                    break;
+                }
             }
             let mut prio = 0;
             let ready = (g.prepare)(ctx, &mut prio);
