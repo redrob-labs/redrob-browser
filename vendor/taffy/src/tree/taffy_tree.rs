@@ -543,6 +543,13 @@ where
         let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
+            #[cfg(feature = "std")]
+            {
+                let slot = usize::from(inputs.run_mode == RunMode::PerformLayout);
+                ALGORITHM_RUNS[slot].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                ALGORITHM_CHILDREN[slot]
+                    .fetch_add(tree.child_count(node_id) as u64, core::sync::atomic::Ordering::Relaxed);
+            }
 
             #[cfg(feature = "block_layout")]
             if display_mode != Display::None && tree.taffy.nodes[node_id.into()].is_inline_root {
@@ -611,6 +618,8 @@ where
         if !float_bands.is_empty() {
             let previous = LEAF_FLOAT_BANDS.with(|bands| bands.replace(float_bands));
             let output = if bypass_cache {
+                #[cfg(feature = "std")]
+                BYPASS_RUNS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 compute(self, node_id, inputs)
             } else {
                 compute_cached_layout(self, node_id, inputs, compute)
@@ -620,6 +629,8 @@ where
         }
 
         if bypass_cache {
+            #[cfg(feature = "std")]
+            BYPASS_RUNS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
             return compute(self, node_id, inputs);
         }
 
@@ -676,6 +687,33 @@ where
             None
         }
     }
+}
+
+/// How many times a layout algorithm ran (measure, perform), and over how many children
+#[cfg(feature = "std")]
+static ALGORITHM_RUNS: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+#[cfg(feature = "std")]
+static ALGORITHM_CHILDREN: [core::sync::atomic::AtomicU64; 2] =
+    [const { core::sync::atomic::AtomicU64::new(0) }; 2];
+/// How many of those runs bypassed the cache (float-sensitive boxes beside floats)
+#[cfg(feature = "std")]
+static BYPASS_RUNS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+/// How many times caches were emptied up to the root (`TaffyTree::mark_dirty`)
+#[cfg(feature = "std")]
+static DIRTY_MARKS: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Diagnostics: how many times a layout algorithm ran on a node since the process started, as
+/// (measure runs, perform runs, runs that bypassed the cache, `mark_dirty` calls)
+#[cfg(feature = "std")]
+pub fn algorithm_runs() -> (u64, u64, u64, u64) {
+    use core::sync::atomic::Ordering::Relaxed;
+    (
+        ALGORITHM_RUNS[0].load(Relaxed),
+        ALGORITHM_RUNS[1].load(Relaxed),
+        BYPASS_RUNS.load(Relaxed),
+        DIRTY_MARKS.load(Relaxed),
+    )
 }
 
 #[cfg(all(feature = "block_layout", feature = "float_layout", feature = "std"))]
@@ -1016,8 +1054,12 @@ impl<NodeContext> TaffyTree<NodeContext> {
                     let _ = self.remove(node);
                 }
                 JournalOp::Style(node, style) => {
-                    if self.nodes.get(node.into()).is_some() {
-                        let _ = self.set_style(node, style);
+                    // The node held this style (and its `calc()` handles) before: the results
+                    // computed under it are still valid, whatever handles it brings back.
+                    if let Some(data) = self.nodes.get_mut(node.into()) {
+                        data.style = style;
+                        data.style_key = None;
+                        self.note_changed(node);
                     }
                 }
                 JournalOp::Children(parent, old) => {
@@ -1423,9 +1465,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn set_style(&mut self, node: NodeId, style: Style) -> TaffyResult<()> {
         // With subtree keys the cached results stay: they carry the key of the subtree they were
-        // computed in, so they serve again when the old style comes back. A `calc()` handle
-        // can change value with the same style, so its results go.
-        let keep_cache = self.config.subtree_keys && !super::subtree_key::style_uses_calc(&style);
+        // computed in, so they serve again when the old style comes back. A `calc()` handle the
+        // node did not hold before can be a freed handle's address with another value, so a
+        // style that brings one empties the caches.
+        let keep_cache = self.config.subtree_keys
+            && super::subtree_key::calc_handles_kept(&self.nodes[node.into()].style, &style);
         let data = &mut self.nodes[node.into()];
         let old = core::mem::replace(&mut data.style, style);
         if let Some(journal) = self.journal.as_mut() {
@@ -1700,6 +1744,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
             }
         }
 
+        #[cfg(feature = "std")]
+        DIRTY_MARKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         mark_dirty_to_root(&mut self.nodes, &self.parents, node.into());
 
         Ok(())

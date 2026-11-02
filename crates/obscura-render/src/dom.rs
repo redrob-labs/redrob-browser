@@ -7769,6 +7769,15 @@ fn layout_dom_once(
             ),
         };
     let mut styles = StyleMap::new(styles);
+    // A layout that may build into the previous layout's box tree keeps the
+    // styles it writes as they were, to tell a real change from a rewrite.
+    if retain::tree_retention_enabled()
+        && retained_geometry
+            .as_ref()
+            .is_some_and(|geometry: &RetainedGeometry| geometry.layout_tree.is_some())
+    {
+        styles.keep_before();
+    }
     let root_props = std::rc::Rc::new(HashMap::default());
     let mut evaluator =
         snapshot.map(|snapshot| crate::css::ContainerQueryEvaluator::new(tree, snapshot));
@@ -7824,8 +7833,12 @@ fn layout_dom_once(
         }),
     );
     let cascade_time = t1.elapsed();
-    let mut phase_marks: Vec<(&'static str, (std::time::Instant, u64))> =
-        vec![("cascade", crate::prof::mark())];
+    #[allow(clippy::type_complexity)]
+    let mut phase_marks: Vec<(
+        &'static str,
+        (std::time::Instant, u64, (u64, u64, u64, u64)),
+    )> = vec![("cascade", crate::prof::mark())];
+    styles.set_pass("after cascade");
     if crate::prof::enabled() {
         eprintln!("[timing] style-writes cascade {}", styles.changed_len());
     }
@@ -7838,11 +7851,13 @@ fn layout_dom_once(
     );
     grow_trailing_auto_cells(tree, &mut styles);
     phase_marks.push(("p.cells", crate::prof::mark()));
+    styles.set_pass("after p.cells");
     if crate::prof::enabled() {
         eprintln!("[timing] style-writes p.cells {}", styles.changed_len());
     }
     shrink_block_level_buttons(tree, &mut styles, fresh_styles.as_ref());
     phase_marks.push(("p.buttons", crate::prof::mark()));
+    styles.set_pass("after p.buttons");
     if crate::prof::enabled() {
         eprintln!("[timing] style-writes p.buttons {}", styles.changed_len());
     }
@@ -7913,6 +7928,7 @@ fn layout_dom_once(
     };
     let needs_emoji_font = !emoji.texts.is_empty() || !emoji.generated.is_empty();
     phase_marks.push(("p.emoji", crate::prof::mark()));
+    styles.set_pass("after p.emoji");
     if crate::prof::enabled() {
         eprintln!("[timing] style-writes p.emoji {}", styles.changed_len());
     }
@@ -8201,6 +8217,7 @@ fn layout_dom_once(
         let prior_definite_known = prior_definite_heights.is_some();
         definite_height_nodes = prior_definite_heights.unwrap_or_default();
         phase_marks.push(("pre", crate::prof::mark()));
+        styles.set_pass("after pre");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes pre {}", styles.changed_len());
         }
@@ -9448,6 +9465,7 @@ fn layout_dom_once(
         }
 
         phase_marks.push(("inherit", crate::prof::mark()));
+        styles.set_pass("after inherit");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes inherit {}", styles.changed_len());
         }
@@ -9708,6 +9726,7 @@ fn layout_dom_once(
         }
 
         phase_marks.push(("fixups", crate::prof::mark()));
+        styles.set_pass("after fixups");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes fixups {}", styles.changed_len());
         }
@@ -9740,6 +9759,7 @@ fn layout_dom_once(
             });
         resolve_grid_areas(tree, root_id, &mut styles, grid_candidates);
         phase_marks.push(("r.grid", crate::prof::mark()));
+        styles.set_pass("after r.grid");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes r.grid {}", styles.changed_len());
         }
@@ -9788,6 +9808,7 @@ fn layout_dom_once(
         }
 
         phase_marks.push(("r.fieldset", crate::prof::mark()));
+        styles.set_pass("after r.fieldset");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes r.fieldset {}", styles.changed_len());
         }
@@ -9938,6 +9959,7 @@ fn layout_dom_once(
         // hero), so it is gone.
 
         phase_marks.push(("r.repairs", crate::prof::mark()));
+        styles.set_pass("after r.repairs");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes r.repairs {}", styles.changed_len());
         }
@@ -9987,6 +10009,7 @@ fn layout_dom_once(
         }
 
         phase_marks.push(("r.intrinsic", crate::prof::mark()));
+        styles.set_pass("after r.intrinsic");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes r.intrinsic {}", styles.changed_len());
         }
@@ -9994,14 +10017,21 @@ fn layout_dom_once(
             defer_cyclic_flex_inline_sizes(tree, &mut styles, root_fs, vw, vh);
 
         phase_marks.push(("resolve", crate::prof::mark()));
+        styles.set_pass("after resolve");
         if crate::prof::enabled() {
             eprintln!("[timing] style-writes resolve {}", styles.changed_len());
         }
+        styles.report_writes("pre-build");
+        styles.set_pass("post-build");
         // Styles written from here on are noted for the next layout's build.
+        let style_changes = styles.take_changes();
+        let before = styles.take_before();
         retain::mark_style_changes(
             &mut ifc_items,
             tree,
-            styles.take_changes(),
+            &styles,
+            style_changes,
+            before,
             deferred_cyclic_inline_sizes
                 .iter()
                 .map(|entry| {
@@ -11582,8 +11612,10 @@ fn layout_dom_once(
             std::mem::size_of::<crate::LayoutStyle>()
         );
         line.push_str(&crate::prof::take());
-        let mut last = (t1, phase_marks.first().map_or(0, |(_, (_, ifc))| *ifc));
-        for (name, (at, ifc)) in &phase_marks {
+        let mut last = (t1, phase_marks.first().map_or(0, |(_, (_, ifc, _))| *ifc));
+        let taffy_runs: Vec<(u64, u64, u64, u64)> =
+            phase_marks.iter().map(|(_, (_, _, runs))| *runs).collect();
+        for (name_index, (name, (at, ifc, _))) in phase_marks.iter().enumerate() {
             line.push_str(&format!(" {name}={:?}", at.duration_since(last.0)));
             let (laid, set) = (ifc & 0xffff_ffff, ifc >> 32);
             let (last_laid, last_set) = (last.1 & 0xffff_ffff, last.1 >> 32);
@@ -11592,6 +11624,23 @@ fn layout_dom_once(
             }
             if set > last_set {
                 line.push_str(&format!(" {name}.set={}", set - last_set));
+            }
+            let (runs, last_runs) = (
+                taffy_runs.get(name_index).copied(),
+                name_index
+                    .checked_sub(1)
+                    .and_then(|i| taffy_runs.get(i).copied()),
+            );
+            if let (Some(runs), Some(last_runs)) = (runs, last_runs) {
+                if runs != last_runs {
+                    line.push_str(&format!(
+                        " {name}.runs={}/{}/{}/{}",
+                        runs.0 - last_runs.0,
+                        runs.1 - last_runs.1,
+                        runs.2 - last_runs.2,
+                        runs.3 - last_runs.3
+                    ));
+                }
             }
             last = (*at, *ifc);
         }
@@ -11615,10 +11664,12 @@ fn layout_dom_once(
     let layout_tree = kept_tree
         .zip(root)
         .and_then(|((taffy, taffy_root, by_dom), root_id)| {
+            styles.report_writes("post-build");
             let pending = match styles.take_changes() {
                 stylemap::StyleChanges::Nodes(nodes) => nodes,
                 stylemap::StyleChanges::All => return None,
             };
+            let pending_before = styles.take_before();
             retain::retain(
                 taffy,
                 taffy_root,
@@ -11627,6 +11678,7 @@ fn layout_dom_once(
                 by_dom,
                 &mut ifc_items,
                 pending,
+                pending_before,
                 viewport,
                 needs_emoji_font,
             )

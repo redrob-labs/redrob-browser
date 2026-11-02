@@ -87,13 +87,19 @@ pub mod prof {
         }
     }
 
-    /// A phase mark: now, and how many inline formatting contexts were laid
-    /// out (low 32 bits) and layout-tree styles changed (high 32 bits) so far.
-    pub fn mark() -> (std::time::Instant, u64) {
+    /// A phase mark: now, how many inline formatting contexts were laid out
+    /// (low 32 bits) and layout-tree styles changed (high 32 bits) so far,
+    /// and Taffy's algorithm runs (measure, perform, and their children).
+    pub fn mark() -> (std::time::Instant, u64, (u64, u64, u64, u64)) {
         (
             std::time::Instant::now(),
             COUNTS[IFC_LAYOUT].load(Ordering::Relaxed) & 0xffff_ffff
                 | COUNTS[STYLE_SET].load(Ordering::Relaxed) << 32,
+            if enabled() {
+                taffy::tree::algorithm_runs()
+            } else {
+                (0, 0, 0, 0)
+            },
         )
     }
 

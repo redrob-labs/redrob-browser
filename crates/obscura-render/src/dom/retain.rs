@@ -191,6 +191,10 @@ pub(super) struct BuildReuse {
     by_dom: HashMap<NodeId, taffy::NodeId>,
     /// The deferred flex percentages the build saw (see `Deferrals`).
     deferrals: Deferrals,
+    /// Elements whose style a pass wrote after the previous build, with
+    /// their styles at that build (`None`: unknown, all count as changed).
+    pending: Vec<NodeId>,
+    pending_before: Option<super::stylemap::BeforeWrites>,
     pub(super) kept: usize,
     pub(super) built: usize,
     /// Why boxes were not kept (debug counts).
@@ -217,6 +221,8 @@ impl BuildReuse {
             gc: Vec::new(),
             by_dom,
             deferrals: Deferrals::default(),
+            pending: Vec::new(),
+            pending_before: None,
             kept: 0,
             built: 0,
             misses: [0; 8],
@@ -559,6 +565,8 @@ pub(crate) struct RetainedLayoutTree {
     pending: Vec<NodeId>,
     /// The deferrals the build saw.
     deferrals: Deferrals,
+    /// The styles of `pending` at the build (see `BuildReuse::pending`).
+    pending_before: Option<super::stylemap::BeforeWrites>,
     /// What the tree was built for.
     pub(super) viewport: (f32, f32),
     pub(super) needs_emoji_font: bool,
@@ -634,15 +642,8 @@ impl RetainedLayoutTree {
             true,
         );
         reuse.deferrals = std::mem::take(&mut self.deferrals);
-        if crate::prof::enabled() {
-            let mut unique = self.pending.clone();
-            unique.sort_unstable_by_key(|id| id.index());
-            unique.dedup();
-            eprintln!("[timing] retained-tree pending={}", unique.len());
-        }
-        for id in std::mem::take(&mut self.pending) {
-            reuse.style_changed(tree, id);
-        }
+        reuse.pending = std::mem::take(&mut self.pending);
+        reuse.pending_before = self.pending_before.take();
         if crate::prof::enabled() {
             eprintln!(
                 "[timing] retained-tree damage nodes={} context={} subtrees={} pending={}",
@@ -682,7 +683,9 @@ impl RetainedLayoutTree {
 pub(super) fn mark_style_changes(
     items: &mut IfcRegistry,
     tree: &DomTree,
+    styles: &HashMap<NodeId, crate::LayoutStyle>,
     changes: super::stylemap::StyleChanges,
+    before: Option<super::stylemap::BeforeWrites>,
     deferrals: Deferrals,
 ) {
     let Some(reuse) = items.reuse.as_mut() else {
@@ -699,36 +702,41 @@ pub(super) fn mark_style_changes(
         )
         .map(|((node, _), _)| *node)
         .collect();
-    if crate::prof::enabled() {
-        eprintln!(
-            "[timing] retained-tree deferrals={} previous={} differing={}",
-            deferrals.len(),
-            previous.len(),
-            differing.len()
-        );
-    }
     for id in differing {
         reuse.style_changed(tree, id);
     }
     reuse.deferrals = deferrals;
-    match changes {
+    let mut written = match changes {
         super::stylemap::StyleChanges::All => {
             if crate::prof::enabled() {
                 eprintln!("[timing] retained-tree full-rebuild reason=all-styles");
             }
-            reuse.reuse = false
+            reuse.reuse = false;
+            return;
         }
-        super::stylemap::StyleChanges::Nodes(nodes) => {
-            if crate::prof::enabled() {
-                let mut unique = nodes.clone();
-                unique.sort_unstable_by_key(|id| id.index());
-                unique.dedup();
-                eprintln!("[timing] retained-tree style-changes={}", unique.len());
-            }
-            for id in nodes {
-                reuse.style_changed(tree, id);
-            }
+        super::stylemap::StyleChanges::Nodes(nodes) => nodes,
+    };
+    // A written style is a change only when it differs from the style the
+    // previous build saw: the style before this layout's first write, or for
+    // one a pass wrote after the previous build, the style it had then.
+    written.append(&mut reuse.pending);
+    written.sort_unstable_by_key(|id| id.index());
+    written.dedup();
+    let pending_before = reuse.pending_before.take();
+    let mut changed = 0;
+    for id in written {
+        let baseline = pending_before
+            .as_ref()
+            .and_then(|pending| pending.get(&id))
+            .or_else(|| before.as_ref().and_then(|before| before.get(&id)));
+        let unchanged = baseline.is_some_and(|old| old.as_ref() == styles.get(&id));
+        if !unchanged {
+            changed += 1;
+            reuse.style_changed(tree, id);
         }
+    }
+    if crate::prof::enabled() {
+        eprintln!("[timing] retained-tree style-changes={changed}");
     }
 }
 
@@ -805,6 +813,7 @@ pub(super) fn retain(
     by_dom: HashMap<NodeId, taffy::NodeId>,
     items: &mut IfcRegistry,
     pending: Vec<NodeId>,
+    pending_before: Option<super::stylemap::BeforeWrites>,
     viewport: (f32, f32),
     needs_emoji_font: bool,
 ) -> Option<Box<RetainedLayoutTree>> {
@@ -836,6 +845,7 @@ pub(super) fn retain(
         records: reuse.records,
         deferrals: reuse.deferrals,
         pending,
+        pending_before,
         viewport,
         needs_emoji_font,
         store: None,
