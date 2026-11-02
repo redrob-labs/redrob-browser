@@ -938,6 +938,11 @@ impl Matcher {
     /// Match `nid` (matched as if it were the subject element; the ancestor
     /// filter reflects `nid`'s ancestors, not `nid` itself) against `compiled`.
     pub fn matches(&mut self, tree: &DomTree, nid: NodeId, compiled: &CompiledSelector) -> bool {
+        // The ancestor filter rejects most selectors before any node is read
+        // (`matches_selector` makes the same check after setting up).
+        if !selectors::matching::selector_may_match(&compiled.hashes, self.ancestors.filter()) {
+            return false;
+        }
         if !tree.with_node(nid, |n| n.is_element()).unwrap_or(false) {
             return false;
         }

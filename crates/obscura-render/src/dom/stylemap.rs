@@ -234,6 +234,34 @@ impl StyleMap {
         self.map.insert(id, style)
     }
 
+    /// `insert` for a caller that drops the old style: it moves into the
+    /// copies from before the first write instead of being copied there.
+    pub(crate) fn replace(&mut self, id: NodeId, style: crate::LayoutStyle) {
+        if self.untracked {
+            self.map.insert(id, style);
+            return;
+        }
+        let keep_old = self
+            .before
+            .as_ref()
+            .is_some_and(|before| !before.contains_key(&id));
+        self.changed.push(id);
+        self.written.push(id);
+        if let Some(passes) = self.passes.as_mut() {
+            passes.entry(id).or_insert(self.pass);
+        }
+        let old = self.map.insert(id, style);
+        if keep_old {
+            if let Some(before) = self.before.as_mut() {
+                if before.len() >= BEFORE_LIMIT {
+                    self.before_overflow = true;
+                } else {
+                    before.insert(id, old);
+                }
+            }
+        }
+    }
+
     pub(crate) fn remove(&mut self, id: &NodeId) -> Option<crate::LayoutStyle> {
         if self.map.contains_key(id) {
             self.note_write(*id);

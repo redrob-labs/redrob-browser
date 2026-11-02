@@ -179,6 +179,15 @@ struct NodeData {
     /// formatting context; `None` when it was laid out beside floats (it cannot be laid out
     /// again from these alone)
     pub(crate) last_perform: Option<(LayoutInput, bool)>,
+    /// The `TaffyTree::place_epoch` of the last placement that placed this node
+    pub(crate) placed_in: u32,
+    /// What the embedder noted for the subtree under the subtree key it had then (see
+    /// [`TaffyTree::set_subtree_memo`])
+    pub(crate) subtree_memo: Option<(u64, bool)>,
+    /// The epoch of the journal that holds the node's style from before its first change in it
+    pub(crate) journaled_style: u32,
+    /// The epoch of the journal that holds the node's child list from before its first change
+    pub(crate) journaled_children: u32,
 }
 
 impl NodeData {
@@ -208,6 +217,10 @@ impl NodeData {
             key_stale: true,
             deferred: false,
             last_perform: None,
+            placed_in: 0,
+            subtree_memo: None,
+            journaled_style: 0,
+            journaled_children: 0,
         }
     }
 
@@ -251,6 +264,10 @@ pub struct TaffyTree<NodeContext = ()> {
 
     /// Nodes whose children's layouts were deferred (some may have been placed since)
     deferred_nodes: Vec<NodeId>,
+    /// Counts the calls that place every deferred node (see `NodeData::placed_in`)
+    place_epoch: u32,
+    /// Counts the journals begun (see `Journal::epoch`)
+    journal_epoch: u32,
     /// The node a placement lays out again: it must not be served from earlier results
     force_perform: Option<NodeId>,
     /// The node the latest `compute_layout_with_measure` laid out as a root: its own layout is
@@ -267,8 +284,8 @@ pub struct TaffyTree<NodeContext = ()> {
 enum JournalOp {
     /// A node was created
     Created(NodeId),
-    /// A node's style was replaced; the old style
-    Style(NodeId, Style),
+    /// A node's style was replaced; the old style and its style key, when computed
+    Style(NodeId, Style, Option<u64>),
     /// A node's child list was changed; the old list
     Children(NodeId, Vec<NodeId>),
     /// A node's inline-root flag was changed; the old flag
@@ -278,6 +295,8 @@ enum JournalOp {
 /// The changes a [`TaffyTree`] recorded since [`TaffyTree::begin_journal`]
 #[derive(Debug, Clone, Default)]
 struct Journal {
+    /// Tells this journal's notes on nodes (`NodeData::journaled_style`) from earlier ones'
+    epoch: u32,
     ops: Vec<JournalOp>,
     /// A change the journal cannot undo was made (a node was removed or its context changed)
     broken: bool,
@@ -986,6 +1005,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
             #[cfg(feature = "block_layout")]
             inline_layout: None,
             deferred_nodes: Vec::new(),
+            place_epoch: 0,
+            journal_epoch: 0,
             force_perform: None,
             last_root: None,
             created: None,
@@ -1020,9 +1041,15 @@ impl<NodeContext> TaffyTree<NodeContext> {
 
     #[inline]
     fn journal_children(&mut self, parent: NodeId) {
+        // Only the list from before the first change matters: the rollback restores every
+        // list to it, and the parent links of every node in the lists it restores.
         if let Some(journal) = self.journal.as_mut() {
-            let old = self.children[parent.into()].iter().copied().collect();
-            journal.ops.push(JournalOp::Children(parent, old));
+            let data = &mut self.nodes[parent.into()];
+            if data.journaled_children != journal.epoch {
+                data.journaled_children = journal.epoch;
+                let old = self.children[parent.into()].iter().copied().collect();
+                journal.ops.push(JournalOp::Children(parent, old));
+            }
         }
     }
 
@@ -1030,7 +1057,8 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// [`Self::rollback_journal`] can return the tree to its current state. Removing a node or
     /// changing a node's context cannot be undone: the journal is then broken.
     pub fn begin_journal(&mut self) {
-        self.journal = Some(Journal::default());
+        self.journal_epoch = self.journal_epoch.wrapping_add(1).max(1);
+        self.journal = Some(Journal { epoch: self.journal_epoch, ..Journal::default() });
     }
 
     /// Whether a journal is being kept and every change since it began can be undone
@@ -1053,12 +1081,12 @@ impl<NodeContext> TaffyTree<NodeContext> {
                 JournalOp::Created(node) => {
                     let _ = self.remove(node);
                 }
-                JournalOp::Style(node, style) => {
+                JournalOp::Style(node, style, style_key) => {
                     // The node held this style (and its `calc()` handles) before: the results
                     // computed under it are still valid, whatever handles it brings back.
                     if let Some(data) = self.nodes.get_mut(node.into()) {
                         data.style = style;
-                        data.style_key = None;
+                        data.style_key = style_key;
                         self.note_changed(node);
                     }
                 }
@@ -1472,8 +1500,13 @@ impl<NodeContext> TaffyTree<NodeContext> {
             && super::subtree_key::calc_handles_kept(&self.nodes[node.into()].style, &style);
         let data = &mut self.nodes[node.into()];
         let old = core::mem::replace(&mut data.style, style);
+        let old_key = data.style_key;
+        // Only the style from before the first change matters: the rollback restores it.
         if let Some(journal) = self.journal.as_mut() {
-            journal.ops.push(JournalOp::Style(node, old));
+            if data.journaled_style != journal.epoch {
+                data.journaled_style = journal.epoch;
+                journal.ops.push(JournalOp::Style(node, old, old_key));
+            }
         }
         let data = &mut self.nodes[node.into()];
         data.style_key = None;
@@ -1656,6 +1689,26 @@ impl<NodeContext> TaffyTree<NodeContext> {
             data.key_stale = true;
             data.round_subtree_stale = true;
             current = self.parents[id.into()];
+        }
+    }
+
+    /// A flag the embedder derived from `node`'s subtree, while the subtree is the one it was
+    /// derived from: its subtree key is the one [`Self::set_subtree_memo`] saw. Call
+    /// [`Self::subtree_key`] on an ancestor first so the keys are current.
+    pub fn subtree_memo(&self, node: NodeId) -> Option<bool> {
+        let data = &self.nodes[node.into()];
+        match data.subtree_memo {
+            Some((key, flag)) if !data.key_stale && key == data.subtree_key => Some(flag),
+            _ => None,
+        }
+    }
+
+    /// Note a flag derived from `node`'s subtree (see [`Self::subtree_memo`]); its subtree key
+    /// must be current
+    pub fn set_subtree_memo(&mut self, node: NodeId, flag: bool) {
+        let data = &mut self.nodes[node.into()];
+        if !data.key_stale {
+            data.subtree_memo = Some((data.subtree_key, flag));
         }
     }
 
@@ -2025,6 +2078,17 @@ impl<NodeContext> TaffyTree<NodeContext> {
         self.round_placed(&roots, &mut measure_function);
     }
 
+    /// A fresh epoch for a call that places deferred nodes (never 0, the epoch of no call)
+    fn next_place_epoch(&mut self) -> u32 {
+        self.place_epoch = self.place_epoch.wrapping_add(1).max(1);
+        self.place_epoch
+    }
+
+    /// Whether the parent of `node` was placed by the call of `epoch`
+    fn parent_placed_in(&self, node: NodeId, epoch: u32) -> bool {
+        self.parents[node.into()].is_some_and(|parent| self.nodes[parent.into()].placed_in == epoch)
+    }
+
     /// Place every deferred node under `root` and round the tree: afterwards every layout is
     /// the one the last layout pass made
     pub fn place_all_deferred<MeasureFunction>(&mut self, root: NodeId, mut measure_function: MeasureFunction)
@@ -2035,23 +2099,29 @@ impl<NodeContext> TaffyTree<NodeContext> {
         if self.deferred_nodes.is_empty() {
             return;
         }
+        let epoch = self.next_place_epoch();
         while !self.deferred_nodes.is_empty() {
             let pending = core::mem::take(&mut self.deferred_nodes);
             for node in pending {
                 if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
                     continue;
                 }
-                // A node outside the tree under `root` keeps its layouts as they are.
-                let mut top = node;
-                while let Some(parent) = self.parents[top.into()] {
-                    top = parent;
+                // A node whose parent this call placed lies under `root`, and every deferred
+                // ancestor of it was placed before its parent was.
+                if !self.parent_placed_in(node, epoch) {
+                    // A node outside the tree under `root` keeps its layouts as they are.
+                    let mut top = node;
+                    while let Some(parent) = self.parents[top.into()] {
+                        top = parent;
+                    }
+                    if top != root {
+                        self.nodes[node.into()].deferred = false;
+                        continue;
+                    }
+                    self.place_path(node, &mut measure_function);
                 }
-                if top != root {
-                    self.nodes[node.into()].deferred = false;
-                    continue;
-                }
-                self.place_path(node, &mut measure_function);
                 self.place_one(node, &mut measure_function);
+                self.nodes[node.into()].placed_in = epoch;
             }
         }
         self.round_placed(&[root], &mut measure_function);
@@ -2077,6 +2147,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
                 tops.push(top);
             }
         }
+        let epoch = self.next_place_epoch();
         loop {
             let mut placed_any = false;
             let pending = core::mem::take(&mut self.deferred_nodes);
@@ -2085,21 +2156,26 @@ impl<NodeContext> TaffyTree<NodeContext> {
                 if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
                     continue;
                 }
-                let mut current = Some(node);
-                let mut inside = false;
-                while let Some(id) = current {
-                    if roots.contains(&id) {
-                        inside = true;
-                        break;
+                // A node whose parent this call placed lies in one of the subtrees, and every
+                // deferred ancestor of it was placed before its parent was.
+                if !self.parent_placed_in(node, epoch) {
+                    let mut current = Some(node);
+                    let mut inside = false;
+                    while let Some(id) = current {
+                        if roots.contains(&id) {
+                            inside = true;
+                            break;
+                        }
+                        current = self.parents[id.into()];
                     }
-                    current = self.parents[id.into()];
+                    if !inside {
+                        keep.push(node);
+                        continue;
+                    }
+                    self.place_path(node, &mut measure_function);
                 }
-                if !inside {
-                    keep.push(node);
-                    continue;
-                }
-                self.place_path(node, &mut measure_function);
                 self.place_one(node, &mut measure_function);
+                self.nodes[node.into()].placed_in = epoch;
                 placed_any = true;
             }
             keep.append(&mut self.deferred_nodes);
