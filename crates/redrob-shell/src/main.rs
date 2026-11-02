@@ -284,6 +284,8 @@ struct Window {
     took_focus: bool,
     /// Whether the window itself had the keyboard last frame.
     window_focused: bool,
+    /// Whether the address bar had the keyboard last frame.
+    address_focused: bool,
     /// Minimized: its page is hidden to Chromium (browser.rs).
     minimized: bool,
     /// Window shortcuts pressed while the page had the keyboard.
@@ -735,6 +737,24 @@ impl Window {
             Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab(a, a + 1),
             Shortcut::Escape => {
                 popup::close_menus(ctx);
+                // Escape in the address bar: its text goes back to the
+                // page's address and the page gets the keyboard back.
+                if self.address_focused {
+                    self.address_focused = false;
+                    self.editing = false;
+                    ctx.memory_mut(|m| m.surrender_focus(self.address_id));
+                    if let Some(t) = self.model.active_tab() {
+                        let web = t.url != NEW_TAB && !internal::is_internal(&t.url);
+                        self.address = if t.url == NEW_TAB {
+                            String::new()
+                        } else {
+                            t.url.clone()
+                        };
+                        if web {
+                            self.focus_page = true;
+                        }
+                    }
+                }
                 if let Some(id) = self.active_id() {
                     if let Some(op) = self.prompts.shortcut(s, id) {
                         self.op(id, op);
@@ -1786,6 +1806,7 @@ impl Window {
                     let (pill, _) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::hover());
                     field_rect = pill;
                     let focused = ui.memory(|m| m.has_focus(self.address_id));
+                    self.address_focused = focused;
                     let pill_fill = if focused {
                         p.surface_base
                     } else {

@@ -414,6 +414,7 @@ impl Browser {
             page_focused: false,
             took_focus: false,
             window_focused: false,
+            address_focused: false,
             minimized: false,
             page_shortcuts: Vec::new(),
             status: None,

@@ -110,7 +110,6 @@ pub fn after_pump() {
             if (g.acquire)(ctx) == 0 {
                 return;
             }
-            crate::cdp::trace(format_args!("glib ran"));
             let mut prio = 0;
             let ready = (g.prepare)(ctx, &mut prio);
             let mut timeout = -1;
