@@ -2189,11 +2189,10 @@ impl Window {
         );
         ui.add(
             egui::Image::from_bytes(
-                "bytes://redrob-ui/redrob-browser-icon.svg",
+                "bytes://redrob-ui/redrob-browser-icon-web.svg",
                 theme::BRAND_ICON,
             )
-            .fit_to_exact_size(Vec2::splat(64.0))
-            .corner_radius(14),
+            .fit_to_exact_size(Vec2::splat(64.0)),
         );
         ui.add_space(size::SPACE_3);
         ui.label(
