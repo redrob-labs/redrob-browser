@@ -88,7 +88,6 @@ pub struct Window {
 /// Where Chromium's DevTools protocol is.
 pub enum Upstream {
     /// The pipe pair: commands in, replies out, NUL after each message.
-    #[cfg(unix)]
     Pipe {
         commands: std::fs::File,
         replies: std::fs::File,
@@ -100,7 +99,6 @@ pub enum Upstream {
 impl From<crate::cef::DevTools> for Upstream {
     fn from(d: crate::cef::DevTools) -> Self {
         match d {
-            #[cfg(unix)]
             crate::cef::DevTools::Pipe { commands, replies } => {
                 Upstream::Pipe { commands, replies }
             }
@@ -114,7 +112,22 @@ impl From<crate::cef::DevTools> for Upstream {
 // tungstenite fixes the handshake callback's error type.
 #[allow(clippy::result_large_err)]
 pub async fn start(upstream: Upstream, window: Window) -> anyhow::Result<String> {
-    listen(Hub::connect(upstream).await?, window).await
+    let pipe = matches!(upstream, Upstream::Pipe { .. });
+    let hub = Hub::connect(upstream).await?;
+    // A pipe Chromium did not take stays silent: find out now. Silence
+    // while Chromium's loop is not running (a window that cannot run its
+    // passes) says nothing about the pipe.
+    if pipe {
+        let before = crate::cef::pumps();
+        if let Err(e) = hub.call(None, "Browser.getVersion", json!({})).await {
+            if crate::cef::pumps() - before >= 10 {
+                crate::cef::pipe_failed(&e.to_string());
+                anyhow::bail!("Chromium's DevTools pipe did not answer: {e}");
+            }
+            eprintln!("redrob-browser: DevTools pipe check skipped: Chromium's loop did not run");
+        }
+    }
+    listen(hub, window).await
 }
 
 #[allow(clippy::result_large_err)]
@@ -242,7 +255,6 @@ impl Hub {
             state: Mutex::default(),
         });
         match upstream {
-            #[cfg(unix)]
             Upstream::Pipe {
                 mut commands,
                 replies,

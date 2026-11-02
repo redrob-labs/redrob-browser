@@ -915,6 +915,16 @@ impl eframe::App for App {
         let me = self.0.clone();
         lock(&self.0).root_pass(ui, &me);
     }
+
+    /// eframe runs no pass for a minimized window, only this: Chromium
+    /// still has to run its pages, downloads and agents' DevTools calls.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().minimized == Some(true)) {
+            let mut b = lock(&self.0);
+            b.route(ctx);
+            b.after(ctx);
+        }
+    }
 }
 
 impl Browser {
