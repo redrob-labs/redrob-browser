@@ -24,8 +24,10 @@ struct Frag {
     /// read at.
     origin: (f32, f32),
     origin_unrounded: (f32, f32),
-    /// The box's absolute rounded rect.
+    /// The box's absolute rounded rect, and its rounded location relative
+    /// to the parent.
     rect: Rect,
+    location: (f32, f32),
     /// Its unrounded location (relative to the parent) and size.
     location_unrounded: (f32, f32),
     size_unrounded: (f32, f32),
@@ -109,6 +111,12 @@ impl Collected {
     /// The absolute rounded rect `node` was read at, when it is in the tree.
     pub(crate) fn rect_of(&self, node: taffy::NodeId) -> Option<Rect> {
         self.frags.get(&node).map(|frag| frag.rect)
+    }
+
+    /// The absolute unrounded origin of `node`'s border box (the initial
+    /// containing block's x included).
+    pub(crate) fn unrounded_origin_of(&self, node: taffy::NodeId) -> Option<(f32, f32)> {
+        self.frags.get(&node).map(Frag::absolute_unrounded)
     }
 }
 
@@ -203,14 +211,7 @@ impl Reader<'_> {
         if let Some(frag) = self.state.frags.get(&node).copied() {
             if !subtree {
                 if frag.origin != origin || frag.origin_unrounded != origin_unrounded {
-                    self.shift(
-                        node,
-                        (origin.0 - frag.origin.0, origin.1 - frag.origin.1),
-                        (
-                            origin_unrounded.0 - frag.origin_unrounded.0,
-                            origin_unrounded.1 - frag.origin_unrounded.1,
-                        ),
-                    );
+                    self.shift(node, origin, origin_unrounded);
                 }
                 return;
             }
@@ -230,6 +231,7 @@ impl Reader<'_> {
             origin,
             origin_unrounded,
             rect,
+            location: (layout.location.x, layout.location.y),
             location_unrounded: (unrounded.location.x, unrounded.location.y),
             size_unrounded: (unrounded.size.width, unrounded.size.height),
             dom: self.id_map.get(&node).copied(),
@@ -372,34 +374,34 @@ impl Reader<'_> {
         }
     }
 
-    /// Move the subtree of `node`, unchanged since it was read, by the
-    /// difference of its parent's origin.
-    fn shift(&mut self, node: taffy::NodeId, delta: (f32, f32), delta_unrounded: (f32, f32)) {
-        let mut stack = vec![node];
-        while let Some(id) = stack.pop() {
+    /// Move the subtree of `node`, unchanged since it was read, to its
+    /// parent's new origin: each box's absolute values are derived again from
+    /// its kept relative ones, top down, exactly as a read derives them.
+    fn shift(&mut self, node: taffy::NodeId, origin: (f32, f32), origin_unrounded: (f32, f32)) {
+        let mut stack = vec![(node, origin, origin_unrounded)];
+        while let Some((id, origin, origin_unrounded)) = stack.pop() {
             let Some(frag) = self.state.frags.get_mut(&id) else {
                 continue;
             };
             self.stats.moved += 1;
-            frag.origin = (frag.origin.0 + delta.0, frag.origin.1 + delta.1);
-            frag.origin_unrounded = (
-                frag.origin_unrounded.0 + delta_unrounded.0,
-                frag.origin_unrounded.1 + delta_unrounded.1,
-            );
-            frag.rect.x += delta.0;
-            frag.rect.y += delta.1;
+            frag.origin = origin;
+            frag.origin_unrounded = origin_unrounded;
+            frag.rect.x = origin.0 + frag.location.0;
+            frag.rect.y = origin.1 + frag.location.1;
             let frag = *frag;
             if let Some(dom) = frag.dom {
                 if self.state.winners.get(&dom) == Some(&id) {
                     self.write(dom, id, &frag);
                     if let Some(overflow) = self.state.geometry.grid_overflow.get_mut(&dom) {
-                        overflow.x += delta.0;
-                        overflow.y += delta.1;
+                        overflow.x = frag.rect.x;
+                        overflow.y = frag.rect.y;
                     }
                 }
             }
             if let Some(kids) = self.state.children.get(&id) {
-                stack.extend(kids.iter().copied());
+                let next = (frag.rect.x, frag.rect.y);
+                let next_unrounded = frag.absolute_unrounded();
+                stack.extend(kids.iter().map(|&kid| (kid, next, next_unrounded)));
             }
         }
     }

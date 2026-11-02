@@ -11673,9 +11673,6 @@ fn layout_dom_once(
             for (slot, generated) in generated_rects.iter_mut().zip(&ifc_items.generated) {
                 *slot = collected.rect_of(generated.node);
             }
-            if let Some(reuse) = ifc_items.reuse.as_mut() {
-                reuse.collected = Some(collected);
-            }
             phase_marks.push(("x.abs", crate::prof::mark()));
             used_auto_margins = collect_used_auto_margins(
                 &taffy_tree,
@@ -11690,13 +11687,15 @@ fn layout_dom_once(
             phase_marks.push(("x.collect", crate::prof::mark()));
             phase_marks.push(("x.frac", crate::prof::mark()));
             inline_fragments = place_inline_content(
-                &taffy_tree,
-                initial_cb_x,
+                &collected,
                 &mut ifc_items,
                 &mut rects,
                 &mut text_runs,
                 &mut generated_rects,
             );
+            if let Some(reuse) = ifc_items.reuse.as_mut() {
+                reuse.collected = Some(collected);
+            }
             phase_marks.push(("x.inline", crate::prof::mark()));
             // A box split across columns: its client rects are its column
             // fragments and its bounding box their union (CSSOM View).
@@ -12270,8 +12269,7 @@ fn mark_float_sensitive(taffy_tree: &mut TaffyTree<usize>, root: taffy::NodeId) 
 /// text nodes (one font box per line) and `<br>`. Returns the per-fragment
 /// rects of inline elements and text nodes; `rects` gets their unions.
 fn place_inline_content(
-    taffy_tree: &TaffyTree<usize>,
-    initial_cb_x: f32,
+    collected: &collect::Collected,
     ifc_items: &mut IfcRegistry,
     rects: &mut HashMap<NodeId, Rect>,
     text_runs: &mut HashMap<NodeId, Vec<(Rect, std::sync::Arc<str>)>>,
@@ -12291,12 +12289,12 @@ fn place_inline_content(
         // Unrounded, in LayoutUnits: Chrome positions text (and inline
         // boxes) at fractional offsets; only borders and backgrounds snap to
         // device pixels at paint.
-        let Some((x, y)) = taffy_unrounded_global_origin(taffy_tree, node) else {
+        let Some((x, y)) = collected.unrounded_origin_of(node) else {
             continue;
         };
         let snap = |value: f32| (value * 64.0).round() / 64.0;
         let origin = (
-            snap(x + initial_cb_x + ifc.content_offset.0),
+            snap(x + ifc.content_offset.0),
             snap(y + ifc.content_offset.1),
         );
         ifc.origin = origin;

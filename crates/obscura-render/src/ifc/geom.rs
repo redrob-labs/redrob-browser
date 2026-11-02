@@ -212,7 +212,8 @@ impl Ifc {
     }
 
     /// `fragments`, kept with the IFC until its final lines change (see
-    /// `Ifc::touch`) or it is asked for another origin.
+    /// `Ifc::touch`): made once at the origin and moved to `origin`, so an
+    /// IFC that only moved is not walked again.
     pub(crate) fn cached_fragments(&mut self, origin: (f32, f32)) -> std::sync::Arc<Fragments> {
         let key = (self.epoch, origin.0.to_bits(), origin.1.to_bits());
         if let Some((cached_key, fragments)) = &self.fragments_cache {
@@ -220,7 +221,41 @@ impl Ifc {
                 return fragments.clone();
             }
         }
-        let fragments = std::sync::Arc::new(self.fragments(origin));
+        let relative = match &self.relative_fragments {
+            Some((epoch, fragments)) if *epoch == self.epoch => fragments.clone(),
+            _ => {
+                let fragments = std::sync::Arc::new(self.fragments((0.0, 0.0)));
+                self.relative_fragments = Some((self.epoch, fragments.clone()));
+                fragments
+            }
+        };
+        let moved = |rect: &Rect| Rect {
+            x: rect.x + origin.0,
+            y: rect.y + origin.1,
+            ..*rect
+        };
+        let fragments = std::sync::Arc::new(Fragments {
+            elements: relative
+                .elements
+                .iter()
+                .map(|(node, rect)| (*node, moved(rect)))
+                .collect(),
+            pseudos: relative
+                .pseudos
+                .iter()
+                .map(|(node, kind, rect)| (*node, *kind, moved(rect)))
+                .collect(),
+            texts: relative
+                .texts
+                .iter()
+                .map(|(node, rect, text)| (*node, moved(rect), text.clone()))
+                .collect(),
+            breaks: relative
+                .breaks
+                .iter()
+                .map(|(node, rect)| (*node, moved(rect)))
+                .collect(),
+        });
         self.fragments_cache = Some((key, fragments.clone()));
         fragments
     }
