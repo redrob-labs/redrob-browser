@@ -411,6 +411,7 @@ impl Browser {
             notice: None,
             address: String::new(),
             editing: false,
+            suggest: Default::default(),
             focus_address: false,
             focus_page: false,
             error: None,

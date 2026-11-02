@@ -64,6 +64,8 @@ pub struct Suggestion {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SuggestionKind {
+    /// The address as typed.
+    Url,
     Bookmark,
     History,
     Search,
@@ -220,14 +222,36 @@ impl Model {
         }
     }
 
-    /// Address bar suggestions for `input`: bookmarks first, then history by
-    /// visits and recency, then a search. At most `limit`.
+    /// Address bar suggestions for `input`, as Chrome orders them: what was
+    /// typed first (a search, or the address when it is one), then
+    /// bookmarks, then history by visits and recency, and the search last
+    /// when the first row is the address. At most `limit`.
     pub fn suggest(&self, input: &str, limit: usize) -> Vec<Suggestion> {
         let q = input.trim().to_lowercase();
         let mut out = Vec::new();
-        if q.is_empty() {
+        if q.is_empty() || limit == 0 {
             return out;
         }
+        let typed = to_url(input);
+        let search = Suggestion {
+            url: search_url(input),
+            title: input.trim().to_string(),
+            kind: SuggestionKind::Search,
+        };
+        let is_search = typed == search.url;
+        let (first, last) = if is_search {
+            (search, None)
+        } else {
+            let url = Suggestion {
+                url: typed.clone(),
+                title: String::new(),
+                kind: SuggestionKind::Url,
+            };
+            (url, Some(search))
+        };
+        out.push(first);
+        // Room left for the rows that match.
+        let room = limit.saturating_sub(1 + usize::from(last.is_some()));
         let matches = |url: &str, title: &str| {
             let u = url.to_lowercase();
             let u = u
@@ -236,9 +260,10 @@ impl Model {
                 .trim_start_matches("www.");
             u.starts_with(&q) || u.contains(&q) || title.to_lowercase().contains(&q)
         };
+        let mut rows = Vec::new();
         for b in &self.bookmarks {
-            if out.len() < limit && matches(&b.url, &b.title) {
-                out.push(Suggestion {
+            if rows.len() < room && b.url != typed && matches(&b.url, &b.title) {
+                rows.push(Suggestion {
                     url: b.url.clone(),
                     title: b.title.clone(),
                     kind: SuggestionKind::Bookmark,
@@ -248,7 +273,11 @@ impl Model {
         let mut hist: Vec<&HistoryEntry> = self
             .history
             .iter()
-            .filter(|h| matches(&h.url, &h.title) && !out.iter().any(|s| s.url == h.url))
+            .filter(|h| {
+                h.url != typed
+                    && matches(&h.url, &h.title)
+                    && !rows.iter().any(|s: &Suggestion| s.url == h.url)
+            })
             .collect();
         hist.sort_by(|a, b| {
             b.visits
@@ -256,21 +285,23 @@ impl Model {
                 .then(b.last_visit.cmp(&a.last_visit))
         });
         for h in hist {
-            if out.len() + 1 >= limit {
+            if rows.len() >= room {
                 break;
             }
-            out.push(Suggestion {
+            rows.push(Suggestion {
                 url: h.url.clone(),
                 title: h.title.clone(),
                 kind: SuggestionKind::History,
             });
         }
-        out.push(Suggestion {
-            url: search_url(input),
-            title: input.trim().to_string(),
-            kind: SuggestionKind::Search,
-        });
+        out.extend(rows);
+        out.extend(last);
         out
+    }
+
+    /// Forget a history entry (Shift+Delete on an address bar suggestion).
+    pub fn remove_history(&mut self, url: &str) {
+        self.history.retain(|h| h.url != url);
     }
 }
 
@@ -279,6 +310,17 @@ pub fn now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// Whether `url` (without its scheme and `www.`) starts with `typed`
+/// (lowercase): the address Tab completes to.
+pub fn completes(url: &str, typed: &str) -> bool {
+    let u = url.to_lowercase();
+    let u = u
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_start_matches("www.");
+    !typed.is_empty() && (u.starts_with(typed) || url.to_lowercase().starts_with(typed))
 }
 
 /// Address field text to a URL: a URL as typed, a bare host gets https, anything else is a search.

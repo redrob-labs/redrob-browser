@@ -48,7 +48,23 @@ pub fn show<R>(
         ),
         None => at,
     };
+    // A new popup window stays hidden for its first frame, which measures
+    // what it draws: shown at once, it came up at a guessed size and grew a
+    // frame later, its unpainted part flashing over the page (the address
+    // bar's suggestions on the first letter typed).
+    let age_id = id.with("age");
+    let pass = ctx.cumulative_pass_nr();
+    let age = match ctx.data(|d| d.get_temp::<(u64, u32)>(age_id)) {
+        Some((last, age)) if last + 1 >= pass => age.saturating_add(u32::from(last != pass)),
+        _ => 0,
+    };
+    ctx.data_mut(|d| d.insert_temp(age_id, (pass, age)));
+    if age < 3 {
+        // Drawn again once mapped: what a hidden window drew is lost.
+        ctx.request_repaint();
+    }
     let builder = ViewportBuilder::default()
+        .with_visible(age > 0)
         .with_title("Redrob Browser")
         .with_decorations(false)
         .with_resizable(false)
