@@ -1,14 +1,13 @@
-//! Linux: run glib's main context for Chromium, and wake the window loop
-//! when it has work.
+//! Linux: wake the window loop when Chromium's message loop has work.
 //!
-//! Chromium runs on the window thread through the external message pump
-//! (`cef::pump`), which runs Chromium's own tasks only. Its X11 connection
+//! On Linux Chromium runs its own glib message loop (no external pump,
+//! cef/mod.rs): `cef::pump` runs it until idle. What it waits on between
+//! pumps are file descriptors of glib's default main context: its own
+//! wakeup pipe (a task was posted, from any thread), its X11 connection
 //! (input and expose for its windows, the clipboard's selection requests)
-//! and the input method's D-Bus replies are glib sources on the default
-//! main context, which the program's loop has to run, as cefclient's glib
-//! loop does. After each pump [`after_pump`] runs the main context's ready
-//! sources, then asks glib which descriptors and timeout it waits on, and a
-//! watcher thread polls them and asks for a pass as soon as one is
+//! and the input method's D-Bus connection. After each pump
+//! [`after_pump`] asks glib which descriptors those are, and a watcher
+//! thread polls them and asks the window for a pass as soon as one is
 //! readable.
 //!
 //! glib comes from the process (libcef loads it); its functions are looked
@@ -35,7 +34,6 @@ struct Glib {
     prepare: unsafe extern "C" fn(Ctx, *mut c_int) -> c_int,
     query: unsafe extern "C" fn(Ctx, c_int, *mut c_int, *mut GPollFd, c_int) -> c_int,
     check: unsafe extern "C" fn(Ctx, c_int, *mut GPollFd, c_int) -> c_int,
-    iteration: unsafe extern "C" fn(Ctx, c_int) -> c_int,
 }
 
 fn glib() -> Option<&'static Glib> {
@@ -57,7 +55,6 @@ fn glib() -> Option<&'static Glib> {
                 prepare: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_prepare")?),
                 query: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_query")?),
                 check: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_check")?),
-                iteration: std::mem::transmute::<*mut c_void, _>(sym("g_main_context_iteration")?),
             })
         }
     })
@@ -80,27 +77,38 @@ static PUMPED: Condvar = Condvar::new();
 /// The watcher's own pipe: written when the descriptor list changed.
 static NUDGE: OnceLock<(c_int, c_int)> = OnceLock::new();
 
+/// When the watcher last saw Chromium's loop get work, in ms since start.
+static LAST_WORK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_millis() as u64
+        + 1
+}
+
+/// Whether Chromium's loop had work in the last two seconds (input, posted
+/// tasks): its delayed tasks are likely due soon.
+pub fn busy_lately() -> bool {
+    let last = LAST_WORK.load(std::sync::atomic::Ordering::Relaxed);
+    last != 0 && now_ms().saturating_sub(last) < 2000
+}
+
 /// Call on the window thread right after each pump.
 pub fn after_pump() {
     let Some(g) = glib() else { return };
     let mut fds = vec![GPollFd::default(); 32];
     let (ready, timeout, n) = {
         // SAFETY: the default main context, owned by this thread (the one
-        // Chromium pumps on), not inside an iteration now. After running
-        // what is ready, prepare, query and check make one more cycle
-        // without dispatching, to learn what to wait on; the next pass
-        // dispatches what that found ready.
+        // Chromium pumps on), not inside an iteration now. prepare, query
+        // and check make one cycle without dispatching, to learn what to
+        // wait on; Chromium's loop dispatches it in the next pump.
         unsafe {
             let ctx = (g.default)();
             if (g.acquire)(ctx) == 0 {
                 return;
-            }
-            // What is ready now (X11 events, D-Bus replies), without
-            // blocking; a bounded number of rounds, the rest next pass.
-            for _ in 0..16 {
-                if (g.iteration)(ctx, 0) == 0 {
-                    break;
-                }
             }
             crate::cdp::trace(format_args!("glib ran"));
             let mut prio = 0;
@@ -133,9 +141,9 @@ pub fn after_pump() {
         }
     };
     fds.truncate(n);
-    // Chromium's own work source always asks for a zero timeout, and its
-    // work reaches the window through `on_schedule_message_pump_work`:
-    // only a real wait (a GTK timer) is worth a pass.
+    // Chromium's work source asks for a zero timeout whenever its loop is
+    // not running (between pumps): only a real wait (a GTK timer) is worth
+    // a pass.
     if ready {
         super::schedule(Duration::ZERO);
     } else if timeout > 0 {
@@ -217,6 +225,7 @@ fn watch(nudge: c_int) {
                     .map(|f| (f.fd, f.revents))
                     .collect::<Vec<_>>()
             ));
+            LAST_WORK.store(now_ms(), std::sync::atomic::Ordering::Relaxed);
             super::schedule(Duration::ZERO);
             // Until the window has pumped: what woke us is Chromium's to read.
             let s = SHARED.lock().unwrap_or_else(|e| e.into_inner());
