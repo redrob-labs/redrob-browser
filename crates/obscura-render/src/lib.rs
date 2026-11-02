@@ -45,7 +45,9 @@ pub mod prof {
     pub const STYLE_SHARE_HIT: usize = 9;
     pub const STYLE_SHARE_MISS: usize = 10;
     pub const STYLE_UNCHANGED: usize = 11;
-    const NAMES: [&str; 12] = [
+    /// A layout-tree style a repair pass actually changed.
+    pub const STYLE_SET: usize = 12;
+    const NAMES: [&str; 13] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -58,9 +60,10 @@ pub mod prof {
         "style_share_hit",
         "style_share_miss",
         "style_unchanged",
+        "style_set",
     ];
-    static NANOS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
-    static COUNTS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
+    static NANOS: [AtomicU64; 13] = [const { AtomicU64::new(0) }; 13];
+    static COUNTS: [AtomicU64; 13] = [const { AtomicU64::new(0) }; 13];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
@@ -85,11 +88,12 @@ pub mod prof {
     }
 
     /// A phase mark: now, and how many inline formatting contexts were laid
-    /// out so far.
+    /// out (low 32 bits) and layout-tree styles changed (high 32 bits) so far.
     pub fn mark() -> (std::time::Instant, u64) {
         (
             std::time::Instant::now(),
-            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed),
+            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed) & 0xffff_ffff
+                | COUNTS[STYLE_SET].load(Ordering::Relaxed) << 32,
         )
     }
 

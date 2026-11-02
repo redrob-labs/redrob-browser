@@ -85,6 +85,9 @@ pub(crate) struct TaffyConfig {
     /// Whether cache entries carry the subtree key they were computed under (see
     /// [`TaffyTree::enable_subtree_keys`])
     pub(crate) subtree_keys: bool,
+    /// Whether a final layout may be served from a node's earlier final results, deferring
+    /// the layout of its children (see [`TaffyTree::enable_deferred_performs`])
+    pub(crate) defer_performs: bool,
     /// Resolves an opaque `calc()` handle against its percentage basis.
     #[cfg(feature = "calc")]
     pub(crate) calc_resolver: fn(*const (), f32) -> f32,
@@ -100,6 +103,7 @@ impl Default for TaffyConfig {
         Self {
             use_rounding: true,
             subtree_keys: false,
+            defer_performs: false,
             #[cfg(feature = "calc")]
             calc_resolver: default_calc_resolver,
         }
@@ -166,6 +170,15 @@ struct NodeData {
     /// The node or a descendant changed since `subtree_key` was computed. A stale node's
     /// ancestors are all stale.
     pub(crate) key_stale: bool,
+    /// The node's final layout was served from its earlier final results for this input, so
+    /// its children do not hold the layouts that layout placed (see
+    /// [`TaffyTree::enable_deferred_performs`])
+    /// Its inputs are `last_perform`.
+    pub(crate) deferred: bool,
+    /// The inputs of the node's latest final layout request, and whether it was inside a block
+    /// formatting context; `None` when it was laid out beside floats (it cannot be laid out
+    /// again from these alone)
+    pub(crate) last_perform: Option<(LayoutInput, bool)>,
 }
 
 impl NodeData {
@@ -193,6 +206,8 @@ impl NodeData {
             content_key: 0,
             subtree_key: 0,
             key_stale: true,
+            deferred: false,
+            last_perform: None,
         }
     }
 
@@ -233,6 +248,14 @@ pub struct TaffyTree<NodeContext = ()> {
     /// Lays out nodes marked as inline formatting context roots
     #[cfg(feature = "block_layout")]
     inline_layout: Option<InlineLayoutFn<NodeContext>>,
+
+    /// Nodes whose children's layouts were deferred (some may have been placed since)
+    deferred_nodes: Vec<NodeId>,
+    /// The node a placement lays out again: it must not be served from earlier results
+    force_perform: Option<NodeId>,
+    /// The node the latest `compute_layout_with_measure` laid out as a root: its own layout is
+    /// current whatever its ancestors wait for
+    last_root: Option<NodeId>,
 }
 
 /// The tree an [`InlineLayoutFn`] lays out an inline formatting context in. It gives access to the
@@ -395,6 +418,15 @@ where
             debug_log!("HIDDEN");
             return compute_hidden_layout(self, node_id);
         }
+        // A block formatting context without floats is one a layout cannot read anything from:
+        // placing the children later in a fresh one lays them out the same.
+        #[cfg(all(feature = "block_layout", feature = "float_layout"))]
+        let (deferrable_context, in_block_context) =
+            (block_ctx.as_ref().is_none_or(|ctx| !ctx.has_floats()), block_ctx.is_some());
+        #[cfg(all(feature = "block_layout", not(feature = "float_layout")))]
+        let (deferrable_context, in_block_context) = (true, block_ctx.is_some());
+        #[cfg(not(feature = "block_layout"))]
+        let (deferrable_context, in_block_context) = (true, false);
 
         // We run the following wrapped in "compute_cached_layout", which will check the cache for an entry matching the node and inputs and:
         //   - Return that entry if exists
@@ -448,6 +480,40 @@ where
         let (bypass_cache, float_key) = bypass_cache;
         #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
         let bypass_cache = false;
+        #[cfg(not(all(feature = "block_layout", feature = "float_layout")))]
+        let float_key = 0u64;
+
+        if inputs.run_mode == RunMode::PerformLayout {
+            self.taffy.nodes[node_id.into()].last_perform =
+                (!bypass_cache && float_key == 0 && deferrable_context).then_some((inputs, in_block_context));
+        }
+
+        // A final layout this node made before, for these inputs and this subtree, whose
+        // children have been laid out differently since: serve its output and place the
+        // children only when something reads them (`TaffyTree::place_deferred`).
+        if inputs.run_mode == RunMode::PerformLayout && !bypass_cache {
+            let node = &self.taffy.nodes[node_id.into()];
+            let tag = self.taffy.entry_tag(node, float_key);
+            if node.cache.has_final_layout(&inputs, tag) {
+                if node.deferred {
+                    self.taffy.nodes[node_id.into()].deferred = false;
+                }
+            } else if self.taffy.config.defer_performs
+                && deferrable_context
+                && float_key == 0
+                && self.taffy.force_perform != Some(node_id)
+            {
+                if let Some(output) = node.cache.get_final_history(&inputs, tag) {
+                    let data = &mut self.taffy.nodes[node_id.into()];
+                    if !data.deferred {
+                        self.taffy.deferred_nodes.push(node_id);
+                    }
+                    data.deferred = true;
+                    data.round_subtree_stale = true;
+                    return output;
+                }
+            }
+        }
 
         let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
@@ -500,6 +566,19 @@ where
         let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
             let output = compute(tree, node_id, inputs);
             tree.taffy.nodes[node_id.into()].float_key = float_key;
+            output
+        };
+
+        let compute = |tree: &mut Self, node_id: NodeId, inputs: LayoutInput| {
+            if inputs.run_mode != RunMode::PerformLayout {
+                return compute(tree, node_id, inputs);
+            }
+            tree.taffy.nodes[node_id.into()].deferred = false;
+            let output = compute(tree, node_id, inputs);
+            if !bypass_cache && tree.taffy.config.defer_performs {
+                let children = tree.taffy.snapshot_children(node_id);
+                tree.taffy.nodes[node_id.into()].cache.set_pending_children(children);
+            }
             output
         };
 
@@ -813,6 +892,11 @@ where
     fn set_final_layout(&mut self, node_id: NodeId, layout: &Layout) {
         self.taffy.nodes[node_id.into()].final_layout = *layout;
     }
+
+    #[inline(always)]
+    fn is_deferred(&self, node_id: NodeId) -> bool {
+        self.taffy.nodes[node_id.into()].deferred
+    }
 }
 
 #[allow(clippy::iter_cloned_collect)] // due to no-std support, we need to use `iter_cloned` instead of `collect`
@@ -838,6 +922,9 @@ impl<NodeContext> TaffyTree<NodeContext> {
             config: TaffyConfig::default(),
             #[cfg(feature = "block_layout")]
             inline_layout: None,
+            deferred_nodes: Vec::new(),
+            force_perform: None,
+            last_root: None,
         }
     }
 
@@ -1008,6 +1095,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
             source.nodes.get_mut(source_node.into()).ok_or(TaffyError::InvalidInputNode(source_node))?;
         let data = self.nodes.get_mut(node.into()).ok_or(TaffyError::InvalidInputNode(node))?;
         data.cache = core::mem::take(&mut source_data.cache);
+        data.last_perform = source_data.last_perform;
         data.unrounded_layout = source_data.unrounded_layout;
         data.final_layout = source_data.final_layout;
         data.round_stale = true;
@@ -1220,6 +1308,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Return this node layout relative to its parent
     #[inline]
     pub fn layout(&self, node: NodeId) -> TaffyResult<&Layout> {
+        self.dbg_check_read(node);
         if self.config.use_rounding {
             Ok(&self.nodes[node.into()].final_layout)
         } else {
@@ -1267,6 +1356,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Returns this node layout with unrounded values relative to its parent.
     #[inline]
     pub fn unrounded_layout(&self, node: NodeId) -> &Layout {
+        self.dbg_check_read(node);
         &self.nodes[node.into()].unrounded_layout
     }
 
@@ -1421,6 +1511,16 @@ impl<NodeContext> TaffyTree<NodeContext> {
         }
     }
 
+    /// Forget every final layout `node` made, and keep its ancestors' only as earlier results:
+    /// state the embedder keeps for the node's layout (an inline formatting context's lines) is
+    /// gone, so the node must be laid out again before its layout is final
+    pub fn drop_final_layouts(&mut self, node: NodeId) {
+        self.nodes[node.into()].cache.drop_final_layouts();
+        if let Some(parent) = self.parents[node.into()] {
+            self.forget_final_layouts_to_root(parent);
+        }
+    }
+
     /// Empty the final layout entries of `node` and its ancestors: their results assumed
     /// layouts of `node`'s subtree that a layout of `node` alone has replaced. Size results stay.
     pub fn forget_final_layouts_to_root(&mut self, node: NodeId) {
@@ -1481,6 +1581,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
         if self.config.subtree_keys {
             self.refresh_subtree_keys(node_id);
         }
+        self.last_root = Some(node_id);
         // Laying out a node that has a parent (a measuring pass over one subtree) treats it as a
         // root at the origin. Keep the location its parent gave it, and dirty it so the next
         // layout of the real root places it again instead of reusing a cached parent.
@@ -1501,6 +1602,337 @@ impl<NodeContext> TaffyTree<NodeContext> {
             }
         }
         Ok(())
+    }
+
+    /// Let a final layout be served from the node's earlier final results (the ones it made
+    /// before its subtree or its inputs last changed, kept like its size results), without
+    /// laying out its children again. A layout pass after a style change followed by a pass
+    /// after the style is restored, as an embedder's fix-up passes do, then only lays out what
+    /// the change reaches in both passes.
+    ///
+    /// The children of such a node keep the layouts of the node's last real layout until they
+    /// are placed: before reading the layout of a node that may lie under one, call
+    /// [`Self::place_deferred`], and [`Self::place_all_deferred`] before reading the results.
+    /// Only nodes laid out outside an inherited block formatting context are deferred.
+    pub fn enable_deferred_performs(&mut self) {
+        self.config.defer_performs = true;
+    }
+
+    /// Debug (`OBSCURA_TAFFY_DEFER_CHECK`): report a read of a layout under a deferred node
+    #[cfg(feature = "std")]
+    fn dbg_check_read(&self, node: NodeId) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if self.deferred_nodes.is_empty()
+            || self.last_root == Some(node)
+            || !*ON.get_or_init(|| std::env::var_os("OBSCURA_TAFFY_DEFER_CHECK").is_some())
+            || self.deferred_ancestor(node).is_none()
+        {
+            return;
+        }
+        static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+        let trace = std::backtrace::Backtrace::force_capture().to_string();
+        let frames: Vec<&str> = trace
+            .lines()
+            .filter(|line| line.contains("obscura_render::"))
+            .map(|line| line.trim())
+            .take(3)
+            .collect();
+        let key = frames.join(" <- ");
+        let mut seen = SEEN.lock().unwrap();
+        if !seen.contains(&key) {
+            std::eprintln!("[defer-read] {key}");
+            seen.push(key);
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    fn dbg_check_read(&self, _node: NodeId) {}
+
+    /// The nearest ancestor of `node` (not `node` itself) whose children wait to be placed
+    pub fn deferred_ancestor(&self, node: NodeId) -> Option<NodeId> {
+        if self.deferred_nodes.is_empty() {
+            return None;
+        }
+        let mut current = self.parents.get(node.into()).copied().flatten();
+        while let Some(id) = current {
+            if self.nodes[id.into()].deferred {
+                return Some(id);
+            }
+            current = self.parents[id.into()];
+        }
+        None
+    }
+
+    /// Lay out the children of `node` again with the inputs its layout was served for
+    fn place_one<MeasureFunction>(&mut self, node: NodeId, measure_function: &mut MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        let data = &mut self.nodes[node.into()];
+        let (true, Some((inputs, in_block_context))) = (data.deferred, data.last_perform) else {
+            data.deferred = false;
+            return;
+        };
+        if self.restore_children(node, &inputs) {
+            return;
+        }
+        self.force_perform = Some(node);
+        let mut view = TaffyView { taffy: self, measure_function: &mut *measure_function };
+        #[cfg(feature = "block_layout")]
+        {
+            if in_block_context {
+                let mut bfc = crate::compute::BlockFormattingContext::new();
+                let mut root_context = bfc.root_block_context();
+                let mut context = root_context.sub_context(0.0, [0.0, 0.0]);
+                let _ = view.compute_child_layout(node, inputs, Some(&mut context));
+            } else {
+                let _ = view.compute_child_layout(node, inputs, None);
+            }
+        }
+        #[cfg(not(feature = "block_layout"))]
+        {
+            let _ = in_block_context;
+            let _ = view.compute_child_layout(node, inputs);
+        }
+        self.force_perform = None;
+        self.nodes[node.into()].deferred = false;
+        self.note_subtree_rounding_stale(node);
+    }
+
+    /// `node` and its ancestors round again
+    fn note_subtree_rounding_stale(&mut self, node: NodeId) {
+        let mut current = Some(node);
+        while let Some(id) = current {
+            let data = &mut self.nodes[id.into()];
+            if data.round_subtree_stale && id != node {
+                break;
+            }
+            data.round_subtree_stale = true;
+            current = self.parents[id.into()];
+        }
+    }
+
+    /// Whether a node's final layout only places its children's layouts, so the children's
+    /// layouts and inputs restore it: not an inline formatting context (its line layout lives
+    /// with the embedder), a measured leaf or a grid (its track sizes are layout details)
+    fn children_restore_layout(&self, node: NodeId) -> bool {
+        let data = &self.nodes[node.into()];
+        !data.is_inline_root
+            && !data.has_context
+            && data.style.display != Display::Grid
+            && !self.children[node.into()].is_empty()
+    }
+
+    /// The children's layouts and inputs as the node's current final layout placed them, if
+    /// they restore it (see `Self::children_restore_layout`)
+    pub(crate) fn snapshot_children(&self, node: NodeId) -> Option<Box<[super::cache::ChildSnapshot]>> {
+        if !self.children_restore_layout(node) {
+            return None;
+        }
+        self.children[node.into()]
+            .iter()
+            .map(|&child| {
+                let data = &self.nodes[child.into()];
+                let (input, in_block_context) = data.last_perform?;
+                Some(super::cache::ChildSnapshot { layout: data.unrounded_layout, input, in_block_context })
+            })
+            .collect()
+    }
+
+    /// Place `node`'s children at the layouts its earlier final layout for `inputs` placed them
+    /// at, when those are known; the children whose own final layout differs then wait to be
+    /// placed in turn
+    fn restore_children(&mut self, node: NodeId, inputs: &LayoutInput) -> bool {
+        if !self.children_restore_layout(node) {
+            return false;
+        }
+        let tag = self.entry_tag(&self.nodes[node.into()], 0);
+        let Some(children) = self.nodes[node.into()].cache.restore_final_history(inputs, tag) else {
+            return false;
+        };
+        let children: Vec<super::cache::ChildSnapshot> = children.to_vec();
+        let child_ids: Vec<NodeId> = self.children[node.into()].iter().copied().collect();
+        for (child, snapshot) in child_ids.into_iter().zip(children.iter()) {
+            self.store_unrounded_layout(child, &snapshot.layout);
+            let tag = self.entry_tag(&self.nodes[child.into()], 0);
+            let data = &mut self.nodes[child.into()];
+            data.last_perform = Some((snapshot.input, snapshot.in_block_context));
+            let placed = snapshot.input.run_mode != RunMode::PerformLayout
+                || data.cache.has_final_layout(&snapshot.input, tag);
+            if placed {
+                data.deferred = false;
+            } else {
+                if !data.deferred {
+                    self.deferred_nodes.push(child);
+                }
+                let data = &mut self.nodes[child.into()];
+                data.deferred = true;
+                data.round_subtree_stale = true;
+            }
+        }
+        self.nodes[node.into()].deferred = false;
+        self.note_subtree_rounding_stale(node);
+        true
+    }
+
+    /// Place every deferred ancestor of `node` from the root down, so `node`'s own layout is
+    /// the one its parent's current layout gave it. Returns the root the path ends at.
+    fn place_path<MeasureFunction>(&mut self, node: NodeId, measure_function: &mut MeasureFunction) -> NodeId
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        let mut path = Vec::new();
+        let mut current = self.parents[node.into()];
+        let mut root = node;
+        while let Some(id) = current {
+            path.push(id);
+            root = id;
+            current = self.parents[id.into()];
+        }
+        for &ancestor in path.iter().rev() {
+            if self.nodes[ancestor.into()].deferred {
+                self.place_one(ancestor, measure_function);
+            }
+        }
+        root
+    }
+
+    /// Place the deferred ancestors of each of `nodes` (and with `children` the node itself), then
+    /// round what changed, so reading their layouts (and their children's) reads the current ones
+    pub fn place_deferred<MeasureFunction>(
+        &mut self,
+        nodes: &[NodeId],
+        children: bool,
+        mut measure_function: MeasureFunction,
+    )
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() {
+            return;
+        }
+        let mut roots: Vec<NodeId> = Vec::new();
+        for &node in nodes {
+            if self.nodes.get(node.into()).is_none() {
+                continue;
+            }
+            let own = children && self.nodes[node.into()].deferred;
+            if !own && self.deferred_ancestor(node).is_none() {
+                continue;
+            }
+            let root = self.place_path(node, &mut measure_function);
+            if children {
+                self.place_one(node, &mut measure_function);
+            }
+            if !roots.contains(&root) {
+                roots.push(root);
+            }
+        }
+        self.round_placed(&roots, &mut measure_function);
+    }
+
+    /// Place every deferred node under `root` and round the tree: afterwards every layout is
+    /// the one the last layout pass made
+    pub fn place_all_deferred<MeasureFunction>(&mut self, root: NodeId, mut measure_function: MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() {
+            return;
+        }
+        while !self.deferred_nodes.is_empty() {
+            let pending = core::mem::take(&mut self.deferred_nodes);
+            for node in pending {
+                if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
+                    continue;
+                }
+                // A node outside the tree under `root` keeps its layouts as they are.
+                let mut top = node;
+                while let Some(parent) = self.parents[top.into()] {
+                    top = parent;
+                }
+                if top != root {
+                    self.nodes[node.into()].deferred = false;
+                    continue;
+                }
+                self.place_path(node, &mut measure_function);
+                self.place_one(node, &mut measure_function);
+            }
+        }
+        self.round_placed(&[root], &mut measure_function);
+    }
+
+    /// Place every deferred node in the subtrees of `roots` (and the paths to them), so every
+    /// layout in them is the one the last layout pass made
+    pub fn place_all_deferred_under<MeasureFunction>(&mut self, roots: &[NodeId], mut measure_function: MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if self.deferred_nodes.is_empty() || roots.is_empty() {
+            return;
+        }
+        let mut tops: Vec<NodeId> = Vec::new();
+        for &root in roots {
+            if self.nodes.get(root.into()).is_none() {
+                continue;
+            }
+            let top = self.place_path(root, &mut measure_function);
+            if !tops.contains(&top) {
+                tops.push(top);
+            }
+        }
+        loop {
+            let mut placed_any = false;
+            let pending = core::mem::take(&mut self.deferred_nodes);
+            let mut keep = Vec::new();
+            for node in pending {
+                if self.nodes.get(node.into()).is_none_or(|data| !data.deferred) {
+                    continue;
+                }
+                let mut current = Some(node);
+                let mut inside = false;
+                while let Some(id) = current {
+                    if roots.contains(&id) {
+                        inside = true;
+                        break;
+                    }
+                    current = self.parents[id.into()];
+                }
+                if !inside {
+                    keep.push(node);
+                    continue;
+                }
+                self.place_path(node, &mut measure_function);
+                self.place_one(node, &mut measure_function);
+                placed_any = true;
+            }
+            keep.append(&mut self.deferred_nodes);
+            self.deferred_nodes = keep;
+            if !placed_any {
+                break;
+            }
+        }
+        self.round_placed(&tops, &mut measure_function);
+    }
+
+    /// Round the trees under `roots` again where placing changed layouts
+    fn round_placed<MeasureFunction>(&mut self, roots: &[NodeId], measure_function: &mut MeasureFunction)
+    where
+        MeasureFunction:
+            FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    {
+        if !self.config.use_rounding {
+            return;
+        }
+        for &root in roots {
+            let mut view = TaffyView { taffy: self, measure_function: &mut *measure_function };
+            round_layout(&mut view, root);
+        }
     }
 
     /// Updates the stored layout of the provided `node` and its children
