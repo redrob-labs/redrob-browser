@@ -16,7 +16,7 @@ use egui::{
 
 const TOKENS: &str = include_str!("../assets/redrob-ui/tokens.json");
 const WANTED_SANS: &[u8] = include_bytes!("../assets/fonts/WantedSans-Regular.ttf");
-pub const BRAND_ICON: &[u8] = include_bytes!("../assets/redrob-ui/redrob-browser-icon.svg");
+pub const BRAND_ICON: &[u8] = include_bytes!("../assets/redrob-ui/redrob-browser-icon-web.svg");
 
 /// Semantic colours of one theme, named as in the design system.
 #[derive(Clone, Copy, Debug)]
@@ -308,6 +308,9 @@ pub enum Icon {
     User,
     SignIn,
     Incognito,
+    Folder,
+    Plug,
+    BookOpen,
 }
 
 impl Icon {
@@ -340,6 +343,9 @@ impl Icon {
             Icon::User => svg!("user"),
             Icon::SignIn => svg!("signIn"),
             Icon::Incognito => svg!("anonymous"),
+            Icon::Folder => svg!("folder"),
+            Icon::Plug => svg!("plug"),
+            Icon::BookOpen => svg!("bookOpen"),
         }
     }
 

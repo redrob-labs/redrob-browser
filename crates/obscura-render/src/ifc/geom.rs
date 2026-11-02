@@ -16,7 +16,7 @@ pub(crate) struct Fragments {
     /// Per line border boxes of inline `::before`/`::after` boxes.
     pub(crate) pseudos: Vec<(NodeId, GeneratedBoxKind, Rect)>,
     /// Per line font boxes of each text node, with the text on that line.
-    pub(crate) texts: Vec<(NodeId, Rect, String)>,
+    pub(crate) texts: Vec<(NodeId, Rect, std::sync::Arc<str>)>,
     /// The box of each `<br>`.
     pub(crate) breaks: Vec<(NodeId, Rect)>,
 }
@@ -209,6 +209,55 @@ impl Ifc {
             }
         }
         depths
+    }
+
+    /// `fragments`, kept with the IFC until its final lines change (see
+    /// `Ifc::touch`): made once at the origin and moved to `origin`, so an
+    /// IFC that only moved is not walked again.
+    pub(crate) fn cached_fragments(&mut self, origin: (f32, f32)) -> std::sync::Arc<Fragments> {
+        let key = (self.epoch, origin.0.to_bits(), origin.1.to_bits());
+        if let Some((cached_key, fragments)) = &self.fragments_cache {
+            if *cached_key == key {
+                return fragments.clone();
+            }
+        }
+        let relative = match &self.relative_fragments {
+            Some((epoch, fragments)) if *epoch == self.epoch => fragments.clone(),
+            _ => {
+                let fragments = std::sync::Arc::new(self.fragments((0.0, 0.0)));
+                self.relative_fragments = Some((self.epoch, fragments.clone()));
+                fragments
+            }
+        };
+        let moved = |rect: &Rect| Rect {
+            x: rect.x + origin.0,
+            y: rect.y + origin.1,
+            ..*rect
+        };
+        let fragments = std::sync::Arc::new(Fragments {
+            elements: relative
+                .elements
+                .iter()
+                .map(|(node, rect)| (*node, moved(rect)))
+                .collect(),
+            pseudos: relative
+                .pseudos
+                .iter()
+                .map(|(node, kind, rect)| (*node, *kind, moved(rect)))
+                .collect(),
+            texts: relative
+                .texts
+                .iter()
+                .map(|(node, rect, text)| (*node, moved(rect), text.clone()))
+                .collect(),
+            breaks: relative
+                .breaks
+                .iter()
+                .map(|(node, rect)| (*node, moved(rect)))
+                .collect(),
+        });
+        self.fragments_cache = Some((key, fragments.clone()));
+        fragments
     }
 
     /// Every fragment of this IFC, with the content box at `origin`.
@@ -500,7 +549,7 @@ impl Ifc {
                 }
             }
             for (node, x0, x1, baseline, ascent, descent, range, offset) in texts {
-                let text = self.text.get(range).unwrap_or_default().to_string();
+                let text: std::sync::Arc<str> = self.text.get(range).unwrap_or_default().into();
                 out.texts.push((
                     node,
                     Rect {

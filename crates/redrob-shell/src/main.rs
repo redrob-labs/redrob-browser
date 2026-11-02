@@ -27,6 +27,7 @@ mod profile;
 mod relay;
 mod self_update;
 mod startup;
+mod strip;
 mod theme;
 mod updater;
 mod vault;
@@ -41,6 +42,20 @@ use model::{Model, SuggestionKind, Tab, TabId};
 use theme::{size, Bar, Icon};
 
 const NEW_TAB: &str = "about:blank";
+/// Rows in the address bar's suggestion list, and each row's height.
+const SUGGESTIONS: usize = 8;
+const SUGGESTION_ROW: f32 = 34.0;
+
+/// Put the caret of text field `id` at the end of `text`.
+fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        let end = egui::text::CCursor::new(text.chars().count());
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        state.store(ctx, id);
+    }
+}
 
 /// `--incognito`: a private window. Its settings live in a temporary folder
 /// deleted when the browser closes, and Chromium keeps its cookies and
@@ -172,6 +187,30 @@ fn agent_prompt(text: &str) -> Option<&str> {
         .map(str::trim)
 }
 
+/// The address bar's suggestion list, as Chrome's omnibox shows it: open
+/// while the person types, closed by Escape, a pick, a click elsewhere, a
+/// tab switch, or the window losing the keyboard, moving or minimizing.
+#[derive(Default)]
+struct Suggest {
+    open: bool,
+    /// What the person typed: the list follows it, not the row the arrow
+    /// keys put in the field.
+    typed: String,
+    /// The highlighted row; Enter opens it. The first row unless the arrow
+    /// keys moved.
+    sel: usize,
+    /// The arrow keys moved the highlight (the field shows that row).
+    arrowed: bool,
+    /// The window's place on screen when the list opened.
+    origin: Option<egui::Pos2>,
+}
+
+impl Suggest {
+    fn close(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// The window and taskbar icon, from the design system's app icon.
 fn app_icon() -> egui::IconData {
     let png = include_bytes!("../assets/redrob-browser-256.png");
@@ -233,6 +272,8 @@ struct Window {
     /// Address field text; follows the active tab's URL unless the person is typing.
     address: String,
     editing: bool,
+    /// The address bar's suggestion list.
+    suggest: Suggest,
     focus_address: bool,
     /// Give the page area keyboard focus on the next frame: after the
     /// address bar navigates, and for a tab opened on a page, as Chrome
@@ -288,11 +329,35 @@ struct Window {
     maximized: bool,
     /// Something the saved session should catch up with.
     session_dirty: bool,
-    /// The tab being dragged in the strip, and where on it the pointer took hold.
-    tab_drag: Option<(TabId, f32)>,
+    /// A tab or group drag that began in this strip, for the browser to run.
+    drag_start: Option<browser::DragStart>,
+    /// The drag going on in this strip (browser.rs sets it every pass).
+    drag_view: Option<browser::DragView>,
+    /// Where the strip and its tabs were drawn last.
+    strip_layout: browser::StripLayout,
+    /// The window's inner area on screen, in points.
+    screen_inner: Option<Rect>,
+    /// The group whose name is being typed in its chip, and the text.
+    renaming: Option<(model::GroupId, String)>,
+    /// The chrome takes the keyboard from the page on the next pass.
+    take_keyboard: bool,
     /// Most visited sites for the new tab page, read once per new tab.
     top_sites: Option<Vec<(String, String)>>,
     new_tab_query: String,
+    /// The extension whose popup is open over a tab
+    /// (cef/handlers/extensions.rs).
+    ext_popup: Option<(TabId, String)>,
+    /// An extension icon was clicked this frame: it opened or closed the
+    /// popup itself.
+    ext_toggled: bool,
+    /// Extension icons, by file (None: not an image).
+    ext_icons: std::collections::HashMap<std::path::PathBuf, Option<egui::TextureHandle>>,
+    /// When the window last asked for the installed extensions.
+    ext_read_at: f64,
+    /// What the page info bubble shows for a tab (`Op::SiteInfo`).
+    site_info: Option<(TabId, cef::handlers::site_info::SiteInfo)>,
+    /// The page info bubble shows the certificate.
+    site_cert: bool,
 }
 
 impl Window {
@@ -305,11 +370,23 @@ impl Window {
     }
 
     /// Reopen the tabs from the last session in their order.
-    fn restore(&mut self, tabs: Vec<profile::SavedTab>, active: usize) {
+    fn restore(&mut self, tabs: Vec<profile::SavedTab>, active: usize, groups: Vec<model::Group>) {
+        // Saved group ids are the last run's: give each a fresh one.
+        let ids: std::collections::HashMap<u64, model::GroupId> = groups
+            .iter()
+            .map(|g| (g.id, model::alloc_group_id()))
+            .collect();
+        for g in groups {
+            self.model.groups.push(model::Group {
+                id: ids[&g.id],
+                ..g
+            });
+        }
         for saved in tabs {
             let id = self.model.alloc_id();
             let mut tab = Tab::new(id, &saved.url);
             tab.title = saved.title;
+            tab.group = saved.group.and_then(|g| ids.get(&g).copied());
             // Our own pages are drawn here; their Chromium tab waits on about:blank.
             let internal = internal::is_internal(&saved.url);
             tab.loading = !internal && saved.url != NEW_TAB;
@@ -326,8 +403,15 @@ impl Window {
                 }),
             );
         }
+        self.model.prune_groups();
         if !self.model.tabs.is_empty() {
             self.model.active = active.min(self.model.tabs.len() - 1);
+            // The tab on screen never hides in a collapsed group.
+            if let Some(g) = self.model.tabs[self.model.active].group {
+                if let Some(g) = self.model.group_mut(g) {
+                    g.collapsed = false;
+                }
+            }
             self.activated();
         }
     }
@@ -346,7 +430,13 @@ impl Window {
         self.session_dirty = true;
     }
 
+    /// A new tab next to the active one. A page opened from a grouped tab
+    /// joins its group; a new tab page (Ctrl+T, +) goes after the group.
     fn open_tab(&mut self, url: &str, activate: bool) -> TabId {
+        self.open_tab_with(url, activate, url != NEW_TAB)
+    }
+
+    fn open_tab_with(&mut self, url: &str, activate: bool, in_group: bool) -> TabId {
         let id = self.model.alloc_id();
         let mut tab = Tab::new(id, url);
         // Our own pages are drawn by the window; the Chromium tab waits on about:blank.
@@ -358,6 +448,15 @@ impl Window {
             url.to_string()
         };
         self.model.insert_tab(tab, activate);
+        if !in_group {
+            if let Some(i) = self
+                .model
+                .index_of(id)
+                .filter(|i| self.model.tabs[*i].group.is_some())
+            {
+                self.model.remove_from_group(i);
+            }
+        }
         self.op(id, Op::Open(engine_url));
         if url == NEW_TAB {
             self.top_sites = None;
@@ -371,6 +470,94 @@ impl Window {
             }
         }
         id
+    }
+
+    /// Open `urls` at the strip's end, the first on screen: Chrome's "Open
+    /// all" for a bookmarks folder. Returns the new tabs.
+    fn open_all(&mut self, urls: &[String]) -> Vec<TabId> {
+        let mut ids = Vec::new();
+        for (k, url) in urls.iter().enumerate() {
+            let id = self.model.alloc_id();
+            let mut tab = Tab::new(id, url);
+            let engine_url = if internal::is_internal(url) {
+                tab.loading = false;
+                tab.title = internal::title(url).to_string();
+                NEW_TAB.to_string()
+            } else {
+                url.clone()
+            };
+            self.model.tabs.push(tab);
+            self.op(id, Op::Open(engine_url));
+            if k == 0 {
+                self.model.active = self.model.tabs.len() - 1;
+            }
+            ids.push(id);
+        }
+        if !ids.is_empty() {
+            self.activated();
+        }
+        self.save_session();
+        ids
+    }
+
+    /// "Open all in new group": the tabs at the strip's end, in a group
+    /// named `title`.
+    fn open_all_in_group(&mut self, urls: &[String], title: &str) -> Option<model::GroupId> {
+        let ids = self.open_all(urls);
+        self.model.group_tabs(&ids, title)
+    }
+
+    /// "Close group": its tabs close, and Ctrl+Shift+T brings the group back.
+    fn close_group(&mut self, g: model::GroupId) {
+        let Some(group) = self.model.group(g).cloned() else {
+            return;
+        };
+        let Some(r) = self.model.group_range(g) else {
+            return;
+        };
+        let mut tabs = Vec::new();
+        for i in r.rev() {
+            let (url, title) = {
+                let t = &self.model.tabs[i];
+                (t.url.clone(), t.title.clone())
+            };
+            if let Some(t) = self.model.take_tab(i) {
+                self.prompts.close_tab(t.id);
+                self.agent_logins.remove(&t.id);
+                self.op(t.id, Op::Close);
+            }
+            tabs.push((url, title));
+        }
+        tabs.reverse();
+        self.model.remember_closed(model::Closed::Group {
+            title: group.title,
+            color: group.color,
+            tabs,
+        });
+        if self.model.tabs.is_empty() {
+            self.open_tab(NEW_TAB, true);
+        } else {
+            self.activated();
+        }
+        self.save_session();
+    }
+
+    /// Click on a group's chip: collapse or expand it.
+    fn toggle_group(&mut self, g: model::GroupId) {
+        let collapsed = self.model.group(g).is_some_and(|x| x.collapsed);
+        let had = self.active_id();
+        if !self.model.set_collapsed(g, !collapsed) {
+            // Every tab is in the group: Chrome opens a new tab beside it.
+            let id = self.model.alloc_id();
+            self.model.tabs.push(Tab::new(id, NEW_TAB));
+            self.model.active = self.model.tabs.len() - 1;
+            self.op(id, Op::Open(NEW_TAB.to_string()));
+            self.top_sites = None;
+        }
+        if self.active_id() != had {
+            self.activated();
+        }
+        self.save_session();
     }
 
     fn close_tab(&mut self, index: usize) {
@@ -395,6 +582,12 @@ impl Window {
     /// The active tab changed: follow it in the address field and the engine.
     fn activated(&mut self) {
         self.editing = false;
+        // The tab on screen never hides in a collapsed group.
+        if let Some(g) = self.model.active_tab().and_then(|t| t.group) {
+            if let Some(g) = self.model.group_mut(g) {
+                g.collapsed = false;
+            }
+        }
         if let Some(t) = self.model.active_tab() {
             self.address = if t.url == NEW_TAB {
                 String::new()
@@ -446,6 +639,10 @@ impl Window {
             };
             if let Event::OpenTab(url) = event {
                 self.open_tab(&url, false);
+                continue;
+            }
+            if let Event::ShowTab(url) = event {
+                self.open_tab(&url, true);
                 continue;
             }
             if let Event::Download {
@@ -513,6 +710,19 @@ impl Window {
                 }
                 continue;
             }
+            if let Event::Badges = event {
+                continue;
+            }
+            if let Event::PopupClosed = event {
+                if self.ext_popup.as_ref().is_some_and(|(t, _)| *t == tab) {
+                    self.ext_popup = None;
+                }
+                continue;
+            }
+            if let Event::SiteInfo(info) = event {
+                self.site_info = Some((tab, info));
+                continue;
+            }
             // Only the tab on screen can have the keyboard or the pointer,
             // and only while its page shows (not under the new tab page or
             // settings, where Chromium still focuses a page it creates).
@@ -538,6 +748,7 @@ impl Window {
                         // A click in the page closes what floats over it.
                         popup::close_menus(ctx);
                         self.prompts.close_menu();
+                        self.close_ext_popup();
                     } else if self.model.index_of(tab).is_some() {
                         // Chromium focuses each page it makes, out of sight
                         // too (a new tab under the new tab page): the
@@ -623,10 +834,15 @@ impl Window {
                 | Event::Zoom(_)
                 | Event::Clipboard(_)
                 | Event::OpenTab(_)
+                | Event::ShowTab(_)
+                | Event::External { .. }
                 | Event::Shortcut(_)
                 | Event::Focused
                 | Event::TakeFocus
-                | Event::Status(_) => {}
+                | Event::Status(_)
+                | Event::SiteInfo(_)
+                | Event::PopupClosed
+                | Event::Badges => {}
             }
             let url_now = t.url.clone();
             // Blank tabs and our own pages are not history.
@@ -691,11 +907,20 @@ impl Window {
                 self.open_tab(NEW_TAB, true);
             }
             Shortcut::CloseTab => self.close_tab(a),
-            Shortcut::ReopenTab => {
-                if let Some((url, _)) = self.model.closed.pop() {
+            Shortcut::ReopenTab => match self.model.closed.pop() {
+                Some(model::Closed::Tab { url, .. }) => {
                     self.open_tab(&url, true);
                 }
-            }
+                Some(model::Closed::Group { title, color, tabs }) => {
+                    let urls: Vec<String> = tabs.into_iter().map(|(u, _)| u).collect();
+                    if let Some(g) = self.open_all_in_group(&urls, &title) {
+                        if let Some(g) = self.model.group_mut(g) {
+                            g.color = color;
+                        }
+                    }
+                }
+                None => {}
+            },
             Shortcut::NewWindow => self.requests.push(browser::Request::NewWindow),
             Shortcut::NewIncognito => self.open_incognito(),
             Shortcut::Address => self.focus_address = true,
@@ -705,8 +930,17 @@ impl Window {
                     self.op(id, Op::Reload);
                 }
             }
-            Shortcut::NextTab if n > 1 => self.select_tab((a + 1) % n),
-            Shortcut::PrevTab if n > 1 => self.select_tab((a + n - 1) % n),
+            // Tabs in a collapsed group are skipped, as in Chrome.
+            Shortcut::NextTab if n > 1 => {
+                if let Some(i) = self.model.next_shown(false) {
+                    self.select_tab(i);
+                }
+            }
+            Shortcut::PrevTab if n > 1 => {
+                if let Some(i) = self.model.next_shown(true) {
+                    self.select_tab(i);
+                }
+            }
             Shortcut::Back | Shortcut::Forward => {
                 if let Some(id) = self.active_id() {
                     self.op(
@@ -723,8 +957,8 @@ impl Window {
                 self.open_tab(internal::HISTORY, true);
             }
             Shortcut::DevTools => self.devtools(),
-            Shortcut::MoveTabLeft if a > 0 => self.model.move_tab(a, a - 1),
-            Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab(a, a + 1),
+            Shortcut::MoveTabLeft if a > 0 => self.model.move_tab_regroup(a, a - 1),
+            Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab_regroup(a, a + 1),
             Shortcut::Escape => {
                 popup::close_menus(ctx);
                 // Escape in the address bar: its text goes back to the
@@ -929,6 +1163,377 @@ impl Window {
         }
     }
 
+    /// How many buttons [`Self::extension_buttons`] draws: the pinned icons
+    /// and the extensions menu.
+    fn extension_buttons_count(&self) -> usize {
+        let all = cef::handlers::extensions::list();
+        if all.is_empty() {
+            0
+        } else {
+            1 + all.iter().filter(|e| e.pinned).count()
+        }
+    }
+
+    /// The pinned extensions' icons and the extensions menu (Chrome's
+    /// puzzle piece) after the address field: Chrome style pages have no
+    /// toolbar of their own to show them (cef/handlers/extensions.rs).
+    fn extension_buttons(&mut self, ui: &mut egui::Ui) {
+        use cef::handlers::extensions::{self, Extension};
+        let now = ui.input(|i| i.time);
+        if self.ext_read_at == 0.0 || now - self.ext_read_at > 2.0 {
+            self.ext_read_at = now.max(0.001);
+            cef::handlers::on_ui(extensions::refresh);
+        }
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(2));
+        let all = extensions::list();
+        if all.is_empty() {
+            return;
+        }
+        let mut run: Option<(Extension, Rect)> = None;
+        for e in all.iter().filter(|e| e.pinned) {
+            let r = self.extension_icon(ui, e);
+            if r.clicked() {
+                run = Some((e.clone(), r.rect));
+            }
+        }
+        let r = theme::icon_button(ui, Icon::Plug, t("Extensions"));
+        let anchor = r.rect;
+        let mut pin: Option<(String, bool)> = None;
+        let mut open: Option<&'static str> = None;
+        popup::menu(&r, 320.0, true, |ui| {
+            ui.add_space(2.0);
+            ui.strong(t("Extensions"));
+            for e in all.iter() {
+                ui.horizontal(|ui| {
+                    let tex = e.icon.as_ref().and_then(|p| self.ext_texture(ui.ctx(), p));
+                    match tex {
+                        Some(tex) => {
+                            ui.add(egui::Image::new((tex, Vec2::splat(16.0))));
+                        }
+                        None => {
+                            let ink = theme::palette(ui).ink_secondary;
+                            ui.add(Icon::Plug.image(16.0, ink));
+                        }
+                    }
+                    let name = ui.add(
+                        egui::Button::new(theme::elide(&e.name, 32))
+                            .frame(false)
+                            .min_size(Vec2::new(210.0, 28.0)),
+                    );
+                    if name.clicked() {
+                        run = Some((e.clone(), anchor));
+                        ui.close();
+                    }
+                    let label = if e.pinned { t("Unpin") } else { t("Pin") };
+                    if ui.small_button(label).clicked() {
+                        pin = Some((e.id.clone(), !e.pinned));
+                    }
+                });
+            }
+            ui.separator();
+            if ui
+                .add(egui::Button::new(t("Manage extensions")).frame(false))
+                .clicked()
+            {
+                open = Some("chrome://extensions/");
+                ui.close();
+            }
+            if ui
+                .add(egui::Button::new(t("Find more in the Chrome Web Store")).frame(false))
+                .clicked()
+            {
+                open = Some("https://chromewebstore.google.com/category/extensions");
+                ui.close();
+            }
+        });
+        if let Some((id, on)) = pin {
+            cef::handlers::on_ui(move || extensions::set_pinned(&id, on));
+            self.ext_read_at = 0.0;
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        if let Some(url) = open {
+            self.open_tab(url, true);
+        }
+        if let Some((e, at)) = run {
+            self.run_extension(ui.ctx(), &e, at);
+        }
+    }
+
+    /// A pinned extension's toolbar button.
+    fn extension_icon(
+        &mut self,
+        ui: &mut egui::Ui,
+        e: &cef::handlers::extensions::Extension,
+    ) -> egui::Response {
+        let p = theme::palette(ui);
+        let (rect, r) = ui.allocate_exact_size(Vec2::splat(size::CONTROL_SM), Sense::click());
+        let open = self.ext_popup.as_ref().is_some_and(|(_, id)| *id == e.id);
+        let fill = if r.is_pointer_button_down_on() || open {
+            p.border_subtle
+        } else if r.hovered() {
+            p.surface_sunken
+        } else {
+            Color32::TRANSPARENT
+        };
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(size::RADIUS_MD), fill);
+        let icon = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
+        match e.icon.as_ref().and_then(|p| self.ext_texture(ui.ctx(), p)) {
+            Some(tex) => {
+                egui::Image::new((tex, Vec2::splat(18.0))).paint_at(ui, icon);
+            }
+            None => Icon::Plug.paint(ui, icon, p.ink_secondary),
+        }
+        let badge = self
+            .active_id()
+            .and_then(|t| cef::handlers::extensions::badge(&e.id, t));
+        if let Some(b) = badge {
+            let behind = if fill == Color32::TRANSPARENT {
+                p.surface_base
+            } else {
+                fill
+            };
+            paint_badge(ui, rect, &b, p.border_subtle, behind);
+        }
+        popup::tip(r, &e.name)
+    }
+
+    /// The texture of an extension icon file, loaded once.
+    fn ext_texture(
+        &mut self,
+        ctx: &egui::Context,
+        path: &std::path::Path,
+    ) -> Option<egui::TextureId> {
+        self.ext_icons
+            .entry(path.to_path_buf())
+            .or_insert_with(|| {
+                let img = image::load_from_memory(&std::fs::read(path).ok()?)
+                    .ok()?
+                    .to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+                Some(ctx.load_texture(
+                    format!("extension-icon:{}", path.display()),
+                    color,
+                    egui::TextureOptions::LINEAR,
+                ))
+            })
+            .as_ref()
+            .map(|t| t.id())
+    }
+
+    /// Run extension `e`'s action on the tab on screen; `at` is the button
+    /// its popup hangs from. A second click on its icon closes the popup.
+    fn run_extension(
+        &mut self,
+        ctx: &egui::Context,
+        e: &cef::handlers::extensions::Extension,
+        at: Rect,
+    ) {
+        let Some(tab) = self.active_id() else { return };
+        self.ext_toggled = true;
+        let again = self
+            .ext_popup
+            .as_ref()
+            .is_some_and(|(t, id)| *t == tab && *id == e.id);
+        self.close_ext_popup();
+        if again {
+            return;
+        }
+        let s = ctx.pixels_per_point();
+        let px = |v: f32| (v * s).round() as i32;
+        let anchor = [px(at.left()), px(at.top()), px(at.width()), px(at.height())];
+        self.op(
+            tab,
+            Op::Extension {
+                id: e.id.clone(),
+                popup: e.popup.clone(),
+                anchor,
+            },
+        );
+        if e.popup.is_some() {
+            self.ext_popup = Some((tab, e.id.clone()));
+        }
+    }
+
+    fn close_ext_popup(&mut self) {
+        if let Some((tab, _)) = self.ext_popup.take() {
+            self.op(tab, Op::ClosePopup);
+        }
+    }
+
+    /// The page info bubble: the connection, the certificate viewer, the
+    /// site's permissions and data, as Chrome's from its location bar.
+    fn page_info(&mut self, ui: &mut egui::Ui, url: &str) {
+        let tab = self.active_id();
+        let origin = vault::origin_of(url).unwrap_or_default();
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_string))
+            .unwrap_or_else(|| url.to_string());
+        let info = self
+            .site_info
+            .as_ref()
+            .filter(|(t, i)| Some(*t) == tab && i.url == url)
+            .map(|(_, i)| i.clone());
+        let p = theme::palette(ui);
+        ui.add_space(2.0);
+        ui.strong(&host);
+        ui.add_space(4.0);
+        let Some(info) = info else {
+            ui.weak(t("Loading..."));
+            return;
+        };
+        if self.site_cert {
+            if let Some(c) = &info.cert {
+                self.certificate(ui, c);
+            }
+            return;
+        }
+        let https = url.starts_with("https://");
+        let (icon, text) = if info.secure && !info.cert_error && !info.mixed {
+            (Icon::Lock, t("Connection is secure"))
+        } else if info.cert_error {
+            (
+                Icon::Globe,
+                t("Your connection to this site is not private"),
+            )
+        } else if https && info.mixed {
+            (Icon::Globe, t("Parts of this page are not secure"))
+        } else {
+            (Icon::Globe, t("Connection is not secure"))
+        };
+        ui.horizontal(|ui| {
+            ui.add(icon.image(16.0, p.ink_secondary));
+            ui.label(text);
+        });
+        if info.secure && !info.cert_error {
+            ui.weak(t(
+                "Passwords and card numbers you send to this site stay private.",
+            ));
+        } else {
+            ui.weak(t("Do not enter passwords or card numbers on this site."));
+        }
+        if info.cert.is_some() {
+            let label = if info.cert_error {
+                t("Certificate is not valid")
+            } else {
+                t("Certificate is valid")
+            };
+            if ui.add(egui::Button::new(label).frame(false)).clicked() {
+                self.site_cert = true;
+            }
+        }
+        // The site's permissions, as the person answered them.
+        let sites = &cef::handlers::features().sites;
+        let saved = sites.entries(&origin, "permission.");
+        if !saved.is_empty() {
+            ui.separator();
+            ui.strong(t("Permissions"));
+            for (key, value) in saved {
+                let Some(kind) = cef::handlers::permission::Kind::from_key(&key) else {
+                    continue;
+                };
+                ui.horizontal(|ui| {
+                    ui.label(cef::handlers::ui::tr(kind.label()));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button(t("Reset")).clicked() {
+                            sites.set(&origin, &key, None);
+                        }
+                        let allowed = value == "allow";
+                        let now = if allowed { t("Allowed") } else { t("Blocked") };
+                        if ui.small_button(now).clicked() {
+                            let next = if allowed { "block" } else { "allow" };
+                            sites.set(&origin, &key, Some(next));
+                        }
+                    });
+                });
+            }
+        }
+        if origin.is_empty() {
+            return;
+        }
+        ui.separator();
+        if ui
+            .add(egui::Button::new(t("Delete cookies and site data")).frame(false))
+            .clicked()
+        {
+            if let Some(id) = tab {
+                self.op(id, Op::ClearSiteData(origin.clone()));
+            }
+            self.notice = Some(tf("Deleted cookies and site data for {0}", &[&host]));
+            ui.close();
+        }
+        if ui
+            .add(egui::Button::new(t("Site settings")).frame(false))
+            .clicked()
+        {
+            let page = format!("chrome://settings/content/siteDetails?site={origin}");
+            self.open_tab(&page, true);
+            ui.close();
+        }
+    }
+
+    /// The certificate viewer, inside the page info bubble.
+    fn certificate(&mut self, ui: &mut egui::Ui, c: &cef::handlers::site_info::Certificate) {
+        let row = |ui: &mut egui::Ui, k: &str, v: &str| {
+            if v.is_empty() {
+                return;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.weak(k);
+                ui.label(v);
+            });
+        };
+        let mono = |ui: &mut egui::Ui, k: &str, v: &str| {
+            ui.weak(k);
+            ui.label(egui::RichText::new(v).monospace().size(10.5));
+        };
+        ui.strong(t("Certificate viewer"));
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Issued to")).strong());
+        row(ui, t("Common name"), &c.subject.common_name);
+        row(ui, t("Organization"), &c.subject.organization);
+        row(ui, t("Country"), &c.subject.country);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Issued by")).strong());
+        row(ui, t("Common name"), &c.issuer.common_name);
+        row(ui, t("Organization"), &c.issuer.organization);
+        row(ui, t("Country"), &c.issuer.country);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Validity period")).strong());
+        row(ui, t("Issued on"), &c.valid_from);
+        row(ui, t("Expires on"), &c.valid_until);
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(t("Fingerprints")).strong());
+        mono(ui, t("Serial number"), &c.serial);
+        mono(ui, "SHA-256", &c.sha256);
+        mono(ui, "SHA-1", &c.sha1);
+        if !c.chain.is_empty() {
+            ui.add_space(4.0);
+            let n = c.chain.len();
+            ui.label(
+                egui::RichText::new(tf("Issued through {0} more certificates", &[&n])).strong(),
+            );
+            for (i, h) in c.chain.iter().enumerate() {
+                mono(ui, &format!("{}", i + 1), h);
+            }
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button(t("Back")).clicked() {
+                self.site_cert = false;
+            }
+            if ui.button(t("Copy certificate")).clicked() {
+                ui.ctx().copy_text(c.pem.clone());
+                self.notice = Some(t("Copied the certificate (PEM).").to_string());
+                ui.close();
+            }
+        });
+    }
+
     /// Offer to save a sign-in, but only for the tab's own committed site: a
     /// page cannot plant a login for another origin.
     fn offer_save(
@@ -1128,7 +1733,7 @@ impl Window {
             .profile
             .as_ref()
             .and_then(|p| p.setting("agent_server"))
-            .unwrap_or_else(|| agent_bridge::DEFAULT_SERVER.to_string());
+            .unwrap_or_default();
         let tx = self.agent_tx.clone();
         std::thread::spawn(move || {
             let msg = match agent_bridge::send_prompt(&server, &prompt, &url, &title) {
@@ -1184,12 +1789,22 @@ impl Window {
                 self.open_tab(internal::PASSWORDS, true);
                 ui.close();
             }
+            if item(ui, Icon::BookOpen, t("Reading mode")).clicked() {
+                if let Some(id) = self.active_id() {
+                    self.op(id, Op::Reader);
+                }
+                ui.close();
+            }
             if item(ui, Icon::Code, t("Developer tools")).clicked() {
                 self.devtools();
                 ui.close();
             }
             if item(ui, Icon::Settings, t("Settings")).clicked() {
                 self.open_tab(internal::SETTINGS, true);
+                ui.close();
+            }
+            if item(ui, Icon::Code, t("Open logs folder")).clicked() {
+                startup::open_log_dir();
                 ui.close();
             }
             ui.separator();
@@ -1311,8 +1926,35 @@ impl Window {
             tab,
         };
         self.requests.push(browser::Request::Detach {
-            moved: Box::new(moved),
+            moved: Box::new(browser::Payload::Tab(moved)),
             at,
+        });
+        self.activated();
+        self.save_session();
+    }
+
+    /// "Move group to new window": the group and its tabs, live.
+    fn move_group_to_new_window(&mut self, g: model::GroupId) {
+        let all = self
+            .model
+            .group_range(g)
+            .is_some_and(|r| r.len() == self.model.tabs.len());
+        if all {
+            return;
+        }
+        let Some((group, tabs)) = self.model.take_group(g) else {
+            return;
+        };
+        let moved = tabs
+            .into_iter()
+            .map(|tab| browser::Moved {
+                login: self.agent_logins.remove(&tab.id),
+                tab,
+            })
+            .collect();
+        self.requests.push(browser::Request::Detach {
+            moved: Box::new(browser::Payload::Group(group, moved)),
+            at: None,
         });
         self.activated();
         self.save_session();
@@ -1340,311 +1982,6 @@ impl Window {
         {
             self.model.toggle_bookmark(&url, &title);
             self.save_bookmarks();
-        }
-    }
-
-    /// The tab strip: tabs share the width up to 220pt each; the active one
-    /// joins the toolbar below it.
-    fn tab_bar(&mut self, ui: &mut egui::Ui) {
-        let p = *theme::palette(ui);
-        let height = 40.0;
-        // The strip is the title bar: drag it to move the window, double-click to maximize.
-        let (strip, drag) = ui.allocate_exact_size(
-            Vec2::new(ui.available_width(), height),
-            Sense::click_and_drag(),
-        );
-        let strip_fill = if self.incognito {
-            p.surface_raised
-        } else {
-            p.surface_sunken
-        };
-        ui.painter().rect_filled(strip, 0.0, strip_fill);
-        if drag.drag_started_by(egui::PointerButton::Primary) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-        }
-        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-        if drag.double_clicked() {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-        }
-        let mut select = None;
-        let mut close = None;
-        let plus_side = 28.0;
-        // macOS draws its traffic lights over the strip's left end.
-        let left_pad = if cfg!(target_os = "macos") {
-            76.0
-        } else {
-            size::SPACE_2
-        };
-        let captions = if cfg!(target_os = "macos") {
-            0.0
-        } else {
-            self.caption_buttons(ui, strip, maximized)
-        };
-        let badge = if self.incognito {
-            self.incognito_badge(ui, strip, captions)
-        } else {
-            0.0
-        };
-        let strip = Rect::from_min_max(
-            strip.min,
-            egui::pos2(strip.right() - captions - badge, strip.bottom()),
-        );
-        let left = strip.left() + left_pad;
-        let room = (strip.width() - left_pad - size::SPACE_2 - plus_side - size::SPACE_1).max(0.0);
-        let n = self.model.tabs.len().max(1) as f32;
-        let width = (room / n).clamp(48.0, 220.0);
-        let top = strip.top() + 6.0;
-        let count = self.model.tabs.len();
-        let pointer = ui.ctx().pointer_latest_pos();
-        let mut drag_state = self.tab_drag;
-        let mut reorder = None;
-        let mut move_out = None;
-        // Where a tab dragged out of the strip was let go, on screen.
-        let mut drop_at: Option<egui::Pos2> = None;
-        // Pulled this far above or below the strip, a tab leaves the window.
-        let detach_at = 40.0;
-        let detached = |y: f32| y > strip.bottom() + detach_at || y < strip.top() - detach_at;
-        // The dragged tab is painted last, over the tabs it slides across.
-        let mut order: Vec<usize> = (0..count).collect();
-        if let Some(d) = drag_state.and_then(|(id, _)| self.model.index_of(id)) {
-            order.retain(|&i| i != d);
-            order.push(d);
-        }
-        for i in order {
-            let tab = &self.model.tabs[i];
-            // Every window is on the one relay, so agent tabs move too.
-            let detachable = count > 1;
-            let out = |y: f32| detachable && detached(y);
-            let slot = left + i as f32 * width;
-            if slot > strip.right() - plus_side {
-                continue;
-            }
-            let id = ui.id().with(("tab", tab.id));
-            let dragging = drag_state.filter(|(d, _)| *d == tab.id);
-            // Other tabs slide to their new places; the dragged one follows the pointer.
-            let x = match (dragging, pointer) {
-                (Some((_, grab)), Some(pos)) if !out(pos.y) => {
-                    let max = left + count.saturating_sub(1) as f32 * width;
-                    let x = (pos.x - grab).clamp(left, max.max(left));
-                    ui.ctx().animate_value_with_time(id.with("x"), x, 0.0)
-                }
-                _ => ui.ctx().animate_value_with_time(id.with("x"), slot, 0.12),
-            };
-            let rect =
-                Rect::from_min_size(egui::pos2(x, top), Vec2::new(width, strip.bottom() - top));
-            let r = ui.interact(rect, id, Sense::click_and_drag());
-            if r.drag_started_by(egui::PointerButton::Primary) {
-                let grab = r.interact_pointer_pos().map_or(0.0, |p| p.x - x);
-                drag_state = Some((tab.id, grab));
-                select = Some(i);
-            }
-            if let (Some((_, grab)), Some(pos)) = (dragging, pointer) {
-                if r.drag_stopped() {
-                    drag_state = None;
-                    if out(pos.y) {
-                        move_out = Some(i);
-                        // The new window's first tab sits where this one was
-                        // held: its strip starts at the left pad, 6 points down.
-                        let origin = ui
-                            .ctx()
-                            .input(|i| i.viewport().inner_rect.map(|r| r.min))
-                            .unwrap_or_default();
-                        drop_at =
-                            Some(origin + pos.to_vec2() - Vec2::new(grab + left_pad, 6.0 + 12.0));
-                    }
-                } else if !out(pos.y) {
-                    let to = ((pos.x - grab - left) / width + 0.5).floor();
-                    let to = (to.max(0.0) as usize).min(count.saturating_sub(1));
-                    if to != i {
-                        reorder = Some((i, to));
-                    }
-                } else {
-                    // Out of the strip: a copy of the tab rides under the
-                    // pointer, in a window of its own (it crosses the page).
-                    let size = rect.size();
-                    let label = tab.label().to_string();
-                    popup::ghost(
-                        ui.ctx(),
-                        id.with("ghost"),
-                        pos - Vec2::new(grab, 12.0),
-                        |ui| {
-                            let (r, _) =
-                                ui.allocate_exact_size(size - Vec2::splat(12.0), Sense::hover());
-                            ui.painter().text(
-                                egui::pos2(r.left() + 6.0, r.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                label,
-                                egui::FontId::proportional(12.5),
-                                p.ink_primary,
-                            );
-                        },
-                    );
-                }
-            }
-            let active = i == self.model.active;
-            let painter = ui.painter_at(rect.expand2(Vec2::new(8.0, 0.0)));
-            let top_round = CornerRadius {
-                nw: size::RADIUS_MD,
-                ne: size::RADIUS_MD,
-                sw: 0,
-                se: 0,
-            };
-            if active {
-                painter.rect_filled(rect, top_round, p.surface_base);
-            } else if r.hovered() {
-                painter.rect_filled(
-                    rect.shrink2(Vec2::new(2.0, 3.0)),
-                    CornerRadius::same(size::RADIUS_SM),
-                    p.surface_raised,
-                );
-            } else if i + 1 != self.model.active && i + 1 < self.model.tabs.len() {
-                painter.vline(
-                    rect.right(),
-                    rect.y_range().shrink(9.0),
-                    Stroke::new(1.0, p.border_subtle),
-                );
-            }
-            // Icon: a spinner while loading, the sparkle for agent tabs, else a globe.
-            let icon_rect = Rect::from_center_size(
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                Vec2::splat(16.0),
-            );
-            if tab.loading {
-                egui::Spinner::new()
-                    .size(14.0)
-                    .color(p.ink_brand)
-                    .paint_at(ui, icon_rect);
-            } else if tab.agent {
-                Icon::Sparkle.paint(ui, icon_rect, p.ink_brand);
-            } else if internal::is_internal(&tab.url) || tab.url == NEW_TAB {
-                Icon::Sparkle.paint(ui, icon_rect, p.ink_secondary);
-            } else {
-                Icon::Globe.paint(ui, icon_rect, p.ink_muted);
-            }
-            let show_close = active || r.hovered();
-            let close_rect = Rect::from_center_size(
-                egui::pos2(rect.right() - 16.0, rect.center().y),
-                Vec2::splat(20.0),
-            );
-            let mut label = tab.label().to_string();
-            if label.is_empty() {
-                label = t("New tab").to_string();
-            }
-            let text_left = icon_rect.right() + 8.0;
-            let text_right = if show_close {
-                close_rect.left() - 4.0
-            } else {
-                rect.right() - 10.0
-            };
-            if text_right - text_left > 12.0 {
-                let ink = if active {
-                    p.ink_primary
-                } else {
-                    p.ink_secondary
-                };
-                let galley = ui.painter().layout(
-                    label,
-                    egui::FontId::proportional(12.5),
-                    ink,
-                    f32::INFINITY,
-                );
-                let clip = Rect::from_x_y_ranges(text_left..=text_right, rect.y_range());
-                let tp = ui.painter_at(clip);
-                tp.galley(
-                    egui::pos2(text_left, rect.center().y - galley.size().y / 2.0),
-                    galley.clone(),
-                    ink,
-                );
-                if galley.size().x > clip.width() {
-                    // Fade the cut end into the tab instead of an ellipsis.
-                    let bg = if active {
-                        p.surface_base
-                    } else if r.hovered() {
-                        p.surface_raised
-                    } else {
-                        p.surface_sunken
-                    };
-                    let fade = Rect::from_x_y_ranges(
-                        (text_right - 18.0)..=text_right,
-                        rect.y_range().shrink(6.0),
-                    );
-                    let mut mesh = egui::Mesh::default();
-                    mesh.colored_vertex(fade.left_top(), bg.gamma_multiply(0.0));
-                    mesh.colored_vertex(fade.right_top(), bg);
-                    mesh.colored_vertex(fade.right_bottom(), bg);
-                    mesh.colored_vertex(fade.left_bottom(), bg.gamma_multiply(0.0));
-                    mesh.add_triangle(0, 1, 2);
-                    mesh.add_triangle(0, 2, 3);
-                    tp.add(mesh);
-                }
-            }
-            if show_close {
-                let cr = ui.interact(close_rect, id.with("close"), Sense::click());
-                if cr.hovered() {
-                    painter.rect_filled(
-                        close_rect,
-                        CornerRadius::same(size::RADIUS_XS),
-                        p.border_subtle,
-                    );
-                }
-                Icon::Close.paint(
-                    ui,
-                    close_rect.shrink(4.0),
-                    if cr.hovered() {
-                        p.ink_primary
-                    } else {
-                        p.ink_secondary
-                    },
-                );
-                if popup::tip(cr, t("Close tab")).clicked() {
-                    close = Some(i);
-                }
-            }
-            let r = popup::tip(r, &tab.url);
-            if r.clicked() {
-                select = Some(i);
-            }
-            if r.middle_clicked() {
-                close = Some(i);
-            }
-            popup::context_menu(&r, |ui| {
-                if ui
-                    .add_enabled(detachable, egui::Button::new(t("Move to new window")))
-                    .clicked()
-                {
-                    move_out = Some(i);
-                    ui.close();
-                }
-            });
-        }
-        if drag_state.is_some() && !ui.ctx().input(|i| i.pointer.primary_down()) {
-            // The press ended somewhere the tab never heard of it.
-            drag_state = None;
-        }
-        self.tab_drag = drag_state;
-        let shown = self.model.tabs.len() as f32;
-        let plus_x =
-            (left + shown * width + size::SPACE_1).min(strip.right() - plus_side - size::SPACE_1);
-        let plus_rect = Rect::from_min_size(
-            egui::pos2(plus_x, strip.center().y - plus_side / 2.0 + 3.0),
-            Vec2::splat(plus_side),
-        );
-        let mut plus_ui = ui.new_child(egui::UiBuilder::new().max_rect(plus_rect));
-        let new_tab =
-            theme::icon_button_sized(&mut plus_ui, Icon::Plus, t("New tab"), plus_side, true)
-                .clicked();
-        if let Some(i) = move_out {
-            self.move_to_new_window(i, drop_at);
-        } else if new_tab {
-            self.open_tab(NEW_TAB, true);
-        } else if let Some(i) = close {
-            self.close_tab(i);
-        } else if let Some(i) = select {
-            self.select_tab(i);
-        }
-        if let Some((from, to)) = reorder {
-            self.model.move_tab(from, to);
         }
     }
 
@@ -1818,6 +2155,7 @@ impl Window {
                         } else {
                             0.0
                         }
+                        + self.extension_buttons_count() as f32 * (size::CONTROL_SM + 2.0)
                         + 4.0;
                     let width = (ui.available_width() - after).max(120.0);
                     let (pill, _) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::hover());
@@ -1855,6 +2193,27 @@ impl Window {
                         egui::pos2(pill.left() + 20.0, pill.center().y),
                         Vec2::splat(16.0),
                     );
+                    // The page info bubble, from the lock or globe, as in
+                    // Chrome (its connection, certificate, permissions).
+                    if matches!(site_icon, Icon::Lock | Icon::Globe) {
+                        let area = icon_rect.expand(6.0);
+                        let hit = ui.interact(area, ui.id().with("page-info"), Sense::click());
+                        if hit.hovered() {
+                            ui.painter().rect_filled(
+                                area,
+                                CornerRadius::same(size::RADIUS_MD),
+                                p.surface_sunken,
+                            );
+                        }
+                        if hit.clicked() {
+                            self.site_cert = false;
+                            if let Some(id) = id {
+                                self.op(id, Op::SiteInfo);
+                            }
+                        }
+                        let hit = popup::tip(hit, t("View site information"));
+                        popup::menu(&hit, 360.0, false, |ui| self.page_info(ui, &url));
+                    }
                     site_icon.paint(ui, icon_rect, p.ink_muted);
                     let star_rect = Rect::from_center_size(
                         egui::pos2(pill.right() - 20.0, pill.center().y),
@@ -1869,9 +2228,22 @@ impl Window {
                             .max_rect(text_rect)
                             .layout(egui::Layout::left_to_right(egui::Align::Center)),
                     );
+                    // The suggestion list's keys, before the field sees them.
+                    let list_open = self.suggestions_shown(ui.ctx());
+                    if list_open {
+                        self.suggestion_keys(ui.ctx());
+                    } else if focused
+                        && !self.address.trim().is_empty()
+                        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::ArrowDown))
+                    {
+                        // Down opens the list for the text in the field.
+                        self.open_suggestions(ui.ctx());
+                    }
                     let field = field_ui.add(
                         egui::TextEdit::singleline(&mut self.address)
                             .id(self.address_id)
+                            // Tab completes from the list while it is open.
+                            .lock_focus(list_open)
                             .frame(egui::Frame::NONE)
                             .font(egui::FontId::proportional(14.0))
                             .text_color(p.ink_primary)
@@ -1906,10 +2278,17 @@ impl Window {
                         }
                     }
                     if field.changed() {
-                        self.editing = true;
+                        self.open_suggestions(ui.ctx());
                     }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                        if let Some(prompt) = agent_prompt(&self.address) {
+                        // The row the arrow keys picked, else what was typed
+                        // (the first row).
+                        let picked = (list_open && self.suggest.arrowed)
+                            .then(|| self.model.suggest(&self.suggest.typed, SUGGESTIONS))
+                            .and_then(|l| l.into_iter().nth(self.suggest.sel));
+                        if let Some(s) = picked {
+                            go = Some(s.url);
+                        } else if let Some(prompt) = agent_prompt(&self.address) {
                             self.ask_agent(prompt.trim().to_string());
                         } else if !self.address.trim().is_empty() {
                             go = Some(model::to_url(&self.address));
@@ -1950,92 +2329,271 @@ impl Window {
                     }
                     ui.add_space(4.0);
                     self.key_button(ui, &url);
+                    self.extension_buttons(ui);
                     self.menu(ui);
                 });
             });
 
         // Suggestions float under the address field while the person types.
-        if self.editing && ui.memory(|m| m.has_focus(self.address_id)) {
-            let list = self.model.suggest(&self.address, 8);
-            if !list.is_empty() {
-                // A window of its own, as Chrome's: the list covers the page.
-                let at = popup::to_screen(
-                    ui.ctx(),
-                    egui::pos2(field_rect.left(), field_rect.bottom() + 4.0),
-                );
-                popup::show(
-                    ui.ctx(),
-                    egui::Id::new("suggestions"),
-                    at,
-                    field_rect.width(),
-                    false,
-                    |ui| {
-                        ui.set_width(field_rect.width() - 12.0);
-                        for s in list {
-                            let icon = match s.kind {
-                                SuggestionKind::Bookmark => Icon::Star,
-                                SuggestionKind::History => Icon::History,
-                                SuggestionKind::Search => Icon::Search,
-                            };
-                            let (row, r) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), 34.0),
-                                Sense::click(),
-                            );
-                            if r.hovered() {
-                                ui.painter().rect_filled(
-                                    row,
-                                    CornerRadius::same(size::RADIUS_MD),
-                                    p.surface_sunken,
-                                );
-                            }
-                            icon.paint(
-                                ui,
-                                Rect::from_center_size(
-                                    egui::pos2(row.left() + 18.0, row.center().y),
-                                    Vec2::splat(16.0),
-                                ),
-                                p.ink_muted,
-                            );
-                            let title = if s.title.is_empty() {
-                                s.url.clone()
-                            } else {
-                                s.title.clone()
-                            };
-                            let painter = ui.painter_at(row.shrink2(Vec2::new(4.0, 0.0)));
-                            let g = painter.layout_no_wrap(
-                                theme::elide(&title, 60),
-                                egui::FontId::proportional(13.0),
-                                p.ink_primary,
-                            );
-                            let tw = g.size().x;
-                            painter.galley(
-                                egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0),
-                                g,
-                                p.ink_primary,
-                            );
-                            if !s.title.is_empty() {
-                                painter.text(
-                                    egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
-                                    egui::Align2::LEFT_CENTER,
-                                    theme::elide(&s.url, 70),
-                                    egui::FontId::proportional(12.0),
-                                    p.ink_muted,
-                                );
-                            }
-                            if r.clicked() {
-                                go = Some(s.url.clone());
-                            }
-                        }
-                    },
-                );
+        if self.suggestions_shown(ui.ctx()) {
+            if let Some(url) = self.suggestion_list(ui.ctx(), p, field_rect) {
+                go = Some(url);
             }
         }
         if let Some(url) = go {
             self.editing = false;
+            self.suggest.close();
             ui.memory_mut(|m| m.surrender_focus(self.address_id));
             self.focus_page = true;
             self.navigate(url);
         }
+    }
+
+    /// The person typed (or pressed Down): the list opens for the text in
+    /// the field, its first row highlighted.
+    fn open_suggestions(&mut self, ctx: &egui::Context) {
+        self.editing = true;
+        self.suggest = Suggest {
+            open: true,
+            typed: self.address.clone(),
+            sel: 0,
+            arrowed: false,
+            origin: Some(popup::screen_origin(ctx)),
+        };
+    }
+
+    /// Whether the suggestion list is on screen. It closes, as Chrome's
+    /// does, when the address bar loses the keyboard (Escape, a click
+    /// elsewhere, a tab switch), when the window does (another program in
+    /// front, minimized), or when the window moves.
+    fn suggestions_shown(&mut self, ctx: &egui::Context) -> bool {
+        if !self.suggest.open {
+            return false;
+        }
+        let moved = self
+            .suggest
+            .origin
+            .is_some_and(|o| (o - popup::screen_origin(ctx)).length() > 0.5);
+        let ours = self.editing
+            && self.chrome_keyboard
+            && !self.minimized
+            && ctx.memory(|m| m.has_focus(self.address_id));
+        if moved || !ours {
+            self.suggest.close();
+            return false;
+        }
+        // Any text has a first row: what was typed.
+        !self.suggest.typed.trim().is_empty()
+    }
+
+    /// The text the field shows for a highlighted row: what was typed for
+    /// the first row and the search, the address for the others.
+    fn row_text(&self, s: &model::Suggestion) -> String {
+        match s.kind {
+            SuggestionKind::Url | SuggestionKind::Search => self.suggest.typed.clone(),
+            SuggestionKind::Bookmark | SuggestionKind::History => s.url.clone(),
+        }
+    }
+
+    /// Forget a history row (Shift+Delete or its remove button).
+    fn forget_history(&mut self, url: &str) {
+        self.model.remove_history(url);
+        if let Some(p) = &self.profile {
+            let _ = p.delete_history(url);
+        }
+        // The new tab page's most visited sites come from history.
+        self.top_sites = None;
+    }
+
+    /// Chrome's keys for the open list, taken before the field sees them:
+    /// Up and Down move the highlight and put that row in the field, Tab
+    /// completes the field with the highlighted (or best) address match,
+    /// Shift+Delete (or Delete on a row the arrows reached) forgets a
+    /// history row.
+    fn suggestion_keys(&mut self, ctx: &egui::Context) {
+        use egui::Modifiers;
+        let arrowed = self.suggest.arrowed;
+        let (down, up, tab, delete) = ctx.input_mut(|i| {
+            (
+                i.consume_key(Modifiers::NONE, Key::ArrowDown),
+                i.consume_key(Modifiers::NONE, Key::ArrowUp)
+                    || i.consume_key(Modifiers::SHIFT, Key::Tab),
+                i.consume_key(Modifiers::NONE, Key::Tab),
+                i.consume_key(Modifiers::SHIFT, Key::Delete)
+                    || (arrowed && i.consume_key(Modifiers::NONE, Key::Delete)),
+            )
+        });
+        if !(down || up || tab || delete) {
+            return;
+        }
+        let mut list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let Some(last) = list.len().checked_sub(1) else {
+            return;
+        };
+        let mut sel = self.suggest.sel.min(last);
+        if tab {
+            let typed = self.suggest.typed.trim().to_lowercase();
+            let address_row = |s: &model::Suggestion| {
+                matches!(s.kind, SuggestionKind::Bookmark | SuggestionKind::History)
+            };
+            let pick = if sel > 0 && address_row(&list[sel]) {
+                Some(sel)
+            } else {
+                list.iter()
+                    .position(|s| address_row(s) && model::completes(&s.url, &typed))
+            };
+            if let Some(i) = pick {
+                self.address = list[i].url.clone();
+                self.open_suggestions(ctx);
+                cursor_to_end(ctx, self.address_id, &self.address);
+            }
+            return;
+        }
+        if down {
+            sel = (sel + 1).min(last);
+        }
+        if up {
+            sel = sel.saturating_sub(1);
+        }
+        if delete && list[sel].kind == SuggestionKind::History {
+            let url = list[sel].url.clone();
+            self.forget_history(&url);
+            list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+            sel = sel.min(list.len().saturating_sub(1));
+        }
+        let Some(row) = list.get(sel) else {
+            return;
+        };
+        self.address = self.row_text(row);
+        self.suggest.sel = sel;
+        self.suggest.arrowed = sel > 0;
+        cursor_to_end(ctx, self.address_id, &self.address);
+    }
+
+    /// The list under the address field, in a window of its own as Chrome's
+    /// (it covers the page). Returns the address of a row clicked.
+    fn suggestion_list(
+        &mut self,
+        ctx: &egui::Context,
+        p: theme::Palette,
+        field_rect: Rect,
+    ) -> Option<String> {
+        let list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let sel = self.suggest.sel.min(list.len().saturating_sub(1));
+        let at = popup::to_screen(
+            ctx,
+            egui::pos2(field_rect.left(), field_rect.bottom() + 4.0),
+        );
+        let (go, forget) = popup::show(
+            ctx,
+            egui::Id::new("suggestions"),
+            at,
+            field_rect.width(),
+            false,
+            |ui| {
+                let mut go = None;
+                let mut forget = None;
+                ui.set_width(field_rect.width() - 12.0);
+                for (i, s) in list.iter().enumerate() {
+                    let icon = match s.kind {
+                        SuggestionKind::Url => Icon::Globe,
+                        SuggestionKind::Bookmark => Icon::Star,
+                        SuggestionKind::History => Icon::History,
+                        SuggestionKind::Search => Icon::Search,
+                    };
+                    let (row, r) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), SUGGESTION_ROW),
+                        Sense::click(),
+                    );
+                    if i == sel || r.contains_pointer() {
+                        ui.painter().rect_filled(
+                            row,
+                            CornerRadius::same(size::RADIUS_MD),
+                            p.surface_sunken,
+                        );
+                    }
+                    icon.paint(
+                        ui,
+                        Rect::from_center_size(
+                            egui::pos2(row.left() + 18.0, row.center().y),
+                            Vec2::splat(16.0),
+                        ),
+                        p.ink_muted,
+                    );
+                    // History rows can be removed, as in Chrome.
+                    let remove = (s.kind == SuggestionKind::History
+                        && (i == sel || r.contains_pointer()))
+                    .then(|| {
+                        Rect::from_center_size(
+                            egui::pos2(row.right() - 18.0, row.center().y),
+                            Vec2::splat(24.0),
+                        )
+                    });
+                    let (title, detail) = match s.kind {
+                        SuggestionKind::Search => (s.title.clone(), t("Search").to_string()),
+                        _ if s.title.is_empty() => (s.url.clone(), String::new()),
+                        _ => (s.title.clone(), s.url.clone()),
+                    };
+                    let right = remove.map_or(row.right(), |b| b.left());
+                    let painter = ui.painter_at(Rect::from_x_y_ranges(
+                        (row.left() + 4.0)..=(right - 4.0),
+                        row.y_range(),
+                    ));
+                    let g = painter.layout_no_wrap(
+                        theme::elide(&title, 60),
+                        egui::FontId::proportional(13.0),
+                        p.ink_primary,
+                    );
+                    let tw = g.size().x;
+                    painter.galley(
+                        egui::pos2(row.left() + 38.0, row.center().y - g.size().y / 2.0),
+                        g,
+                        p.ink_primary,
+                    );
+                    if !detail.is_empty() {
+                        painter.text(
+                            egui::pos2(row.left() + 38.0 + tw + 10.0, row.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            theme::elide(&detail, 70),
+                            egui::FontId::proportional(12.0),
+                            p.ink_muted,
+                        );
+                    }
+                    if let Some(b) = remove {
+                        let hit = ui.interact(b, egui::Id::new(("forget", i)), Sense::click());
+                        if hit.hovered() {
+                            ui.painter()
+                                .circle_filled(b.center(), 12.0, p.surface_raised);
+                        }
+                        Icon::Close.paint(
+                            ui,
+                            Rect::from_center_size(b.center(), Vec2::splat(14.0)),
+                            p.ink_muted,
+                        );
+                        if hit.clicked() {
+                            forget = Some(s.url.clone());
+                            continue;
+                        }
+                    }
+                    if r.clicked() {
+                        go = Some(s.url.clone());
+                    }
+                }
+                (go, forget)
+            },
+        );
+        if let Some(url) = forget {
+            self.forget_history(&url);
+            if self.suggest.arrowed {
+                // The highlighted row went: the field shows what was typed.
+                self.address = self.suggest.typed.clone();
+                self.suggest.sel = 0;
+                self.suggest.arrowed = false;
+                cursor_to_end(ctx, self.address_id, &self.address);
+            }
+            ctx.request_repaint();
+        }
+        go
     }
 
     fn has_logins(&self, url: &str) -> bool {
@@ -2055,9 +2613,21 @@ impl Window {
             .enumerate()
             .filter(|(_, b)| b.folder.is_empty())
             .collect();
+        // The bar's folders: the first part of each folder path, in order.
+        let mut folders: Vec<String> = Vec::new();
+        for b in &self.model.bookmarks {
+            if let Some(top) = b.folder.split('/').next().filter(|f| !f.is_empty()) {
+                if !folders.iter().any(|f| f == top) {
+                    folders.push(top.to_string());
+                }
+            }
+        }
+        let bookmarks = self.model.bookmarks.clone();
         let mut go = None;
         let mut go_new_tab = None;
         let mut remove = None;
+        // A folder's "Open all": (addresses, folder name, where).
+        let mut open_all: Option<(Vec<String>, String, OpenAll)> = None;
         let r = egui::Frame::new()
             .fill(p.surface_base)
             .inner_margin(egui::Margin {
@@ -2068,7 +2638,7 @@ impl Window {
             })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                if top_level.is_empty() {
+                if top_level.is_empty() && folders.is_empty() {
                     return;
                 }
                 ui.horizontal(|ui| {
@@ -2118,10 +2688,57 @@ impl Window {
                                 go_new_tab = Some(b.url.clone());
                                 ui.close();
                             }
+                            if ui.button(t("Open in new window")).clicked() {
+                                open_all =
+                                    Some((vec![b.url.clone()], String::new(), OpenAll::Window));
+                                ui.close();
+                            }
                             if ui.button(t("Remove")).clicked() {
                                 remove = Some(*i);
                                 ui.close();
                             }
+                        });
+                    }
+                    for folder in &folders {
+                        let label = theme::elide(folder, 22);
+                        let g = ui.painter().layout_no_wrap(
+                            label,
+                            egui::FontId::proportional(12.0),
+                            p.ink_secondary,
+                        );
+                        let w = g.size().x + 34.0;
+                        if ui.available_width() < w {
+                            break;
+                        }
+                        let (rect, r) = ui.allocate_exact_size(Vec2::new(w, 26.0), Sense::click());
+                        if r.hovered() {
+                            ui.painter().rect_filled(
+                                rect,
+                                CornerRadius::same(size::RADIUS_SM),
+                                p.surface_sunken,
+                            );
+                        }
+                        Icon::Folder.paint(
+                            ui,
+                            Rect::from_center_size(
+                                egui::pos2(rect.left() + 14.0, rect.center().y),
+                                Vec2::splat(13.0),
+                            ),
+                            p.ink_muted,
+                        );
+                        ui.painter().galley(
+                            egui::pos2(rect.left() + 26.0, rect.center().y - g.size().y / 2.0),
+                            g,
+                            p.ink_secondary,
+                        );
+                        // Click: the folder's bookmarks; right-click: open them all.
+                        popup::menu(&r, 280.0, false, |ui| {
+                            if let Some(u) = folder_menu(ui, &bookmarks, folder, &mut open_all) {
+                                go = Some(u);
+                            }
+                        });
+                        popup::context_menu(&r, |ui| {
+                            open_all_items(ui, &bookmarks, folder, &mut open_all);
                         });
                     }
                 });
@@ -2135,6 +2752,17 @@ impl Window {
         if let Some(i) = remove {
             self.model.bookmarks.remove(i);
             self.save_bookmarks();
+        }
+        if let Some((urls, name, how)) = open_all {
+            match how {
+                OpenAll::Tabs => {
+                    self.open_all(&urls);
+                }
+                OpenAll::Window => self.requests.push(browser::Request::OpenWindow(urls)),
+                OpenAll::Group => {
+                    self.open_all_in_group(&urls, &name);
+                }
+            }
         }
         if let Some(url) = go_new_tab {
             self.open_tab(&url, false);
@@ -2189,11 +2817,10 @@ impl Window {
         );
         ui.add(
             egui::Image::from_bytes(
-                "bytes://redrob-ui/redrob-browser-icon.svg",
+                "bytes://redrob-ui/redrob-browser-icon-web.svg",
                 theme::BRAND_ICON,
             )
-            .fit_to_exact_size(Vec2::splat(64.0))
-            .corner_radius(14),
+            .fit_to_exact_size(Vec2::splat(64.0)),
         );
         ui.add_space(size::SPACE_3);
         ui.label(
@@ -2390,8 +3017,9 @@ impl Window {
         let bar = self
             .active_id()
             .is_some_and(|id| self.prompts.wants_keyboard(id));
+        let take = std::mem::take(&mut self.take_keyboard);
         if self.page_focused
-            && (self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
+            && (take || self.focus_address || bar || ctx.input(|i| i.pointer.any_pressed()))
         {
             cdp::trace(format_args!("window {} takes the keyboard", self.wid));
             self.page_focused = false;
@@ -2533,6 +3161,15 @@ impl Window {
                     if let Some(u) = act.open_new_tab {
                         self.open_tab(&u, false);
                     }
+                    match act.open_all {
+                        Some((urls, Some(name))) => {
+                            self.open_all_in_group(&urls, &name);
+                        }
+                        Some((urls, None)) => {
+                            self.open_all(&urls);
+                        }
+                        None => {}
+                    }
                     if let Some(u) = act.open {
                         self.navigate(u);
                     }
@@ -2543,6 +3180,17 @@ impl Window {
                 let page_id = self.model.tabs[tab_index].id;
                 self.page(&ctx, rect, page_id);
             });
+        // An extension popup closes on a click anywhere else in the window,
+        // and when its tab leaves the screen.
+        let clicked = ctx.input(|i| i.pointer.any_click());
+        let off_screen = self
+            .ext_popup
+            .as_ref()
+            .is_some_and(|(t, _)| self.active_id() != Some(*t));
+        if (clicked && !self.ext_toggled) || off_screen {
+            self.close_ext_popup();
+        }
+        self.ext_toggled = false;
         popup::end_frame(&ctx, self.page_focused || self.chrome_keyboard);
     }
 
@@ -2614,6 +3262,98 @@ impl Window {
     }
 }
 
+/// Where a bookmarks folder's "Open all" opens its bookmarks.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum OpenAll {
+    Tabs,
+    Window,
+    Group,
+}
+
+/// Every bookmark in folder `path` and the folders inside it, as Chrome's
+/// "Open all" takes them.
+fn folder_urls(bookmarks: &[model::Bookmark], path: &str) -> Vec<String> {
+    let inside = format!("{path}/");
+    bookmarks
+        .iter()
+        .filter(|b| b.folder == path || b.folder.starts_with(&inside))
+        .map(|b| b.url.clone())
+        .collect()
+}
+
+/// A folder's "Open all (N)", "Open all in new window" and "Open all in
+/// new group", as in Chrome's bookmark folder menu.
+fn open_all_items(
+    ui: &mut egui::Ui,
+    bookmarks: &[model::Bookmark],
+    path: &str,
+    out: &mut Option<(Vec<String>, String, OpenAll)>,
+) {
+    let urls = folder_urls(bookmarks, path);
+    let n = urls.len();
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    for (label, how) in [
+        (tf("Open all ({0})", &[&n]), OpenAll::Tabs),
+        (t("Open all in new window").to_string(), OpenAll::Window),
+        (t("Open all in new group").to_string(), OpenAll::Group),
+    ] {
+        if ui.add_enabled(n > 0, egui::Button::new(label)).clicked() {
+            *out = Some((urls.clone(), name.clone(), how));
+            ui.close();
+        }
+    }
+}
+
+/// A bookmarks folder's menu: its bookmarks, its folders (one level
+/// open at a time) and "Open all". Returns the bookmark clicked.
+fn folder_menu(
+    ui: &mut egui::Ui,
+    bookmarks: &[model::Bookmark],
+    path: &str,
+    out: &mut Option<(Vec<String>, String, OpenAll)>,
+) -> Option<String> {
+    let mut go = None;
+    let inside = format!("{path}/");
+    let mut subs: Vec<String> = Vec::new();
+    for b in bookmarks {
+        if let Some(rest) = b.folder.strip_prefix(&inside) {
+            let sub = format!("{inside}{}", rest.split('/').next().unwrap_or(rest));
+            if !subs.contains(&sub) {
+                subs.push(sub);
+            }
+        }
+    }
+    for sub in &subs {
+        let name = sub.rsplit('/').next().unwrap_or(sub);
+        popup::submenu(ui, name, |ui| {
+            for b in bookmarks.iter().filter(|b| &b.folder == sub) {
+                let label = theme::elide(if b.title.is_empty() { &b.url } else { &b.title }, 40);
+                if ui.button(label).clicked() {
+                    go = Some(b.url.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            open_all_items(ui, bookmarks, sub, out);
+        });
+    }
+    let mut any = !subs.is_empty();
+    for b in bookmarks.iter().filter(|b| b.folder == path) {
+        any = true;
+        let label = theme::elide(if b.title.is_empty() { &b.url } else { &b.title }, 40);
+        if ui.button(label).clicked() {
+            go = Some(b.url.clone());
+            ui.close();
+        }
+    }
+    if !any {
+        ui.label(t("(empty)"));
+    }
+    ui.separator();
+    open_all_items(ui, bookmarks, path, out);
+    go
+}
+
 /// A download size the way Chrome's download list shows it: B, KB, MB, GB.
 fn size_label(bytes: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -2627,5 +3367,90 @@ fn size_label(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// An extension's badge over its toolbar button `button`, laid out as
+/// Chrome's (`IconWithBadgeImageSource`): 14 points high at the bottom of
+/// the 28 point icon area, the text at most 23 points wide with 2 on each
+/// side, at least as wide as high, right-aligned until 20 wide and centered
+/// from there, with a 1 point cutout in `behind` around it. `default` is
+/// the background when the extension set none.
+fn paint_badge(
+    ui: &egui::Ui,
+    button: Rect,
+    badge: &cef::handlers::extensions::Badge,
+    default: Color32,
+    behind: Color32,
+) {
+    const HEIGHT: f32 = 14.0;
+    const MAX_TEXT: f32 = 23.0;
+    const PADDING: f32 = 2.0;
+    let area = Rect::from_center_size(button.center(), Vec2::splat(28.0));
+    let [r, g, b, a] = badge.background;
+    let background = if a == 0 {
+        default
+    } else {
+        Color32::from_rgb(r, g, b)
+    };
+    let [r, g, b, a] = badge.color;
+    let color = if a == 0 {
+        max_contrast(background)
+    } else {
+        Color32::from_rgba_unmultiplied(r, g, b, a)
+    };
+    let font = egui::FontId::proportional(9.0);
+    let galley = ui.painter().layout_no_wrap(badge.text.clone(), font, color);
+    let text_w = galley.size().x.min(MAX_TEXT).ceil();
+    let mut width = text_w + PADDING * 2.0;
+    // Even, as the area is: an odd badge in an even area blurs.
+    if (width as i32) % 2 != (area.width() as i32) % 2 {
+        width += 1.0;
+    }
+    let width = width.max(HEIGHT);
+    let x = if width >= 20.0 {
+        area.left() + ((area.width() - width) / 2.0).floor()
+    } else {
+        area.right() - width
+    };
+    let rect = Rect::from_min_size(
+        egui::pos2(x, area.bottom() - HEIGHT),
+        Vec2::new(width, HEIGHT),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(rect.expand(1.0), CornerRadius::same(3), behind);
+    painter.rect_filled(rect, CornerRadius::same(4), background);
+    let text_rect = Rect::from_center_size(rect.center(), Vec2::new(text_w, HEIGHT));
+    let at = egui::pos2(
+        text_rect.center().x - galley.size().x.min(MAX_TEXT) / 2.0,
+        rect.center().y - galley.size().y / 2.0,
+    );
+    painter
+        .with_clip_rect(text_rect.intersect(painter.clip_rect()))
+        .galley(at, galley, color);
+}
+
+/// White or near black, whichever contrasts more with `c`
+/// (`color_utils::GetColorWithMaxContrast`).
+fn max_contrast(c: Color32) -> Color32 {
+    fn lum(c: Color32) -> f32 {
+        let ch = |v: u8| {
+            let v = v as f32 / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * ch(c.r()) + 0.7152 * ch(c.g()) + 0.0722 * ch(c.b())
+    }
+    let dark = Color32::from_rgb(0x20, 0x21, 0x24);
+    let l = lum(c);
+    let with_white = 1.05 / (l + 0.05);
+    let with_dark = (l + 0.05) / (lum(dark) + 0.05);
+    if with_white >= with_dark {
+        Color32::WHITE
+    } else {
+        dark
     }
 }

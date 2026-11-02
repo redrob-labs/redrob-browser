@@ -336,7 +336,104 @@ fn relational_key_may_match(
     }
 }
 
+/// What `relational_key_may_match` reads of a set of elements, so many
+/// keys can be tested against one subtree without walking it for each.
+pub(crate) struct RelationalKeySummary {
+    ids: crate::HashSet<String>,
+    classes: crate::HashSet<String>,
+    attributes: crate::HashSet<String>,
+    locals: crate::HashSet<String>,
+    quirks: bool,
+}
+
+impl RelationalKeySummary {
+    pub(crate) fn of(tree: &DomTree, nodes: &[NodeId]) -> Self {
+        let quirks = tree.is_quirks();
+        // Insert `value` (lowercased in quirks mode), copying it only when
+        // the set does not hold it yet.
+        let add = |set: &mut crate::HashSet<String>, value: &str, lower: bool| {
+            if lower && value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                let value = value.to_ascii_lowercase();
+                if !set.contains(&value) {
+                    set.insert(value);
+                }
+            } else if !set.contains(value) {
+                set.insert(value.to_owned());
+            }
+        };
+        let mut summary = Self {
+            ids: crate::HashSet::default(),
+            classes: crate::HashSet::default(),
+            attributes: crate::HashSet::default(),
+            locals: crate::HashSet::default(),
+            quirks,
+        };
+        for &node in nodes {
+            let Some(dom_node) = tree.borrow_node(node) else {
+                continue;
+            };
+            let Some(element) = dom_node.as_element() else {
+                continue;
+            };
+            add(&mut summary.locals, element.local.as_ref(), true);
+            if let Some(id) = dom_node.get_attribute("id") {
+                add(&mut summary.ids, id, quirks);
+            }
+            if let Some(classes) = dom_node.get_attribute("class") {
+                for class in classes.split_whitespace() {
+                    add(&mut summary.classes, class, quirks);
+                }
+            }
+            if let Some(attributes) = dom_node.attrs() {
+                for attribute in attributes {
+                    add(
+                        &mut summary.attributes,
+                        attribute.name.local.as_ref(),
+                        false,
+                    );
+                }
+            }
+        }
+        summary
+    }
+
+    /// `relational_key_may_match` for some element of the set.
+    fn may_match(&self, key: &RelationalSelectorKey) -> bool {
+        let contains = |set: &crate::HashSet<String>, value: &str| {
+            if self.quirks {
+                set.contains(&value.to_ascii_lowercase())
+            } else {
+                set.contains(value)
+            }
+        };
+        match key {
+            RelationalSelectorKey::Id(expected) => contains(&self.ids, expected),
+            RelationalSelectorKey::Class(expected) => contains(&self.classes, expected),
+            RelationalSelectorKey::Attribute(expected) => self.attributes.contains(expected),
+            RelationalSelectorKey::LocalName(expected) => {
+                self.locals.contains(&expected.to_ascii_lowercase())
+            }
+        }
+    }
+}
+
 impl RelationalInvalidation {
+    /// `subject_may_match` for some element of `nodes`, whose keys
+    /// `summary` holds.
+    pub(crate) fn subject_may_match_any(
+        &self,
+        tree: &DomTree,
+        nodes: &[NodeId],
+        summary: &RelationalKeySummary,
+    ) -> bool {
+        match &self.subject_keys {
+            Some(keys) => keys.iter().any(|key| summary.may_match(key)),
+            None => nodes
+                .iter()
+                .any(|&node| self.relative_path_may_match(tree, node)),
+        }
+    }
+
     pub(crate) fn anchor_may_match(&self, tree: &DomTree, node: NodeId) -> bool {
         relational_key_may_match(self.anchor_key.as_ref(), tree, node)
             && self.anchor_ancestor_keys.iter().all(|key| {
@@ -1864,6 +1961,33 @@ pub(crate) struct MatchedRules {
     important: Vec<(u32, usize, usize)>,
 }
 
+/// Which rules a matching pass considers.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MatchPart {
+    All,
+    ContextFree,
+    Contextual,
+}
+
+impl MatchPart {
+    fn takes(self, context_free: bool) -> bool {
+        match self {
+            Self::All => true,
+            Self::ContextFree => context_free,
+            Self::Contextual => !context_free,
+        }
+    }
+}
+
+/// What an element matches of the context-free rules (see
+/// `CompiledSelector::context_free`): the same for every element whose
+/// ancestor chain agrees in `Stylesheet::element_match_feature`.
+#[derive(Clone)]
+pub(crate) struct ContextFreeMatches {
+    matched: MatchedRules,
+    pseudo: PseudoMatches,
+}
+
 pub(crate) struct ShadowSlottedScope<'a> {
     pub sheet: &'a Stylesheet,
     pub host: NodeId,
@@ -1945,9 +2069,102 @@ struct PseudoRule {
     layer: Option<LayerOrder>,
 }
 
+/// The rule buckets by subject key, of the contextual rules alone (see
+/// `MatchPart::Contextual`): a tenth of the rules on large sites, so an
+/// element whose context-free matches are cached looks up and walks only
+/// these.
+#[derive(Clone, Default)]
+struct ContextualBuckets {
+    by_root: Vec<usize>,
+    by_id: HashMap<String, Vec<usize>>,
+    by_class: HashMap<String, Vec<usize>>,
+    by_attribute: HashMap<String, Vec<usize>>,
+    by_local: HashMap<String, Vec<usize>>,
+    universal: Vec<usize>,
+    /// A bit per hash of each class and attribute key (`KeyFilter`): most
+    /// of an element's classes and attributes key no contextual rule, and
+    /// the filter rejects them without a map lookup.
+    class_filter: KeyFilter,
+    attribute_filter: KeyFilter,
+}
+
+/// A one-hash Bloom filter over bucket keys.
+#[derive(Clone)]
+struct KeyFilter([u64; 64]);
+
+impl Default for KeyFilter {
+    fn default() -> Self {
+        Self([0; 64])
+    }
+}
+
+impl KeyFilter {
+    fn bit(key: &str) -> usize {
+        use std::hash::BuildHasher;
+        (foldhash::fast::FixedState::default().hash_one(key) & 4095) as usize
+    }
+
+    fn insert(&mut self, key: &str) {
+        let bit = Self::bit(key);
+        self.0[bit / 64] |= 1 << (bit % 64);
+    }
+
+    fn may_contain(&self, key: &str) -> bool {
+        self.may_contain_bit(Self::bit(key))
+    }
+
+    fn may_contain_bit(&self, bit: usize) -> bool {
+        self.0[bit / 64] & (1 << (bit % 64)) != 0
+    }
+}
+
+/// An element's class and its `KeyFilter` bit, split and hashed once for
+/// every rule map an element is matched against.
+#[derive(Clone, Copy)]
+pub(crate) struct ClassKey<'a> {
+    name: &'a str,
+    bit: usize,
+}
+
+fn class_keys<'a>(classes: impl IntoIterator<Item = &'a str>) -> Vec<ClassKey<'a>> {
+    classes
+        .into_iter()
+        .map(|name| ClassKey {
+            name,
+            bit: KeyFilter::bit(name),
+        })
+        .collect()
+}
+
+impl ContextualBuckets {
+    fn add(&mut self, key: &SelectorKey, index: usize) {
+        match key {
+            SelectorKey::Root => self.by_root.push(index),
+            SelectorKey::Id(value) => self.by_id.entry(value.clone()).or_default().push(index),
+            SelectorKey::Class(value) => {
+                self.class_filter.insert(value);
+                self.by_class.entry(value.clone()).or_default().push(index)
+            }
+            SelectorKey::Attribute(value) => {
+                self.attribute_filter.insert(value);
+                self.by_attribute
+                    .entry(value.clone())
+                    .or_default()
+                    .push(index)
+            }
+            SelectorKey::Local(value) => {
+                self.by_local.entry(value.clone()).or_default().push(index)
+            }
+            SelectorKey::Universal => self.universal.push(index),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct PseudoRuleMap {
     rules: Vec<PseudoRule>,
+    /// The contextual rules' buckets (the buckets below hold every rule).
+    contextual: ContextualBuckets,
     by_root: Vec<usize>,
     by_id: HashMap<String, Vec<usize>>,
     by_class: HashMap<String, Vec<usize>>,
@@ -1955,11 +2172,27 @@ struct PseudoRuleMap {
     by_local: HashMap<String, Vec<usize>>,
     universal: Vec<usize>,
     candidate_slot_count: usize,
+    /// By rule index: see `Stylesheet::rule_context_free`.
+    context_free: Vec<bool>,
+    /// See `Stylesheet::match_attributes`.
+    match_attributes: crate::HashSet<String>,
 }
 
 impl PseudoRuleMap {
-    fn push(&mut self, mut rule: PseudoRule) {
+    /// Add `rule`; returns the attributes its selector reads when it is
+    /// context-free.
+    fn push(&mut self, mut rule: PseudoRule) -> Vec<String> {
         let index = self.rules.len();
+        let mut attributes = Vec::new();
+        let context_free = rule.sel.context_free(&mut attributes)
+            && rule.container_condition_id == ContainerConditionId::NONE;
+        self.context_free.push(context_free);
+        if !context_free {
+            for key in rule.sel.candidate_keys() {
+                self.contextual.add(key, index);
+            }
+        }
+        self.match_attributes.extend(attributes.iter().cloned());
         if rule.sel.candidate_keys().len() > 1 {
             rule.candidate_slot = u32::try_from(self.candidate_slot_count)
                 .expect("pseudo selector candidate slot count exceeds u32");
@@ -1984,6 +2217,7 @@ impl PseudoRuleMap {
             }
         }
         self.rules.push(rule);
+        attributes
     }
 
     fn bucket_matches_container_query_rule(
@@ -2673,6 +2907,23 @@ pub struct Stylesheet {
     before_rules: PseudoRuleMap,
     after_rules: PseudoRuleMap,
     placeholder_rules: PseudoRuleMap,
+    /// Unique per content: a fresh sheet and every parse into one get a new
+    /// value, so caches of matching and cascade results can key on it.
+    epoch: u64,
+    /// By rule index: the selector is context-free (see
+    /// `CompiledSelector::context_free`) and has no container condition.
+    rule_context_free: Vec<bool>,
+    /// The contextual rules' buckets (`by_id` and the rest hold every rule).
+    contextual: ContextualBuckets,
+    /// The attributes context-free selectors read (lowercase).
+    match_attributes: crate::HashSet<String>,
+}
+
+/// The next `Stylesheet::epoch`.
+static NEXT_SHEET_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_sheet_epoch() -> u64 {
+    NEXT_SHEET_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 const MAX_STYLESHEET_CACHE_SOURCE_BYTES: usize = 8 * 1024 * 1024;
@@ -3295,7 +3546,16 @@ impl Stylesheet {
             before_rules: PseudoRuleMap::default(),
             after_rules: PseudoRuleMap::default(),
             placeholder_rules: PseudoRuleMap::default(),
+            epoch: next_sheet_epoch(),
+            rule_context_free: Vec::new(),
+            contextual: ContextualBuckets::default(),
+            match_attributes: crate::HashSet::default(),
         }
+    }
+
+    /// See `Stylesheet::epoch`.
+    pub(crate) fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Append the rules of `sources` after those already in the sheet. A
@@ -3310,6 +3570,7 @@ impl Stylesheet {
         fold: &mut ParseFold,
     ) {
         let sheet = self;
+        sheet.epoch = next_sheet_epoch();
         let mut order = fold.order;
         let mut layers = std::mem::take(&mut fold.layers);
         let mut keyframe_winners = std::mem::take(&mut fold.keyframe_winners);
@@ -3390,7 +3651,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.before_rules.push(PseudoRule {
+                        let attributes = sheet.before_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3402,6 +3663,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         // Keep correctness metadata for relative/structural
                         // syntax that the current selector matcher cannot yet
@@ -3425,7 +3688,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.after_rules.push(PseudoRule {
+                        let attributes = sheet.after_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3437,6 +3700,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         note_selector_for_invalidation(&mut sheet.invalidation_map, base, order);
                     }
@@ -3456,7 +3721,7 @@ impl Stylesheet {
                         let normal_flags = declaration_stream_flags(&normal_decls);
                         let important_flags = declaration_stream_flags(&important_decls);
                         let specificity = sel.specificity();
-                        sheet.placeholder_rules.push(PseudoRule {
+                        let attributes = sheet.placeholder_rules.push(PseudoRule {
                             sel,
                             specificity,
                             normal_decls,
@@ -3468,6 +3733,8 @@ impl Stylesheet {
                             container_condition_id,
                             layer,
                         });
+                        // Pseudo-element selectors read these too.
+                        sheet.match_attributes.extend(attributes);
                     } else if selector_requires_conservative_tracking(base) {
                         note_selector_for_invalidation(&mut sheet.invalidation_map, base, order);
                     }
@@ -3535,6 +3802,16 @@ impl Stylesheet {
                         SelectorKey::Universal => sheet.universal.push(idx),
                     }
                 }
+                let mut attributes = Vec::new();
+                let context_free = sel.context_free(&mut attributes)
+                    && container_condition_id == ContainerConditionId::NONE;
+                sheet.rule_context_free.push(context_free);
+                if !context_free {
+                    for key in sel.candidate_keys() {
+                        sheet.contextual.add(key, idx);
+                    }
+                }
+                sheet.match_attributes.extend(attributes);
                 sheet.rules.push(Rule {
                     sel,
                     specificity,
@@ -3618,16 +3895,59 @@ impl Stylesheet {
         nid: NodeId,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
     ) -> PseudoMatches {
+        let node = tree.borrow_node(nid);
+        let classes = class_keys(
+            node.as_ref()
+                .and_then(|node| node.get_attribute("class"))
+                .into_iter()
+                .flat_map(obscura_dom::selector::class_tokens),
+        );
+        self.pseudo_matches_part(tree, matcher, nid, &classes, evaluator, MatchPart::All)
+    }
+
+    fn pseudo_matches_part(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        classes: &[ClassKey<'_>],
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+        part: MatchPart,
+    ) -> PseudoMatches {
         let supports_placeholder = tree.borrow_node(nid).is_some_and(|node| {
             node.as_element()
                 .is_some_and(|element| matches!(element.local.as_ref(), "input" | "textarea"))
         });
         PseudoMatches {
-            before: self.pseudo_rule_matches(&self.before_rules, tree, matcher, nid, evaluator),
-            after: self.pseudo_rule_matches(&self.after_rules, tree, matcher, nid, evaluator),
+            before: self.pseudo_rule_matches(
+                &self.before_rules,
+                tree,
+                matcher,
+                nid,
+                classes,
+                evaluator,
+                part,
+            ),
+            after: self.pseudo_rule_matches(
+                &self.after_rules,
+                tree,
+                matcher,
+                nid,
+                classes,
+                evaluator,
+                part,
+            ),
             placeholder: supports_placeholder
                 .then(|| {
-                    self.pseudo_rule_matches(&self.placeholder_rules, tree, matcher, nid, evaluator)
+                    self.pseudo_rule_matches(
+                        &self.placeholder_rules,
+                        tree,
+                        matcher,
+                        nid,
+                        classes,
+                        evaluator,
+                        part,
+                    )
                 })
                 .flatten(),
         }
@@ -3669,13 +3989,16 @@ impl Stylesheet {
 
     /// The `rules` (one pseudo-element's) matching `nid`, normal and
     /// important, each in cascade order; `None` when none match.
+    #[allow(clippy::too_many_arguments)]
     fn pseudo_rule_matches(
         &self,
         rules: &PseudoRuleMap,
         tree: &DomTree,
         matcher: &mut Matcher,
         nid: NodeId,
+        classes: &[ClassKey<'_>],
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+        part: MatchPart,
     ) -> Option<PseudoMatch> {
         let mut normal_matched: Vec<(u32, usize, usize)> = Vec::new();
         let mut important_matched: Vec<(u32, usize, usize)> = Vec::new();
@@ -3688,6 +4011,9 @@ impl Stylesheet {
              important_matched: &mut Vec<(u32, usize, usize)>| {
                 let Some(indices) = bucket else { return };
                 for &index in indices {
+                    if !part.takes(rules.context_free[index]) {
+                        continue;
+                    }
                     let rule = &rules.rules[index];
                     if rule.candidate_slot != NO_CANDIDATE_SLOT
                         && !matcher.mark_candidate(rule.candidate_slot as usize)
@@ -3717,35 +4043,63 @@ impl Stylesheet {
                 }
             };
 
+        // The contextual part walks the contextual rules' buckets alone.
+        let filters = matches!(part, MatchPart::Contextual).then(|| {
+            (
+                &rules.contextual.class_filter,
+                &rules.contextual.attribute_filter,
+            )
+        });
+        let (by_root, by_id, by_class, by_attribute, by_local, universal) = match part {
+            MatchPart::Contextual => (
+                &rules.contextual.by_root,
+                &rules.contextual.by_id,
+                &rules.contextual.by_class,
+                &rules.contextual.by_attribute,
+                &rules.contextual.by_local,
+                &rules.contextual.universal,
+            ),
+            MatchPart::All | MatchPart::ContextFree => (
+                &rules.by_root,
+                &rules.by_id,
+                &rules.by_class,
+                &rules.by_attribute,
+                &rules.by_local,
+                &rules.universal,
+            ),
+        };
         if let Some(node) = tree.borrow_node(nid) {
-            if let Some(element) = node.as_element() {
+            if let Some(element) = node.as_element().filter(|_| !by_local.is_empty()) {
                 consider(
-                    rules.by_local.get(element.local.as_ref()),
+                    by_local.get(element.local.as_ref()),
                     &mut normal_matched,
                     &mut important_matched,
                 );
             }
-            if let Some(id) = node.get_attribute("id") {
-                consider(
-                    rules.by_id.get(id),
-                    &mut normal_matched,
-                    &mut important_matched,
-                );
+            if let Some(id) = node.get_attribute("id").filter(|_| !by_id.is_empty()) {
+                consider(by_id.get(id), &mut normal_matched, &mut important_matched);
             }
-            if let Some(classes) = node.get_attribute("class") {
-                for class in classes.split_whitespace() {
+            if !by_class.is_empty() {
+                for class in classes {
+                    if filters.is_some_and(|(filter, _)| !filter.may_contain_bit(class.bit)) {
+                        continue;
+                    }
                     consider(
-                        rules.by_class.get(class),
+                        by_class.get(class.name),
                         &mut normal_matched,
                         &mut important_matched,
                     );
                 }
             }
-            if !rules.by_attribute.is_empty() {
+            if !by_attribute.is_empty() {
                 if let Some(attributes) = node.attrs() {
                     for attribute in attributes {
+                        let name = attribute.name.local.as_ref();
+                        if filters.is_some_and(|(_, attributes)| !attributes.may_contain(name)) {
+                            continue;
+                        }
                         consider(
-                            rules.by_attribute.get(attribute.name.local.as_ref()),
+                            by_attribute.get(name),
                             &mut normal_matched,
                             &mut important_matched,
                         );
@@ -3753,18 +4107,12 @@ impl Stylesheet {
                 }
             }
         }
-        if is_root_element(tree, nid) {
-            consider(
-                (!rules.by_root.is_empty()).then_some(&rules.by_root),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !by_root.is_empty() && is_root_element(tree, nid) {
+            consider(Some(by_root), &mut normal_matched, &mut important_matched);
         }
-        consider(
-            (!rules.universal.is_empty()).then_some(&rules.universal),
-            &mut normal_matched,
-            &mut important_matched,
-        );
+        if !universal.is_empty() {
+            consider(Some(universal), &mut normal_matched, &mut important_matched);
+        }
 
         if normal_matched.is_empty() && important_matched.is_empty() {
             return None;
@@ -4112,7 +4460,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4145,7 +4493,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4186,7 +4534,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4221,7 +4569,7 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         style: &mut LayoutStyle,
         parent_props: &HashMap<String, String>,
@@ -4293,9 +4641,34 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
         evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+    ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
+        let classes = class_keys(classes.iter().map(AsRef::as_ref));
+        self.collect_matched_rules_part(
+            tree,
+            matcher,
+            nid,
+            id,
+            &classes,
+            local,
+            evaluator,
+            MatchPart::All,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn collect_matched_rules_part(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[ClassKey<'_>],
+        local: &str,
+        evaluator: &mut Option<&mut ContainerQueryEvaluator<'_>>,
+        part: MatchPart,
     ) -> (Vec<(u32, usize, usize)>, Vec<(u32, usize, usize)>) {
         // Keep the two cascade priorities separate from the outset. A typical
         // stylesheet has very few important declarations, so cloning and
@@ -4312,6 +4685,9 @@ impl Stylesheet {
              important_matched: &mut Vec<(u32, usize, usize)>| {
                 if let Some(idxs) = bucket {
                     for &i in idxs {
+                        if !part.takes(self.rule_context_free[i]) {
+                            continue;
+                        }
                         let rule = &self.rules[i];
                         if rule.candidate_slot != NO_CANDIDATE_SLOT
                             && !matcher.mark_candidate(rule.candidate_slot as usize)
@@ -4340,38 +4716,66 @@ impl Stylesheet {
                 }
             };
 
-        consider(
-            self.by_local.get(local),
-            &mut normal_matched,
-            &mut important_matched,
-        );
-        if is_root_element(tree, nid) {
+        // The contextual part walks the contextual rules' buckets alone.
+        let filters = matches!(part, MatchPart::Contextual).then(|| {
+            (
+                &self.contextual.class_filter,
+                &self.contextual.attribute_filter,
+            )
+        });
+        let (by_root, by_id, by_class, by_attribute, by_local, universal) = match part {
+            MatchPart::Contextual => (
+                &self.contextual.by_root,
+                &self.contextual.by_id,
+                &self.contextual.by_class,
+                &self.contextual.by_attribute,
+                &self.contextual.by_local,
+                &self.contextual.universal,
+            ),
+            MatchPart::All | MatchPart::ContextFree => (
+                &self.by_root,
+                &self.by_id,
+                &self.by_class,
+                &self.by_attribute,
+                &self.by_local,
+                &self.universal,
+            ),
+        };
+        if !by_local.is_empty() {
             consider(
-                (!self.by_root.is_empty()).then_some(&self.by_root),
+                by_local.get(local),
                 &mut normal_matched,
                 &mut important_matched,
             );
         }
-        if let Some(id) = id {
-            consider(
-                self.by_id.get(id),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !by_root.is_empty() && is_root_element(tree, nid) {
+            consider(Some(by_root), &mut normal_matched, &mut important_matched);
         }
-        for c in classes {
-            consider(
-                self.by_class.get(c),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if let Some(id) = id.filter(|_| !by_id.is_empty()) {
+            consider(by_id.get(id), &mut normal_matched, &mut important_matched);
         }
-        if !self.by_attribute.is_empty() {
+        if !by_class.is_empty() {
+            for class in classes {
+                if filters.is_some_and(|(filter, _)| !filter.may_contain_bit(class.bit)) {
+                    continue;
+                }
+                consider(
+                    by_class.get(class.name),
+                    &mut normal_matched,
+                    &mut important_matched,
+                );
+            }
+        }
+        if !by_attribute.is_empty() {
             if let Some(node) = tree.borrow_node(nid) {
                 if let Some(attributes) = node.attrs() {
                     for attribute in attributes {
+                        let name = attribute.name.local.as_ref();
+                        if filters.is_some_and(|(_, attributes)| !attributes.may_contain(name)) {
+                            continue;
+                        }
                         consider(
-                            self.by_attribute.get(attribute.name.local.as_ref()),
+                            by_attribute.get(name),
                             &mut normal_matched,
                             &mut important_matched,
                         );
@@ -4379,12 +4783,8 @@ impl Stylesheet {
                 }
             }
         }
-        if !self.universal.is_empty() {
-            consider(
-                Some(&self.universal),
-                &mut normal_matched,
-                &mut important_matched,
-            );
+        if !universal.is_empty() {
+            consider(Some(universal), &mut normal_matched, &mut important_matched);
         }
 
         if normal_matched.len() > 1 {
@@ -4451,12 +4851,148 @@ impl Stylesheet {
         matcher: &mut Matcher,
         nid: NodeId,
         id: Option<&str>,
-        classes: &[String],
+        classes: &[impl AsRef<str>],
         local: &str,
     ) -> MatchedRules {
         let (normal, important) =
             self.collect_matched_rules(tree, matcher, nid, id, classes, local, &mut None);
         MatchedRules { normal, important }
+    }
+
+    /// `matched_rules_without_scopes` and `pseudo_matches`, matching only the
+    /// contextual rules when `cached` holds the context-free part for an
+    /// element with the same ancestor chain feature. Also returns the
+    /// context-free part when it was matched, for caching.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn matches_with_context_free(
+        &self,
+        tree: &DomTree,
+        matcher: &mut Matcher,
+        nid: NodeId,
+        id: Option<&str>,
+        classes: &[impl AsRef<str>],
+        local: &str,
+        cached: Option<&ContextFreeMatches>,
+    ) -> (MatchedRules, PseudoMatches, Option<ContextFreeMatches>) {
+        let part = if cached.is_some() {
+            MatchPart::Contextual
+        } else {
+            MatchPart::All
+        };
+        let classes = class_keys(classes.iter().map(AsRef::as_ref));
+        let (normal, important) = self
+            .collect_matched_rules_part(tree, matcher, nid, id, &classes, local, &mut None, part);
+        let pseudo = self.pseudo_matches_part(tree, matcher, nid, &classes, &mut None, part);
+        let matched = MatchedRules { normal, important };
+        let Some(cached) = cached else {
+            let keep = |list: &[(u32, usize, usize)], flags: &[bool]| {
+                list.iter()
+                    .copied()
+                    .filter(|&(_, _, index)| flags[index])
+                    .collect::<Vec<_>>()
+            };
+            let pseudo_part = |matched: &Option<PseudoMatch>, rules: &PseudoRuleMap| {
+                matched.as_ref().and_then(|(normal, important)| {
+                    let normal = keep(normal, &rules.context_free);
+                    let important = keep(important, &rules.context_free);
+                    (!normal.is_empty() || !important.is_empty()).then_some((normal, important))
+                })
+            };
+            let context_free = ContextFreeMatches {
+                matched: MatchedRules {
+                    normal: keep(&matched.normal, &self.rule_context_free),
+                    important: keep(&matched.important, &self.rule_context_free),
+                },
+                pseudo: PseudoMatches {
+                    before: pseudo_part(&pseudo.before, &self.before_rules),
+                    after: pseudo_part(&pseudo.after, &self.after_rules),
+                    placeholder: pseudo_part(&pseudo.placeholder, &self.placeholder_rules),
+                },
+            };
+            return (matched, pseudo, Some(context_free));
+        };
+        fn merge<'r>(
+            own: &[(u32, usize, usize)],
+            shared: &[(u32, usize, usize)],
+            layer: &dyn Fn(usize) -> Option<&'r LayerOrder>,
+            important: bool,
+        ) -> Vec<(u32, usize, usize)> {
+            let mut all = Vec::with_capacity(own.len() + shared.len());
+            all.extend_from_slice(shared);
+            all.extend_from_slice(own);
+            if !own.is_empty() && !shared.is_empty() {
+                all.sort_unstable_by(|a, b| {
+                    compare_rule_cascade(layer(a.2), a.0, a.1, layer(b.2), b.0, b.1, important)
+                });
+            }
+            all
+        }
+        let rule_layer = |index: usize| self.rules[index].layer.as_ref();
+        let matched = MatchedRules {
+            normal: merge(&matched.normal, &cached.matched.normal, &rule_layer, false),
+            important: merge(
+                &matched.important,
+                &cached.matched.important,
+                &rule_layer,
+                true,
+            ),
+        };
+        let merge_pseudo =
+            |own: Option<PseudoMatch>, shared: &Option<PseudoMatch>, rules: &PseudoRuleMap| {
+                let layer = |index: usize| rules.rules[index].layer.as_ref();
+                match (own, shared) {
+                    (None, None) => None,
+                    (Some(own), None) => Some(own),
+                    (None, Some(shared)) => Some(shared.clone()),
+                    (Some(own), Some(shared)) => Some((
+                        merge(&own.0, &shared.0, &layer, false),
+                        merge(&own.1, &shared.1, &layer, true),
+                    )),
+                }
+            };
+        let pseudo = PseudoMatches {
+            before: merge_pseudo(pseudo.before, &cached.pseudo.before, &self.before_rules),
+            after: merge_pseudo(pseudo.after, &cached.pseudo.after, &self.after_rules),
+            placeholder: merge_pseudo(
+                pseudo.placeholder,
+                &cached.pseudo.placeholder,
+                &self.placeholder_rules,
+            ),
+        };
+        (matched, pseudo, None)
+    }
+
+    /// What context-free selectors read of `node` itself (see
+    /// `CompiledSelector::context_free`): its namespace and local name, id,
+    /// class list and the attributes they name. `None` for a non-element.
+    pub(crate) fn element_match_feature(&self, node: &obscura_dom::tree::Node) -> Option<u64> {
+        use std::hash::{BuildHasher, Hash, Hasher};
+        let element = node.as_element()?;
+        let mut hasher = foldhash::fast::FixedState::default().build_hasher();
+        element.ns.as_ref().hash(&mut hasher);
+        element.local.as_ref().hash(&mut hasher);
+        if let Some(attributes) = node.attrs() {
+            for attribute in attributes {
+                let name = attribute.name.local.as_ref();
+                let tracked = matches!(name, "id" | "class") || {
+                    let lower;
+                    let name = if name.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                        lower = name.to_ascii_lowercase();
+                        lower.as_str()
+                    } else {
+                        name
+                    };
+                    // Holds the pseudo-element maps' attributes too.
+                    self.match_attributes.contains(name)
+                };
+                if tracked {
+                    attribute.name.ns.as_ref().hash(&mut hasher);
+                    name.hash(&mut hasher);
+                    attribute.value.as_str().hash(&mut hasher);
+                }
+            }
+        }
+        Some(hasher.finish())
     }
 
     /// The second half of `apply`: apply rules already matched (and inline

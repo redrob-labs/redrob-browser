@@ -53,12 +53,46 @@ impl ToCss for CssString {
 
 impl PrecomputedHash for CssString {
     fn precomputed_hash(&self) -> u32 {
-        let mut h: u32 = 5381;
-        for b in self.0.as_bytes() {
-            h = h.wrapping_mul(33).wrapping_add(*b as u32);
-        }
-        h
+        css_string_hash(&self.0)
     }
+}
+
+/// The classes of a `class` attribute, split on whitespace the way class
+/// matching splits them (Unicode whitespace), with the faster ASCII split for
+/// the usual all-ASCII attribute (the same tokens there).
+pub fn class_tokens(value: &str) -> ClassTokens<'_> {
+    if value.is_ascii() {
+        ClassTokens::Ascii(value.split_ascii_whitespace())
+    } else {
+        ClassTokens::Unicode(value.split_whitespace())
+    }
+}
+
+/// See `class_tokens`.
+pub enum ClassTokens<'a> {
+    Ascii(std::str::SplitAsciiWhitespace<'a>),
+    Unicode(std::str::SplitWhitespace<'a>),
+}
+
+impl<'a> Iterator for ClassTokens<'a> {
+    type Item = &'a str;
+
+    #[inline]
+    fn next(&mut self) -> Option<&'a str> {
+        match self {
+            Self::Ascii(tokens) => tokens.next(),
+            Self::Unicode(tokens) => tokens.next(),
+        }
+    }
+}
+
+/// `CssString::precomputed_hash` of a borrowed string.
+fn css_string_hash(value: &str) -> u32 {
+    let mut h: u32 = 5381;
+    for b in value.as_bytes() {
+        h = h.wrapping_mul(33).wrapping_add(*b as u32);
+    }
+    h
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -565,9 +599,47 @@ impl<'a> Element for DomElement<'a> {
             .with_node(self.node_id, |n| {
                 n.get_attribute("class")
                     .map(|class_attr| {
+                        if case_sensitivity == CaseSensitivity::CaseSensitive {
+                            // A class is an occurrence bounded by ASCII
+                            // whitespace (the separators `split_whitespace`
+                            // also splits on) or the ends: no split.
+                            let needle = name.0.as_bytes();
+                            if needle.is_empty() {
+                                return false;
+                            }
+                            if !class_attr.is_ascii() {
+                                return class_attr
+                                    .split_whitespace()
+                                    .any(|class| class.as_bytes() == needle);
+                            }
+                            // The ASCII characters `char::is_whitespace` holds.
+                            // A token holds none of them, so a needle with
+                            // whitespace (or any non-ASCII one) never equals
+                            // one; a scan of the tokens builds no searcher.
+                            let separator = |byte: u8| {
+                                matches!(byte, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
+                            };
+                            let bytes = class_attr.as_bytes();
+                            let mut at = 0;
+                            while at < bytes.len() {
+                                if separator(bytes[at]) {
+                                    at += 1;
+                                    continue;
+                                }
+                                let start = at;
+                                while at < bytes.len() && !separator(bytes[at]) {
+                                    at += 1;
+                                }
+                                if &bytes[start..at] == needle {
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                        let name = name.0.as_bytes();
                         class_attr
                             .split_whitespace()
-                            .any(|c| case_sensitivity.eq(c.as_bytes(), name.0.as_bytes()))
+                            .any(|c| case_sensitivity.eq(c.as_bytes(), name))
                     })
                     .unwrap_or(false)
             })
@@ -931,6 +1003,11 @@ impl Matcher {
     /// Match `nid` (matched as if it were the subject element; the ancestor
     /// filter reflects `nid`'s ancestors, not `nid` itself) against `compiled`.
     pub fn matches(&mut self, tree: &DomTree, nid: NodeId, compiled: &CompiledSelector) -> bool {
+        // The ancestor filter rejects most selectors before any node is read
+        // (`matches_selector` makes the same check after setting up).
+        if !selectors::matching::selector_may_match(&compiled.hashes, self.ancestors.filter()) {
+            return false;
+        }
         if !tree.with_node(nid, |n| n.is_element()).unwrap_or(false) {
             return false;
         }
@@ -1024,14 +1101,18 @@ impl Matcher {
 /// the filter holds exactly the hashes of the current node's ancestor chain.
 struct AncestorFilter {
     filter: Box<selectors::bloom::BloomFilter>,
-    /// Hashes pushed per tree-depth level, so `pop` knows what to remove.
-    levels: Vec<Vec<u32>>,
+    /// The hashes pushed, all levels in one list.
+    hashes: Vec<u32>,
+    /// Where each tree-depth level's hashes start in `hashes`, so `pop`
+    /// knows what to remove.
+    levels: Vec<usize>,
 }
 
 impl AncestorFilter {
     fn new() -> Self {
         AncestorFilter {
             filter: Box::default(),
+            hashes: Vec::new(),
             levels: Vec::new(),
         }
     }
@@ -1041,38 +1122,27 @@ impl AncestorFilter {
     }
 
     fn push(&mut self, tree: &DomTree, nid: NodeId) {
-        let mut hashes = Vec::new();
+        self.levels.push(self.hashes.len());
+        let hashes = &mut self.hashes;
+        let filter = &mut self.filter;
         tree.with_node(nid, |node| {
             if let Some(elem) = node.as_element() {
-                push_hash(
-                    &mut hashes,
-                    &mut self.filter,
-                    CssLocalName(elem.local.clone()).precomputed_hash(),
-                );
+                push_hash(hashes, filter, elem.local.precomputed_hash());
                 if let Some(id) = node.get_attribute("id") {
-                    push_hash(
-                        &mut hashes,
-                        &mut self.filter,
-                        CssString(id.to_string()).precomputed_hash(),
-                    );
+                    push_hash(hashes, filter, css_string_hash(id));
                 }
                 if let Some(class) = node.get_attribute("class") {
-                    for c in class.split_whitespace() {
-                        push_hash(
-                            &mut hashes,
-                            &mut self.filter,
-                            CssString(c.to_string()).precomputed_hash(),
-                        );
+                    for c in class_tokens(class) {
+                        push_hash(hashes, filter, css_string_hash(c));
                     }
                 }
             }
         });
-        self.levels.push(hashes);
     }
 
     fn pop(&mut self) {
-        if let Some(hashes) = self.levels.pop() {
-            for h in hashes {
+        if let Some(start) = self.levels.pop() {
+            for h in self.hashes.drain(start..) {
                 self.filter.remove_hash(h);
             }
         }
@@ -1100,6 +1170,65 @@ pub enum SelectorKey {
     Universal,
 }
 
+/// See `CompiledSelector::context_free`.
+fn selector_context_free(
+    sel: &parser::Selector<ObscuraSelector>,
+    attributes: &mut Vec<String>,
+) -> bool {
+    use parser::{Combinator, Component};
+    sel.iter_raw_match_order().all(|component| match component {
+        Component::LocalName(_)
+        | Component::ID(_)
+        | Component::Class(_)
+        | Component::ExplicitUniversalType
+        | Component::ExplicitAnyNamespace
+        | Component::ExplicitNoNamespace
+        | Component::DefaultNamespace(_)
+        | Component::Namespace(..)
+        | Component::Root
+        | Component::Invalid(_)
+        | Component::PseudoElement(_)
+        | Component::Combinator(
+            Combinator::Child | Combinator::Descendant | Combinator::PseudoElement,
+        ) => true,
+        Component::AttributeInNoNamespaceExists {
+            local_name_lower, ..
+        } => {
+            attributes.push(local_name_lower.0.to_string());
+            true
+        }
+        Component::AttributeInNoNamespace { local_name, .. } => {
+            attributes.push(local_name.0.as_ref().to_ascii_lowercase());
+            true
+        }
+        Component::AttributeOther(selector) => {
+            attributes.push(selector.local_name_lower.0.to_string());
+            true
+        }
+        Component::Negation(list) | Component::Is(list) | Component::Where(list) => list
+            .slice()
+            .iter()
+            .all(|alternative| selector_context_free(alternative, attributes)),
+        Component::NonTSPseudoClass(pseudo) => match pseudo {
+            PseudoClass::Link => {
+                attributes.push("href".into());
+                true
+            }
+            PseudoClass::Enabled | PseudoClass::Disabled => {
+                attributes.push("disabled".into());
+                true
+            }
+            PseudoClass::Visited
+            | PseudoClass::Active
+            | PseudoClass::Focus
+            | PseudoClass::FocusVisible
+            | PseudoClass::FocusWithin => true,
+            PseudoClass::Hover | PseudoClass::Checked => false,
+        },
+        _ => false,
+    })
+}
+
 /// A parsed selector plus its cached specificity and subject key.
 #[derive(Clone)]
 pub struct CompiledSelector {
@@ -1113,6 +1242,15 @@ impl CompiledSelector {
     /// The selector serialized back to CSS, for diagnostics.
     pub fn to_css_text(&self) -> String {
         self.sel.to_css_string()
+    }
+
+    /// Whether matching reads nothing of an element and its ancestors but
+    /// their namespaces, local names, ids, classes, whether each is the
+    /// root, and the attributes it pushes onto `attributes` (lowercase): no
+    /// sibling, child, `:has()`, scope, slot or live state. Elements whose
+    /// ancestor chains agree in those match it alike.
+    pub fn context_free(&self, attributes: &mut Vec<String>) -> bool {
+        selector_context_free(&self.sel, attributes)
     }
 
     /// Whether this selector is eligible to match a featureless shadow host.

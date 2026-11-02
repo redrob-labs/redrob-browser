@@ -107,6 +107,67 @@ impl From<crate::cef::DevTools> for Upstream {
     }
 }
 
+/// The relay's connection to Chromium, for the window's own calls that
+/// only a DevTools client may make ([`trigger_action`]).
+static WINDOW_HUB: std::sync::OnceLock<(Arc<Hub>, tokio::runtime::Handle)> =
+    std::sync::OnceLock::new();
+
+/// Have Chrome run extension `id`'s toolbar action on the page in Chrome
+/// window `window` (each of the window's pages is a Chrome window with one
+/// tab), as a click on Chrome's own toolbar icon does: the extension gets
+/// `activeTab` (cef/handlers/extensions.rs). `Extensions.triggerAction`
+/// answers DevTools clients only (CEF's own sessions are told "Method not
+/// allowed"), and names the page by its "tab" target.
+pub fn trigger_action(window: i64, id: String) {
+    let Some((hub, rt)) = WINDOW_HUB.get() else {
+        eprintln!("redrob-browser: extension action: no DevTools connection");
+        return;
+    };
+    let hub = hub.clone();
+    rt.spawn(async move {
+        if let Err(e) = trigger(&hub, window, &id).await {
+            eprintln!("redrob-browser: extension action: {e}");
+        }
+    });
+}
+
+async fn trigger(hub: &Hub, window: i64, id: &str) -> anyhow::Result<()> {
+    let tabs = hub
+        .call(
+            None,
+            "Target.getTargets",
+            json!({ "filter": [{ "type": "tab" }] }),
+        )
+        .await?;
+    let ids = tabs["targetInfos"]
+        .as_array()
+        .map(|all| {
+            all.iter()
+                .filter_map(|t| t["targetId"].as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for tab in ids {
+        let w = hub
+            .call(
+                None,
+                "Browser.getWindowForTarget",
+                json!({ "targetId": tab }),
+            )
+            .await;
+        if w.ok().and_then(|w| w["windowId"].as_i64()) == Some(window) {
+            hub.call(
+                None,
+                "Extensions.triggerAction",
+                json!({ "id": id, "targetId": tab }),
+            )
+            .await?;
+            return Ok(());
+        }
+    }
+    anyhow::bail!("no tab in Chrome window {window}")
+}
+
 /// Bind on loopback and serve clients against Chromium. Returns the relay's
 /// ws:// address, which carries its secret.
 // tungstenite fixes the handshake callback's error type.
@@ -114,6 +175,7 @@ impl From<crate::cef::DevTools> for Upstream {
 pub async fn start(upstream: Upstream, window: Window) -> anyhow::Result<String> {
     let pipe = matches!(upstream, Upstream::Pipe { .. });
     let hub = Hub::connect(upstream).await?;
+    let _ = WINDOW_HUB.set((hub.clone(), tokio::runtime::Handle::current()));
     // A pipe Chromium did not take stays silent: find out now. Silence
     // while Chromium's loop is not running (a window that cannot run its
     // passes) says nothing about the pipe.
@@ -655,6 +717,41 @@ async fn serve(
                 } else {
                     Err("the browser is closing".into())
                 }));
+                continue;
+            }
+            "Redrob.chromeCommand" => {
+                // A Chrome command (IDC_*, cef_command_ids.h) on the tab of
+                // this session or of `targetId`, as its menu entry runs it.
+                let target = params["targetId"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| session.as_deref().and_then(|s| hub.target_of(s)))
+                    .or_else(|| page.clone())
+                    .unwrap_or_default();
+                let command = params["command"].as_i64().unwrap_or(0) as i32;
+                // `dry`: only whether Chrome has it enabled for the page.
+                let dry = params["dry"].as_bool().unwrap_or(false);
+                let (tx, rx) = oneshot::channel();
+                let sent = command > 0
+                    && crate::cef::browser_of(&target).is_some_and(|b| {
+                        crate::cef::with_browser(b, move |browser| {
+                            let _ = tx.send(if dry {
+                                crate::cef::handlers::chrome::enabled(browser, command)
+                            } else {
+                                crate::cef::handlers::chrome::run(browser, command)
+                            });
+                        })
+                    });
+                let to_client = to_client.clone();
+                let (original, session) = (original.clone(), session.clone());
+                tokio::spawn(async move {
+                    let result = match tokio::time::timeout(Duration::from_secs(5), rx).await {
+                        _ if !sent => Err("no window tab for this target, or no command".into()),
+                        Ok(Ok(enabled)) => Ok(json!({ "enabled": enabled })),
+                        _ => Err("the window did not run the command".to_string()),
+                    };
+                    let _ = to_client.send(answer(&original, &session, result));
+                });
                 continue;
             }
             m if m.starts_with("Redrob.") => {

@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 use egui::ViewportId;
 
 use crate::cdp::{self, Event, Update, WindowId};
-use crate::model::{self, Bookmark, DownloadItem, HistoryEntry, Model, Tab, TabId};
+use crate::model::{self, Bookmark, Closed, DownloadItem, HistoryEntry, Model, Tab, TabId};
 use crate::profile::{Bounds, Profile, SavedWindow, SessionWindow};
 use crate::{relay, theme, updater, vault, Window, NEW_TAB};
 
@@ -35,11 +35,14 @@ pub struct Start {
 /// What a window asks of the browser.
 pub enum Request {
     NewWindow,
-    /// Open a new window holding this tab. `at`: its top-left on screen.
+    /// Open a new window holding these tabs. `at`: its top-left on screen.
     Detach {
-        moved: Box<Moved>,
+        moved: Box<Payload>,
         at: Option<egui::Pos2>,
     },
+    /// Open these addresses in a new window: a bookmarks folder's "Open
+    /// all in new window".
+    OpenWindow(Vec<String>),
     /// Close every window and keep them all in the saved session.
     Quit,
 }
@@ -50,6 +53,75 @@ pub struct Moved {
     pub login: Option<(String, tokio::sync::oneshot::Sender<serde_json::Value>)>,
 }
 
+/// What moves between windows: one tab, or a tab group with its tabs.
+pub enum Payload {
+    Tab(Moved),
+    Group(model::Group, Vec<Moved>),
+}
+
+/// What a tab drag holds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DragItem {
+    Tab(TabId),
+    /// A group, by its chip.
+    Group(model::GroupId),
+}
+
+/// A drag that began in a window's strip: the item, and where the pointer
+/// took hold of it (points from the item's top-left).
+#[derive(Clone, Copy, Debug)]
+pub struct DragStart {
+    pub item: DragItem,
+    pub grab: egui::Vec2,
+}
+
+/// A drag going on in this window's strip: the item follows the pointer,
+/// at `x` (window points) less `grab`.
+#[derive(Clone, Copy, Debug)]
+pub struct DragView {
+    pub item: DragItem,
+    pub x: f32,
+    pub grab: f32,
+}
+
+/// The strip as the window last drew it, in window points: where a tab
+/// dragged in from another window lands.
+#[derive(Clone, Debug)]
+pub struct StripLayout {
+    pub rect: egui::Rect,
+    /// Each tab or chip shown: its center, and the strip index a tab
+    /// dropped before it gets.
+    pub slots: Vec<(f32, usize)>,
+    /// Where the first item starts.
+    pub left: f32,
+}
+
+impl Default for StripLayout {
+    fn default() -> Self {
+        Self {
+            rect: egui::Rect::NOTHING,
+            slots: Vec::new(),
+            left: crate::strip::TAB_STRIP_LEFT,
+        }
+    }
+}
+
+/// Pulled this far (points) above or below its strip, a dragged tab
+/// leaves the window.
+pub const DETACH_AT: f32 = 40.0;
+
+/// A tab drag across windows (Chrome's tab drag controller).
+#[derive(Clone, Copy, Debug)]
+struct Drag {
+    item: DragItem,
+    grab: egui::Vec2,
+    /// The window that took the press: where the pointer is read from
+    /// where the platform does not say (cef/native.rs).
+    press: WindowId,
+    /// The window moving with the pointer, holding the item alone.
+    following: Option<WindowId>,
+}
+
 /// Lent to the window being drawn, and taken back after.
 #[derive(Default)]
 struct Shared {
@@ -58,7 +130,7 @@ struct Shared {
     bookmarks: Vec<Bookmark>,
     history: Vec<HistoryEntry>,
     downloads: Vec<DownloadItem>,
-    closed: Vec<(String, String)>,
+    closed: Vec<Closed>,
 }
 
 impl Shared {
@@ -125,6 +197,14 @@ pub struct Browser {
     session_saved_at: Instant,
     /// The session was saved for the last time; closing must not overwrite it.
     final_saved: bool,
+    /// A tab or group being dragged, from any window to any window.
+    drag: Option<Drag>,
+    /// The pointer on screen (points) and the button, as the window that
+    /// took the press saw it last (where the platform cannot say).
+    press_pointer: Option<(egui::Pos2, bool)>,
+    /// Windows, most recently in front last: a drop over windows that
+    /// overlap goes to the one in front.
+    front: Vec<WindowId>,
 }
 
 /// Linux: Xlib has one error handler per process, and winit's keeps the
@@ -340,6 +420,9 @@ impl Browser {
             session_sig: 0,
             session_saved_at: Instant::now(),
             final_saved: false,
+            drag: None,
+            press_pointer: None,
+            front: Vec::new(),
         };
 
         let mut restore = start.restore;
@@ -349,6 +432,7 @@ impl Browser {
                 active: 0,
                 bounds: None,
                 maximized: false,
+                groups: Vec::new(),
             });
         }
         for (i, saved) in restore.into_iter().enumerate() {
@@ -356,7 +440,7 @@ impl Browser {
             let mut w = browser.make_window(i == 0, builder);
             w.bounds = saved.bounds;
             w.maximized = saved.maximized;
-            w.restore(saved.tabs, saved.active);
+            w.restore(saved.tabs, saved.active, saved.groups);
             browser.windows.push(w);
         }
         let first = &mut browser.windows[0];
@@ -411,6 +495,7 @@ impl Browser {
             notice: None,
             address: String::new(),
             editing: false,
+            suggest: Default::default(),
             focus_address: false,
             focus_page: false,
             error: None,
@@ -438,9 +523,20 @@ impl Browser {
             bounds: None,
             maximized: false,
             session_dirty: false,
-            tab_drag: None,
+            drag_start: None,
+            drag_view: None,
+            strip_layout: StripLayout::default(),
+            screen_inner: None,
+            renaming: None,
+            take_keyboard: false,
             top_sites: None,
             new_tab_query: String::new(),
+            ext_popup: None,
+            ext_toggled: false,
+            ext_icons: Default::default(),
+            ext_read_at: 0.0,
+            site_info: None,
+            site_cert: false,
             last_title: String::new(),
         }
     }
@@ -683,6 +779,7 @@ impl Browser {
     fn show(&mut self, i: usize, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let w = &mut self.windows[i];
+        let press = self.drag.is_some_and(|d| d.press == w.wid);
         let focused = ctx.input(|inp| {
             let v = inp.viewport();
             if let (Some(outer), Some(inner)) = (v.outer_rect, v.inner_rect) {
@@ -692,6 +789,12 @@ impl Browser {
                     width: inner.width(),
                     height: inner.height(),
                 });
+            }
+            w.screen_inner = v.inner_rect;
+            if press {
+                if let (Some(r), Some(p)) = (v.inner_rect, inp.pointer.latest_pos()) {
+                    self.press_pointer = Some((p + r.min.to_vec2(), inp.pointer.primary_down()));
+                }
             }
             w.maximized = v.maximized.unwrap_or(false);
             v.focused == Some(true)
@@ -705,6 +808,13 @@ impl Browser {
         w.chrome_keyboard = focused;
         if focused {
             self.focused = w.wid;
+        }
+        if focused || w.page_focused {
+            let wid = w.wid;
+            if self.front.last() != Some(&wid) {
+                self.front.retain(|x| *x != wid);
+                self.front.push(wid);
+            }
         }
         self.shared.lend(w);
         crate::ime::before_pass(&ctx, focused);
@@ -749,16 +859,11 @@ impl Browser {
                 }
                 Request::Detach { moved, at } => {
                     let i = self.new_window(Some(from), at);
-                    let Moved { tab, login } = *moved;
-                    let w = &mut self.windows[i];
-                    let id = tab.id;
-                    if let Some(login) = login {
-                        w.agent_logins.insert(id, login);
-                    }
-                    w.model.insert_tab(tab, true);
-                    // Activate from the new window: Chromium gives the
-                    // page that window's size and keeps it on screen.
-                    w.activated();
+                    self.put(i, *moved, 0);
+                }
+                Request::OpenWindow(urls) => {
+                    let i = self.new_window(Some(from), None);
+                    self.windows[i].open_all(&urls);
                 }
                 Request::Quit => {
                     self.save_session();
@@ -767,6 +872,274 @@ impl Browser {
                 }
             }
         }
+    }
+
+    /// Take `item` out of window `i`, with what the window kept for its
+    /// tabs. The window shows its next tab.
+    fn take(&mut self, i: usize, item: DragItem) -> Option<Payload> {
+        let w = &mut self.windows[i];
+        let payload = match item {
+            DragItem::Tab(id) => {
+                let index = w.model.index_of(id)?;
+                let tab = w.model.take_tab(index)?;
+                Payload::Tab(Moved {
+                    login: w.agent_logins.remove(&id),
+                    tab,
+                })
+            }
+            DragItem::Group(g) => {
+                let (group, tabs) = w.model.take_group(g)?;
+                let moved = tabs
+                    .into_iter()
+                    .map(|tab| Moved {
+                        login: w.agent_logins.remove(&tab.id),
+                        tab,
+                    })
+                    .collect();
+                Payload::Group(group, moved)
+            }
+        };
+        if !w.model.tabs.is_empty() {
+            w.activated();
+        }
+        w.session_dirty = true;
+        Some(payload)
+    }
+
+    /// Put tabs from another window into window `i` at strip index `at`,
+    /// the moved tab on screen.
+    fn put(&mut self, i: usize, payload: Payload, at: usize) {
+        let w = &mut self.windows[i];
+        match payload {
+            Payload::Tab(Moved { tab, login }) => {
+                if let Some(login) = login {
+                    w.agent_logins.insert(tab.id, login);
+                }
+                w.model.insert_tab_at(tab, at);
+            }
+            Payload::Group(group, moved) => {
+                let mut tabs = Vec::new();
+                for Moved { tab, login } in moved {
+                    if let Some(login) = login {
+                        w.agent_logins.insert(tab.id, login);
+                    }
+                    tabs.push(tab);
+                }
+                w.model.insert_group(group, tabs, at, true);
+            }
+        }
+        // Activate from this window: Chromium moves the page into it,
+        // gives it this window's size and keeps it on screen.
+        w.activated();
+        w.session_dirty = true;
+    }
+
+    /// A window lost its last tab to a drag: it closes, as in Chrome.
+    fn retire(&mut self, ctx: &egui::Context, i: usize) {
+        if self.windows[i].viewport == ViewportId::ROOT {
+            // The process lives on for the other windows: the first only hides.
+            ctx.send_viewport_cmd_to(ViewportId::ROOT, egui::ViewportCommand::Visible(false));
+        }
+        self.close_window(i);
+        ctx.request_repaint_of(ViewportId::ROOT);
+    }
+
+    fn window_of(&self, wid: WindowId) -> Option<usize> {
+        self.windows.iter().position(|w| w.wid == wid)
+    }
+
+    fn holder_of(&self, item: DragItem) -> Option<usize> {
+        self.windows.iter().position(|w| match item {
+            DragItem::Tab(id) => w.model.index_of(id).is_some(),
+            DragItem::Group(g) => w.model.group(g).is_some(),
+        })
+    }
+
+    /// The pointer on screen in points, and whether the button is down.
+    fn pointer(&self, ctx: &egui::Context) -> Option<(egui::Pos2, bool)> {
+        match crate::cef::native::pointer() {
+            Some((x, y, down)) => {
+                let s = ctx.pixels_per_point().max(0.1);
+                Some((egui::pos2(x as f32 / s, y as f32 / s), down))
+            }
+            None => self.press_pointer,
+        }
+    }
+
+    /// Where a window's top-left goes so that `item`, the first in its
+    /// strip, sits under the pointer at `p` where it was held.
+    fn origin_for(&self, p: egui::Pos2, grab: egui::Vec2) -> egui::Pos2 {
+        let left = self
+            .windows
+            .first()
+            .map_or(crate::strip::TAB_STRIP_LEFT, |w| w.strip_layout.left);
+        p - egui::vec2(left + grab.x, crate::strip::TAB_TOP + grab.y)
+    }
+
+    /// Chrome's tab drag, run every pass: a tab (or a group) slides in its
+    /// strip; pulled out it becomes a window of its own that follows the
+    /// pointer; over any window's strip it goes into that strip where the
+    /// pointer is, and a window it leaves empty closes. Its page comes
+    /// along (its native window is re-parented, cdp.rs).
+    fn drag_tick(&mut self, ctx: &egui::Context) {
+        for w in &mut self.windows {
+            if let Some(s) = w.drag_start.take() {
+                self.drag = Some(Drag {
+                    item: s.item,
+                    grab: s.grab,
+                    press: w.wid,
+                    following: None,
+                });
+                self.press_pointer = None;
+            }
+        }
+        let Some(mut d) = self.drag else {
+            return;
+        };
+        for w in &mut self.windows {
+            w.drag_view = None;
+        }
+        let (Some(holder), Some((p, down))) = (self.holder_of(d.item), self.pointer(ctx)) else {
+            self.drag = None;
+            return;
+        };
+        if !down {
+            // Let go: where it is, it stays.
+            cdp::trace(format_args!("drag {:?}: dropped at {p:?}", d.item));
+            self.drag = None;
+            self.press_pointer = None;
+            for w in &mut self.windows {
+                ctx.request_repaint_of(w.viewport);
+            }
+            return;
+        }
+        // Keep the pointer read while the button is down.
+        ctx.request_repaint_of(ViewportId::ROOT);
+        let following = d.following == Some(self.windows[holder].wid);
+        let strip_of = |w: &Window| {
+            let inner = w.screen_inner?;
+            Some(w.strip_layout.rect.translate(inner.min.to_vec2()))
+        };
+        // The strip under the pointer: its own (with room to pull before
+        // it leaves), or another window's, the one in front first.
+        let mut target = None;
+        let mut best = -1i64;
+        for (i, w) in self.windows.iter().enumerate() {
+            let Some(strip) = strip_of(w) else { continue };
+            let band = if i == holder {
+                if following {
+                    continue;
+                }
+                strip.expand2(egui::vec2(0.0, DETACH_AT))
+            } else {
+                strip
+            };
+            if !band.contains(p) {
+                continue;
+            }
+            let rank = self
+                .front
+                .iter()
+                .position(|x| *x == w.wid)
+                .map_or(0, |r| r as i64 + 1);
+            if i == holder {
+                // Its own strip wins while the pointer is still in it.
+                target = Some(i);
+                break;
+            }
+            if rank > best {
+                best = rank;
+                target = Some(i);
+            }
+        }
+        let n_items = |w: &Window| match d.item {
+            DragItem::Tab(_) => w.model.tabs.len(),
+            DragItem::Group(g) => {
+                w.model.tabs.len() - w.model.group_range(g).map_or(0, |r| r.len()) + 1
+            }
+        };
+        match target {
+            // A window's only tab (or group) moves the window at once, as in Chrome.
+            Some(i) if i == holder && n_items(&self.windows[i]) <= 1 => {
+                d.following = Some(self.windows[i].wid);
+                let at = self.origin_for(p, d.grab);
+                let w = &self.windows[i];
+                ctx.send_viewport_cmd_to(w.viewport, egui::ViewportCommand::OuterPosition(at));
+                cdp::trace(format_args!("drag {:?}: its window follows", d.item));
+            }
+            Some(i) if i == holder => {
+                let w = &mut self.windows[i];
+                let x = p.x - w.screen_inner.map_or(0.0, |r| r.min.x);
+                w.drag_view = Some(DragView {
+                    item: d.item,
+                    x,
+                    grab: d.grab.x,
+                });
+                ctx.request_repaint_of(w.viewport);
+            }
+            Some(i) => {
+                // Into another window's strip, at the pointer.
+                let w = &self.windows[i];
+                let x = p.x - w.screen_inner.map_or(0.0, |r| r.min.x);
+                let at = w
+                    .strip_layout
+                    .slots
+                    .iter()
+                    .find(|(c, _)| *c > x - d.grab.x + 24.0)
+                    .map_or(w.model.tabs.len(), |(_, idx)| *idx);
+                let viewport = w.viewport;
+                let Some(payload) = self.take(holder, d.item) else {
+                    self.drag = None;
+                    return;
+                };
+                self.put(i, payload, at);
+                cdp::trace(format_args!(
+                    "drag {:?}: from window {} into window {} at {at} ({} windows)",
+                    d.item,
+                    self.windows[holder].wid,
+                    self.windows[i].wid,
+                    self.windows.len()
+                ));
+                let wv = &mut self.windows[i];
+                wv.drag_view = Some(DragView {
+                    item: d.item,
+                    x,
+                    grab: d.grab.x,
+                });
+                ctx.send_viewport_cmd_to(viewport, egui::ViewportCommand::Focus);
+                ctx.request_repaint_of(viewport);
+                d.following = None;
+                if self.windows[holder].model.tabs.is_empty() {
+                    self.retire(ctx, holder);
+                }
+            }
+            None if following => {
+                let at = self.origin_for(p, d.grab);
+                let w = &self.windows[holder];
+                ctx.send_viewport_cmd_to(w.viewport, egui::ViewportCommand::OuterPosition(at));
+            }
+            None => {
+                // Out of its strip: a window of its own, under the pointer.
+                let at = self.origin_for(p, d.grab);
+                if n_items(&self.windows[holder]) <= 1 {
+                    d.following = Some(self.windows[holder].wid);
+                    cdp::trace(format_args!("drag {:?}: its window follows", d.item));
+                    let w = &self.windows[holder];
+                    ctx.send_viewport_cmd_to(w.viewport, egui::ViewportCommand::OuterPosition(at));
+                } else if let Some(payload) = self.take(holder, d.item) {
+                    let from_wid = self.windows[holder].wid;
+                    let i = self.new_window(self.window_of(from_wid), Some(at));
+                    self.put(i, payload, 0);
+                    d.following = Some(self.windows[i].wid);
+                    cdp::trace(format_args!(
+                        "drag {:?}: out to window {}",
+                        d.item, self.windows[i].wid
+                    ));
+                    ctx.request_repaint_of(ViewportId::ROOT);
+                }
+            }
+        }
+        self.drag = Some(d);
     }
 
     /// Tell the relay which window each tab is in, when that changed.
@@ -808,7 +1181,10 @@ impl Browser {
         for w in &self.windows {
             w.model.active.hash(&mut h);
             for t in &w.model.tabs {
-                (t.id, &t.url, &t.title, t.agent).hash(&mut h);
+                (t.id, &t.url, &t.title, t.agent, t.group).hash(&mut h);
+            }
+            for g in &w.model.groups {
+                (g.id, &g.title, g.color, g.collapsed).hash(&mut h);
             }
             if let Some(b) = w.bounds {
                 (
@@ -913,6 +1289,7 @@ impl Browser {
     fn after(&mut self, ctx: &egui::Context) {
         self.sync_minimized(ctx);
         let windows = self.windows.len();
+        self.drag_tick(ctx);
         self.handle_requests(ctx);
         // The windows' commands go to Chromium, and Chromium does its work.
         cdp::process(&mut self.command_rx);

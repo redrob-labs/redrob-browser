@@ -208,6 +208,13 @@ impl Fonts {
         }
     }
 
+    /// Whether this is the set `Fonts::take(web_fonts, load_emoji)` gives.
+    pub(crate) fn is_set(&self, web_fonts: &[WebFont], load_emoji: bool) -> bool {
+        self.signature == signature(web_fonts, load_emoji)
+            && self.load_emoji == load_emoji
+            && self.web_fonts == web_fonts
+    }
+
     /// Whether this set is the one `key` was taken from (web font files
     /// compared by identity, which the key keeps alive).
     pub(crate) fn matches_key(&self, key: &FontSetKey) -> bool {

@@ -18,6 +18,12 @@
 //! egui has no name for, the Korean 한/영 and 한자 keys, go to the input
 //! method (ime.rs) on the way. While a page has the keyboard, its window
 //! takes them and Chromium's input method does.
+//!
+//! And it keeps Chrome's own dialogs and bubbles (print preview, the
+//! extension install dialog, the screen picker, the QR code bubble) above
+//! the browser window they belong to ([`own_dialog`]): Chrome makes them
+//! transient for the page's window, a child the window manager does not
+//! know, so a click on the browser window used to bury them.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -99,6 +105,8 @@ const NAMES: &[&str] = &[
     "REDROB_DROP",
     "_NET_WM_STATE",
     "_NET_WM_STATE_HIDDEN",
+    "_NET_WM_PID",
+    "_NET_ACTIVE_WINDOW",
 ];
 
 fn x() -> Option<&'static X> {
@@ -116,6 +124,14 @@ fn x() -> Option<&'static X> {
                 .atom;
             atoms.insert(*n, a);
         }
+        // Top-level windows created and mapped on the screen: Chrome's
+        // dialogs among them (own_dialog).
+        let _ = conn.change_window_attributes(
+            root,
+            &x11rb::protocol::xproto::ChangeWindowAttributesAux::new()
+                .event_mask(EventMask::SUBSTRUCTURE_NOTIFY),
+        );
+        let _ = conn.flush();
         let x = X { conn, root, atoms };
         std::thread::Builder::new()
             .name("xdnd".into())
@@ -279,6 +295,19 @@ fn run() {
         let mut st = STATE.lock().unwrap_or_else(|e| e.into_inner());
         let st = st.get_or_insert_with(State::default);
         match ev {
+            Event::CreateNotify(e) if e.parent == x.root && !e.override_redirect => {
+                // Watch it: Chrome sets its pid and transient-for after.
+                let _ = x.conn.change_window_attributes(
+                    e.window,
+                    &x11rb::protocol::xproto::ChangeWindowAttributesAux::new()
+                        .event_mask(EventMask::PROPERTY_CHANGE),
+                );
+                let _ = x.conn.flush();
+                own_dialog(x, st, e.window);
+            }
+            Event::PropertyNotify(e) if e.atom == u32::from(AtomEnum::WM_TRANSIENT_FOR) => {
+                own_dialog(x, st, e.window);
+            }
             Event::ClientMessage(e) => client_message(x, st, &e),
             // The window manager unmaps a minimized window. Chromium does
             // not see its page hidden with it (a child window keeps its
@@ -357,6 +386,71 @@ fn run() {
             }
             _ => {}
         }
+    }
+}
+
+/// A 32-bit property of `w`, its first value.
+fn prop32(x: &X, w: Window, prop: u32, kind: impl Into<u32>) -> Option<u32> {
+    x.conn
+        .get_property(false, w, prop, kind.into(), 0, 1)
+        .ok()?
+        .reply()
+        .ok()?
+        .value32()?
+        .next()
+}
+
+/// The top-level window `w` is in (itself when it is one).
+fn toplevel_of(x: &X, mut w: Window) -> Window {
+    for _ in 0..16 {
+        let Some(t) = x.conn.query_tree(w).ok().and_then(|c| c.reply().ok()) else {
+            return w;
+        };
+        if t.parent == x.root || t.parent == 0 {
+            return w;
+        }
+        w = t.parent;
+    }
+    w
+}
+
+/// `w` is a top-level window Chrome made (a dialog, a bubble, the task
+/// manager; Chromium's X connection made it, as it made the pages): keep it
+/// above the browser window it belongs to. Chrome names the page's window
+/// (a child of a browser window) as its WM_TRANSIENT_FOR, or nothing, and
+/// the window manager stacks it under the browser window on the next click.
+fn own_dialog(x: &X, st: &State, w: Window) {
+    if st.targets.contains_key(&w) {
+        return;
+    }
+    let mask = x.conn.setup().resource_id_mask;
+    let chromium = st
+        .targets
+        .values()
+        .find_map(|t| t.shown)
+        .map(|h| h.0 as u32 & !mask);
+    if chromium != Some(w & !mask) {
+        return;
+    }
+    let for_ = prop32(x, w, AtomEnum::WM_TRANSIENT_FOR.into(), AtomEnum::WINDOW);
+    if for_.is_some_and(|f| st.targets.contains_key(&f)) {
+        return;
+    }
+    let active = prop32(x, x.root, atom(x, "_NET_ACTIVE_WINDOW"), AtomEnum::WINDOW);
+    let top = for_
+        .map(|f| toplevel_of(x, f))
+        .filter(|t| st.targets.contains_key(t))
+        .or(active.filter(|a| st.targets.contains_key(a)))
+        .or_else(|| st.targets.keys().next().copied());
+    if let Some(top) = top {
+        let _ = x.conn.change_property32(
+            PropMode::REPLACE,
+            w,
+            AtomEnum::WM_TRANSIENT_FOR,
+            AtomEnum::WINDOW,
+            &[top],
+        );
+        let _ = x.conn.flush();
     }
 }
 

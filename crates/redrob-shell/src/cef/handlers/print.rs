@@ -1,9 +1,11 @@
 //! Print (Ctrl+P).
 //!
-//! Windows and macOS: Chromium opens the system print dialog. Linux: CEF
-//! has no print dialog of its own there (it expects the app to bring a GTK
-//! one), so the page is saved as a PDF in the downloads folder, shown in the
-//! downloads panel and opened in the system's PDF viewer, which prints.
+//! Chrome style pages (Windows, Linux): Chrome's print preview, with the
+//! system's printers and "Save as PDF". macOS (Alloy style): the system
+//! print dialog. Alloy style on Linux has no print dialog (CEF expects the
+//! app to bring a GTK one), so there the page is saved as a PDF in the
+//! downloads folder, shown in the downloads panel and opened in the
+//! system's PDF viewer, which prints.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -16,7 +18,7 @@ pub fn print(sink: &Sink, browser: &Browser) {
     let Some(host) = browser.host() else {
         return;
     };
-    if !cfg!(target_os = "linux") {
+    if !cfg!(target_os = "linux") || crate::cef::native::chrome_style() {
         host.print();
         return;
     }

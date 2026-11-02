@@ -1,3 +1,6 @@
+//! The tab's request handler: the languages pages are asked for, and links
+//! of schemes Chromium does not know (mailto:, tel:).
+//!
 //! The languages pages are asked for follow the window's language at once.
 //!
 //! `navigator.languages` and new pages follow Chromium's preference
@@ -51,7 +54,9 @@ pub fn replacement(sent: &str, now: Lang) -> Option<String> {
 }
 
 wrap_resource_request_handler! {
-    struct Requests;
+    struct Requests {
+        sink: crate::cef::Sink,
+    }
 
     impl ResourceRequestHandler {
         fn on_before_resource_load(
@@ -70,13 +75,161 @@ wrap_resource_request_handler! {
             }
             ReturnValue::CONTINUE
         }
+
+        fn on_protocol_execution(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            allow_os_execution: Option<&mut ::std::os::raw::c_int>,
+        ) {
+            // mailto:, tel:, zoommtg: and the rest go to the program the
+            // system has for them once the person agrees, as in Chrome
+            // ("Open xdg-email?"): the window asks (Event::External).
+            // Chromium itself does nothing with them.
+            if let Some(allow) = allow_os_execution {
+                *allow = 0;
+            }
+            let url = request.map(|r| super::text(&r.url())).unwrap_or_default();
+            let (Some(browser), true) = (browser, external_ok(&url)) else {
+                return;
+            };
+            let origin = frame
+                .map(|f| super::text(&f.url()))
+                .and_then(|u| super::site_of(&u))
+                .unwrap_or_default();
+            ask(&self.sink, browser.identifier(), origin, url);
+        }
     }
 }
 
+/// Open `url` with another program as the site's saved choice says, or ask.
+fn ask(sink: &crate::cef::Sink, browser_id: i32, origin: String, url: String) {
+    match super::features()
+        .sites
+        .get(&origin, &external_key(&url))
+        .as_deref()
+    {
+        Some("allow") => super::external::launch(&url),
+        Some("block") => {}
+        _ => sink.send(browser_id, crate::cdp::Event::External { origin, url }),
+    }
+}
+
+/// Schemes Chromium loads itself.
+pub fn chromium_scheme(scheme: &str) -> bool {
+    matches!(
+        scheme,
+        "http"
+            | "https"
+            | "file"
+            | "ftp"
+            | "data"
+            | "blob"
+            | "about"
+            | "chrome"
+            | "chrome-extension"
+            | "chrome-untrusted"
+            | "chrome-search"
+            | "chrome-error"
+            | "chrome-native"
+            | "chrome-distiller"
+            | "isolated-app"
+            | "devtools"
+            | "view-source"
+            | "javascript"
+            | "ws"
+            | "wss"
+            | "filesystem"
+            | "redrob"
+    ) || scheme.starts_with("web+")
+        || scheme.starts_with("ext+")
+}
+
+/// Whether a site registered itself for `scheme` (registerProtocolHandler):
+/// Chromium sends those links to it. Call on CEF's UI thread.
+fn registered(scheme: &str) -> bool {
+    use cef::{
+        ImplDictionaryValue as _, ImplListValue as _, ImplPreferenceManager as _, ImplValue as _,
+    };
+    let Some(list) = crate::cef::request_context()
+        .and_then(|c| {
+            c.preference(Some(&CefString::from(
+                "custom_handlers.registered_protocol_handlers",
+            )))
+        })
+        .and_then(|v| v.list())
+    else {
+        return false;
+    };
+    (0..list.size()).any(|i| {
+        list.dictionary(i)
+            .map(|d| super::text(&d.string(Some(&CefString::from("protocol")))) == scheme)
+            .unwrap_or(false)
+    })
+}
+
+/// The key a site's "always open these links" is saved under.
+pub fn external_key(url: &str) -> String {
+    let scheme = url
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    format!("external.{scheme}")
+}
+
+/// Whether a URL of a scheme Chromium does not know may go to the system's
+/// handler: any but the schemes that run code or read files, which Chrome
+/// never hands out either.
+pub fn external_ok(url: &str) -> bool {
+    let scheme = url
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    !scheme.is_empty()
+        && !matches!(
+            scheme.as_str(),
+            "javascript" | "vbscript" | "file" | "data" | "shell" | "ms-msdt" | "search-ms"
+        )
+}
+
 wrap_request_handler! {
-    struct Handler;
+    struct Handler {
+        sink: crate::cef::Sink,
+    }
 
     impl RequestHandler {
+        fn on_before_browse(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _user_gesture: ::std::os::raw::c_int,
+            _is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            // A link only another program opens: ask, and leave the page
+            // where it is (Chromium would show ERR_UNKNOWN_URL_SCHEME). A
+            // scheme a site registered (registerProtocolHandler) is the
+            // site's, and Chromium sends it there.
+            let url = request.map(|r| super::text(&r.url())).unwrap_or_default();
+            let scheme = super::external::scheme(&url);
+            if chromium_scheme(&scheme) || !external_ok(&url) || registered(&scheme) {
+                return 0;
+            }
+            let (Some(browser), Some(_)) = (browser, frame) else {
+                return 0;
+            };
+            let origin = browser
+                .main_frame()
+                .map(|f| super::text(&f.url()))
+                .and_then(|u| super::site_of(&u))
+                .unwrap_or_default();
+            ask(&self.sink, browser.identifier(), origin, url);
+            1
+        }
+
         fn resource_request_handler(
             &self,
             _browser: Option<&mut Browser>,
@@ -87,12 +240,12 @@ wrap_request_handler! {
             _request_initiator: Option<&CefString>,
             _disable_default_handling: Option<&mut ::std::os::raw::c_int>,
         ) -> Option<ResourceRequestHandler> {
-            Some(Requests::new())
+            Some(Requests::new(self.sink.clone()))
         }
     }
 }
 
 /// The tab's request handler.
-pub fn new() -> RequestHandler {
-    Handler::new()
+pub fn new(sink: crate::cef::Sink) -> RequestHandler {
+    Handler::new(sink)
 }

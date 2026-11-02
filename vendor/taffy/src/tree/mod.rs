@@ -34,6 +34,8 @@ pub use taffy_tree::{TaffyError, TaffyResult, TaffyTree};
 pub use taffy_tree::{InlineLayoutFn, InlineLayoutHost};
 #[cfg(all(feature = "taffy_tree", feature = "block_layout", feature = "float_layout", feature = "std"))]
 pub use taffy_tree::current_leaf_float_bands;
+#[cfg(all(feature = "taffy_tree", feature = "std"))]
+pub use taffy_tree::algorithm_runs;
 
 #[cfg(feature = "detailed_layout_info")]
 pub use layout::DetailedLayoutInfo;

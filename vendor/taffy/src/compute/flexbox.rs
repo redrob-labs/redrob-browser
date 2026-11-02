@@ -1030,6 +1030,21 @@ fn determine_container_main_size(
                 let size = longest_line_length + main_content_box_inset;
                 if lines.len() > 1 {
                     f32_max(size, main_axis_available_space)
+                } else if constants.is_wrap {
+                    // A multi-line container is sized to fit-content: an item wider than the
+                    // available space (a 100% basis that was cyclic while the container was
+                    // measured, laid out at its max-content) does not widen it past the
+                    // available space unless its minimum does (Chrome).
+                    let longest_minimum: f32 = lines
+                        .iter()
+                        .flat_map(|line| line.items.iter())
+                        .map(|child| {
+                            let padding_border_sum = (child.padding + child.border).main_axis_sum(constants.dir);
+                            (child.resolved_minimum_main_size + child.margin.main_axis_sum(constants.dir))
+                                .max(padding_border_sum)
+                        })
+                        .fold(0.0, f32_max);
+                    size.min(f32_max(main_axis_available_space, longest_minimum + main_content_box_inset))
                 } else {
                     size
                 }
@@ -2585,10 +2600,20 @@ fn perform_absolute_layout_on_absolute_children(
             }
         };
 
-        let location = match constants.is_row {
+        let mut location = match constants.is_row {
             true => Point { x: offset_main, y: offset_cross },
             false => Point { x: offset_cross, y: offset_main },
         };
+        if left.is_none() && right.is_none() || top.is_none() && bottom.is_none() {
+            if let Some(probe) = tree.static_probe_offset(child, node) {
+                if left.is_none() && right.is_none() {
+                    location.x = probe.x + resolved_margin.left;
+                }
+                if top.is_none() && bottom.is_none() {
+                    location.y = probe.y + resolved_margin.top;
+                }
+            }
+        }
         let scrollbar_size = Size {
             width: if overflow.y == Overflow::Scroll { scrollbar_width } else { 0.0 },
             height: if overflow.x == Overflow::Scroll { scrollbar_width } else { 0.0 },

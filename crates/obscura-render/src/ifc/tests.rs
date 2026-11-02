@@ -369,7 +369,7 @@ fn keep_all_never_inserts_controls_inside_grapheme_clusters() {
     let text = tree.children(keep)[0];
     let shaped: String = laid.text_runs[&text]
         .iter()
-        .map(|(_, content)| content.as_str())
+        .map(|(_, content)| &**content)
         .collect();
     assert_eq!(shaped, source);
 }

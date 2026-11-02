@@ -45,7 +45,16 @@ pub mod prof {
     pub const STYLE_SHARE_HIT: usize = 9;
     pub const STYLE_SHARE_MISS: usize = 10;
     pub const STYLE_UNCHANGED: usize = 11;
-    const NAMES: [&str; 12] = [
+    /// A layout-tree style a repair pass actually changed.
+    pub const STYLE_SET: usize = 12;
+    /// A node `resolve_clip_rects` walked.
+    pub const CLIP_WALK: usize = 13;
+    /// A node whose rect changed since the retained layout.
+    pub const RECT_MOVED: usize = 14;
+    /// An element whose context-free matches came from the cache.
+    pub const MATCH_HIT: usize = 15;
+    pub const MATCH_MISS: usize = 16;
+    const NAMES: [&str; 17] = [
         "finalize_relayout",
         "push_item",
         "finalize",
@@ -58,9 +67,14 @@ pub mod prof {
         "style_share_hit",
         "style_share_miss",
         "style_unchanged",
+        "style_set",
+        "clip_walk",
+        "rect_moved",
+        "match_hit",
+        "match_miss",
     ];
-    static NANOS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
-    static COUNTS: [AtomicU64; 12] = [const { AtomicU64::new(0) }; 12];
+    static NANOS: [AtomicU64; 17] = [const { AtomicU64::new(0) }; 17];
+    static COUNTS: [AtomicU64; 17] = [const { AtomicU64::new(0) }; 17];
 
     pub fn enabled() -> bool {
         static ON: OnceLock<bool> = OnceLock::new();
@@ -84,12 +98,19 @@ pub mod prof {
         }
     }
 
-    /// A phase mark: now, and how many inline formatting contexts were laid
-    /// out so far.
-    pub fn mark() -> (std::time::Instant, u64) {
+    /// A phase mark: now, how many inline formatting contexts were laid out
+    /// (low 32 bits) and layout-tree styles changed (high 32 bits) so far,
+    /// and Taffy's algorithm runs (measure, perform, and their children).
+    pub fn mark() -> (std::time::Instant, u64, (u64, u64, u64, u64)) {
         (
             std::time::Instant::now(),
-            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed),
+            COUNTS[IFC_LAYOUT].load(Ordering::Relaxed) & 0xffff_ffff
+                | COUNTS[STYLE_SET].load(Ordering::Relaxed) << 32,
+            if enabled() {
+                taffy::tree::algorithm_runs()
+            } else {
+                (0, 0, 0, 0)
+            },
         )
     }
 
@@ -117,6 +138,10 @@ pub use border::{
 };
 
 pub mod dom;
+mod style_table;
+pub use style_table::StyleTable;
+mod node_map;
+pub use node_map::NodeMap;
 pub(crate) mod ifc;
 pub use dom::{
     layout_dom, layout_dom_with_images, layout_dom_with_resources, AttributeStyleMutation,
@@ -1607,10 +1632,6 @@ pub struct LayoutStyle {
     /// as buttons are atomic inline boxes but still use ordinary grid `normal`
     /// stretch behavior in Chromium and Gecko.
     pub(crate) has_replaced_sizing: bool,
-    /// A replaced element's percentage width is held as 0px while its flex
-    /// ancestor's inline size is still cyclic. It keeps the percentage's
-    /// zero min-content contribution (a compressible replaced element).
-    pub(crate) deferred_percent_width: bool,
     pub margin: Edges,
     /// Which margin sides are `auto` (top, right, bottom, left). `margin: 0
     /// auto` / `margin-inline: auto` centering needs a real Auto margin, which
@@ -2312,6 +2333,12 @@ impl ReplacedIntrinsic {
 /// inline-flex/grid, so this cannot be inferred from `Display::Inline` alone.
 pub(crate) fn is_inline_level_box(style: &LayoutStyle) -> bool {
     style.display == Display::Inline || style.is_inline_block
+}
+
+/// Whether `blockify_outer_display` would change `style` (it leaves a
+/// blockified box that is not inline-level as it is).
+pub(crate) fn blockify_changes(style: &LayoutStyle) -> bool {
+    !style.blockified || is_inline_level_box(style)
 }
 
 /// Apply CSS Display blockification while preserving the inner display mode.

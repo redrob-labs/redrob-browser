@@ -5,14 +5,20 @@
 //! The window draws what they report with `ui::Prompts`; ops the engine does
 //! not handle itself go to [`run_op`].
 
+pub mod chrome;
 pub mod context_menu;
 pub mod cookies;
 pub mod download;
+pub mod extensions;
+pub mod external;
 pub mod find;
 pub mod jsdialog;
 pub mod languages;
 pub mod permission;
 pub mod print;
+pub mod reader;
+pub mod site_info;
+pub mod spelling;
 pub mod ui;
 pub mod widevine;
 pub mod zoom;
@@ -100,6 +106,7 @@ pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
             sink.send(browser.identifier(), Event::Zoom(percent));
         }
         Op::Print => print::print(sink, browser),
+        Op::Reader => reader::toggle(browser),
         _ => {}
     }
 }

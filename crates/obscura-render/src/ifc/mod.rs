@@ -240,12 +240,29 @@ pub(crate) struct Ifc {
     /// over whole (see `IfcStore::create`): it already has the line layout
     /// `adopt_layout_of` would give it.
     pub(crate) reused_laid: bool,
+    /// Changes whenever what `fragments` reads may have changed (see
+    /// `touch`).
+    pub(crate) epoch: u64,
+    /// `fragments` at an origin, under the epoch it was made in.
+    pub(crate) fragments_cache: Option<((u64, u32, u32), std::sync::Arc<geom::Fragments>)>,
+    /// `fragments` at the zero origin, under the epoch it was made in.
+    pub(crate) relative_fragments: Option<(u64, std::sync::Arc<geom::Fragments>)>,
 }
 
+/// The next `Ifc::epoch`.
+static NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 impl Ifc {
+    /// Its final lines, their positions or its spans may change: forget the
+    /// fragments made from them.
+    pub(crate) fn touch(&mut self) {
+        self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Take the line layout another IFC of the same template ended its
     /// layout with, for a box whose Taffy layout is reused unchanged.
     pub(crate) fn adopt_layout_of(&mut self, laid: Box<Ifc>) {
+        self.touch();
         let laid = *laid;
         self.layout = laid.layout;
         self.final_layout = laid.final_layout;
@@ -276,7 +293,7 @@ pub(crate) struct IfcStore {
     pub(crate) raster: paint::GlyphRaster,
     /// The shaped, not yet laid out IFCs this store created, with what they
     /// were built from. A later layout reuses one whose inputs are equal.
-    pub(crate) templates: Vec<build::IfcTemplate>,
+    pub(crate) templates: crate::HashMap<usize, build::IfcTemplate>,
 }
 
 impl Default for IfcStore {
@@ -289,7 +306,7 @@ impl Default for IfcStore {
             by_node: Default::default(),
             #[cfg(feature = "paint")]
             raster: Default::default(),
-            templates: Vec::new(),
+            templates: Default::default(),
         }
     }
 }
@@ -313,13 +330,38 @@ impl IfcStore {
         self.ifcs.len()
     }
 
+    /// Whether this store's fonts are the set `web_fonts` and `load_emoji`
+    /// select (a retained store is only reused with the same fonts).
+    pub(crate) fn has_fonts(&self, web_fonts: &[fonts::WebFont], load_emoji: bool) -> bool {
+        self.fonts
+            .as_ref()
+            .is_some_and(|fonts| fonts.is_set(web_fonts, load_emoji))
+    }
+
+    /// Drop IFC `index` of a retained store whose box is built again or
+    /// gone, offering its template and line layout to the IFCs built next
+    /// (see `build::offer_template`).
+    pub(crate) fn release(&mut self, index: usize) {
+        let Some(ifc) = self.ifcs.get_mut(index).and_then(Option::take) else {
+            return;
+        };
+        if let Some(template) = self.templates.remove(&index) {
+            build::offer_template(template, ifc);
+        }
+    }
+
+    /// The number of IFCs that are still held.
+    pub(crate) fn live(&self) -> usize {
+        self.ifcs.iter().filter(|ifc| ifc.is_some()).count()
+    }
+
     /// Lay out `text` in `style` outside the box tree (the generated text of
     /// a positioned pseudo-element its host paints), at `width` or its
     /// max-content width. Returns the IFC and its (width, height).
     pub(crate) fn standalone(
         &mut self,
         tree: &obscura_dom::tree::DomTree,
-        styles: &crate::HashMap<NodeId, crate::LayoutStyle>,
+        styles: &crate::StyleTable,
         owner: NodeId,
         style: &crate::LayoutStyle,
         text: &str,
@@ -336,6 +378,7 @@ impl IfcStore {
             params,
         )?;
         let ifc = self.get_mut(index)?;
+        ifc.touch();
         ifc.layout.break_all_lines(width);
         ifc.layout.align(
             ifc.params.align,
@@ -383,7 +426,7 @@ impl Drop for IfcStore {
     fn drop(&mut self) {
         self.deactivate();
         build::retain_templates(
-            std::mem::take(&mut self.templates),
+            std::mem::take(&mut self.templates).into_values().collect(),
             std::mem::take(&mut self.ifcs),
         );
         if let Some(fonts) = self.fonts.take() {
