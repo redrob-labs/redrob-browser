@@ -4291,6 +4291,8 @@ fn prepare_dom_with_retained_styles_with_animation_state_inner(
             transforms: std::mem::take(&mut previous.layout.transforms),
             projective_transforms: std::mem::take(&mut previous.layout.projective_transforms),
             clip_inputs: previous.layout.clip_inputs,
+            clip_styles: std::mem::take(&mut previous.layout.clip_styles),
+            clip_recheck: previous.layout.clip_recheck.take(),
             previous_rendered,
             derived: previous_derived,
             counters_used: previous.layout.counters_used,

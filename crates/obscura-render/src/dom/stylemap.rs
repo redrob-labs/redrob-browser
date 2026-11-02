@@ -26,6 +26,11 @@ pub(crate) struct StyleMap {
     changed: Vec<NodeId>,
     /// A write the map cannot attribute to nodes (`values_mut`) happened.
     all_changed: bool,
+    /// Every node written since the map was made (may repeat); unlike
+    /// `changed`, never taken.
+    written: Vec<NodeId>,
+    /// A write the map cannot attribute to nodes happened since it was made.
+    written_all: bool,
     /// Writes are not recorded (a map no box tree is built from).
     untracked: bool,
     /// Copies of styles from before their first write, when kept.
@@ -116,6 +121,12 @@ impl StyleMap {
         (!self.all_changed).then_some(&self.changed)
     }
 
+    /// Every node written since the map was made (may repeat); `None` when
+    /// writes are not recorded or one could not be attributed.
+    pub(crate) fn written_since_new(&self) -> Option<&[NodeId]> {
+        (!self.untracked && !self.written_all).then_some(&self.written)
+    }
+
     /// How many writes were noted since the last `take_changes`.
     pub(crate) fn changed_len(&self) -> usize {
         if self.all_changed {
@@ -158,6 +169,7 @@ impl StyleMap {
             return;
         }
         self.changed.push(id);
+        self.written.push(id);
         if let Some(before) = self.before.as_mut() {
             if !before.contains_key(&id) {
                 if before.len() >= BEFORE_LIMIT {
@@ -241,6 +253,7 @@ impl StyleMap {
         &mut self,
     ) -> std::collections::hash_map::ValuesMut<'_, NodeId, crate::LayoutStyle> {
         self.all_changed |= !self.untracked;
+        self.written_all = true;
         self.map.values_mut()
     }
 
@@ -248,6 +261,7 @@ impl StyleMap {
         &mut self,
     ) -> std::collections::hash_map::IterMut<'_, NodeId, crate::LayoutStyle> {
         self.all_changed |= !self.untracked;
+        self.written_all = true;
         self.map.iter_mut()
     }
 

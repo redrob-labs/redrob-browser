@@ -329,6 +329,11 @@ pub struct DomLayout {
     /// The root font size and viewport `clip_rects` and the transforms were
     /// resolved with (see `RetainedGeometry`).
     pub(crate) clip_inputs: (f32, (f32, f32)),
+    /// By node index: what `resolve_clip_rects` read of each style.
+    pub(crate) clip_styles: Vec<Option<ClipStyle>>,
+    /// Nodes whose style was written after the clips were resolved (their
+    /// `clip_styles` entry may be stale); `None`: unknown.
+    pub(crate) clip_recheck: Option<Vec<NodeId>>,
     /// Per-word geometry for text nodes: a text DOM node lays out as one
     /// taffy leaf per word (see `build_text_words`), each wrapping
     /// independently within its container, so its rendered content is a list
@@ -1248,6 +1253,11 @@ pub(crate) struct RetainedGeometry {
     pub(crate) projective_transforms: HashMap<NodeId, crate::Mat4>,
     /// The root font size and viewport the clips were resolved with.
     pub(crate) clip_inputs: (f32, (f32, f32)),
+    /// By node index: what `resolve_clip_rects` read of each style.
+    pub(crate) clip_styles: Vec<Option<ClipStyle>>,
+    /// Nodes whose style was written after the clips were resolved (their
+    /// `clip_styles` entry may be stale); `None`: unknown.
+    pub(crate) clip_recheck: Option<Vec<NodeId>>,
     /// The rendered tree of that layout.
     pub(crate) previous_rendered: Option<std::rc::Rc<FlatTree>>,
     /// What the render of that layout derived from it.
@@ -1870,6 +1880,8 @@ impl DomLayout {
                 .and_then(|style| style.font_size)
                 .unwrap_or(16.0);
             self.clip_inputs = (root_font_size, viewport);
+            // A sampled transform is not in `clip_styles`.
+            self.clip_recheck = None;
             resolve_clip_rects(
                 tree,
                 root_id,
@@ -3398,12 +3410,85 @@ pub(crate) struct ClipDirty {
     subtree: Vec<bool>,
 }
 
+/// The fields of a style `resolve_clip_rects` reads (for a node and what it
+/// hands its children).
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct ClipStyle {
+    flags: [bool; 8],
+    display: crate::Display,
+    border: crate::Edges,
+    radii: crate::BorderRadii,
+    individual_translate: Option<(crate::Dimension, crate::Dimension)>,
+    individual_translate_expressions: [Option<String>; 2],
+    individual_rotate: Option<f32>,
+    individual_scale: Option<(f32, f32)>,
+    transform_ops: Vec<crate::TransformOp>,
+    transform_origin: Option<(crate::Dimension, crate::Dimension)>,
+    perspective: Option<f32>,
+    perspective_origin: Option<(crate::Dimension, crate::Dimension)>,
+    font_size: Option<f32>,
+}
+
+impl ClipStyle {
+    pub(crate) fn of(style: &crate::LayoutStyle) -> Self {
+        Self {
+            flags: [
+                style.overflow_hidden,
+                style.overflow_axes_set,
+                style.overflow_clip_x,
+                style.overflow_clip_y,
+                style.overflow_propagated_to_viewport,
+                style.is_inline_block,
+                style.is_replaced_box,
+                style.preserve_3d,
+            ],
+            display: style.display,
+            border: style.border,
+            radii: style.border_model.radii,
+            individual_translate: style.individual_translate,
+            individual_translate_expressions: style.individual_translate_expressions.clone(),
+            individual_rotate: style.individual_rotate,
+            individual_scale: style.individual_scale,
+            transform_ops: style.transform_ops.clone(),
+            transform_origin: style.transform_origin,
+            perspective: style.perspective,
+            perspective_origin: style.perspective_origin,
+            font_size: style.font_size,
+        }
+    }
+
+    /// `clip_styles` of every styled node.
+    pub(crate) fn all(
+        tree: &DomTree,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+    ) -> Vec<Option<ClipStyle>> {
+        let mut all = vec![None; tree.node_slot_count()];
+        for (id, style) in styles {
+            if let Some(slot) = all.get_mut(id.index()) {
+                *slot = Some(Self::of(style));
+            }
+        }
+        all
+    }
+}
+
+/// What `ClipDirty::new` compares styles with: the previous layout's
+/// `clip_styles` (updated in place), the nodes written since, and those the
+/// previous layout wrote after its clips.
+pub(crate) struct ClipStyleChanges<'a> {
+    pub(crate) clip_styles: &'a mut Vec<Option<ClipStyle>>,
+    pub(crate) written: &'a [NodeId],
+    pub(crate) recheck: &'a [NodeId],
+}
+
 impl ClipDirty {
     fn new(
         tree: &DomTree,
         old_rects: &HashMap<NodeId, Rect>,
         rects: &HashMap<NodeId, Rect>,
         fresh: &HashSet<NodeId>,
+        styles: &HashMap<NodeId, crate::LayoutStyle>,
+        style_changes: Option<ClipStyleChanges<'_>>,
     ) -> Self {
         let slots = tree.node_slot_count();
         let mut dirty = Self {
@@ -3422,6 +3507,25 @@ impl ClipDirty {
             }
         }
         let document = tree.document();
+        if let Some(changes) = style_changes {
+            // Every style that may differ from the one the previous clips
+            // read: compare what the walk reads.
+            changes.clip_styles.resize(slots, None);
+            for &id in fresh.iter().chain(changes.written).chain(changes.recheck) {
+                if id == document {
+                    continue;
+                }
+                let Some(slot) = changes.clip_styles.get_mut(id.index()) else {
+                    continue;
+                };
+                let now = styles.get(&id).map(ClipStyle::of);
+                if *slot != now || !old_rects.contains_key(&id) {
+                    *slot = now;
+                    dirty.mark(tree, id, Self::STYLE);
+                }
+            }
+            return dirty;
+        }
         for &id in fresh {
             // The document has no box; a retained layout names it fresh
             // whenever it restyles anything.
@@ -11776,6 +11880,8 @@ fn layout_dom_once(
         .unwrap_or(16.0);
     let clip_inputs = (root_font_size, viewport);
     let mut derived_seed = None;
+    let mut clip_styles = Vec::new();
+    let mut clip_styles_kept = false;
     if let Some(root_id) = root {
         let mut derived_changes = None;
         let dirty = retained_geometry
@@ -11783,7 +11889,20 @@ fn layout_dom_once(
             .filter(|geometry| geometry.clip_inputs == clip_inputs)
             .zip(fresh_styles.as_ref())
             .map(|(mut geometry, fresh)| {
-                let mut dirty = ClipDirty::new(tree, &geometry.rects, &rects, fresh);
+                let written = styles.written_since_new();
+                let mut old_clip_styles = std::mem::take(&mut geometry.clip_styles);
+                let style_changes = written
+                    .zip(geometry.clip_recheck.as_deref())
+                    .filter(|_| !old_clip_styles.is_empty())
+                    .map(|(written, recheck)| ClipStyleChanges {
+                        clip_styles: &mut old_clip_styles,
+                        written,
+                        recheck,
+                    });
+                clip_styles_kept = style_changes.is_some();
+                let mut dirty =
+                    ClipDirty::new(tree, &geometry.rects, &rects, fresh, &styles, style_changes);
+                clip_styles = old_clip_styles;
                 // The derived geometry of the previous render can be kept
                 // where this walk does not go once the walk also goes where
                 // the rendered tree changed.
@@ -11863,6 +11982,10 @@ fn layout_dom_once(
         }
     }
 
+    if !clip_styles_kept {
+        clip_styles = ClipStyle::all(tree, &styles);
+    }
+    let written_at_clips = styles.written_since_new().map(<[NodeId]>::len);
     phase_marks.push(("clips", crate::prof::mark()));
     for index in ifc_items.ifc_nodes.clone() {
         let Some(root) = ifc_items.ifc.get(index).map(|ifc| ifc.root) else {
@@ -11966,6 +12089,9 @@ fn layout_dom_once(
                 needs_emoji_font,
             )
         });
+    let clip_recheck = written_at_clips
+        .zip(styles.written_since_new())
+        .map(|(at, written)| written[at.min(written.len())..].to_vec());
     (
         DomLayout {
             rects,
@@ -11987,6 +12113,8 @@ fn layout_dom_once(
             transforms,
             projective_transforms,
             clip_inputs,
+            clip_styles,
+            clip_recheck,
             text_runs,
             text_engine: engine,
             ifc: std::mem::take(&mut ifc_items.ifc),
