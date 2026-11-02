@@ -456,6 +456,11 @@ wrap_life_span_handler! {
             set_place(self.ctx.tab, None);
             handlers::extensions::forget_tab(self.ctx.tab);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));
+            // A page Chrome closed itself (an agent's `Target.closeTarget`)
+            // gets no `do_close` when it is a Chrome window of its own
+            // (cef/host.rs): the window learns of it here. A tab the window
+            // closed is gone from it already.
+            self.ctx.sink.send_tab(self.ctx.tab, Event::Closed);
         }
     }
 }

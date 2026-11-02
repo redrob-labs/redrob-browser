@@ -136,7 +136,9 @@ wrap_browser_view_delegate! {
             is_devtools: ::std::os::raw::c_int,
         ) -> Option<BrowserViewDelegate> {
             if is_devtools == 1 {
-                return None;
+                // A DevTools browser: a plain one in a window of its own
+                // (`on_popup_browser_view_created`).
+                return Some(DevToolsView::new());
             }
             let key = client_key(client?);
             let tab = POPUP_CLIENTS.with_borrow_mut(|p| p.remove(&key))?;
@@ -150,8 +152,18 @@ wrap_browser_view_delegate! {
             popup_browser_view: Option<&mut BrowserView>,
             is_devtools: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
+            if is_devtools == 1 {
+                let Some(view) = popup_browser_view else { return 0 };
+                let page = _browser_view
+                    .and_then(|v| v.browser())
+                    .and_then(|b| b.main_frame())
+                    .map(|f| super::handlers::text(&f.url()))
+                    .unwrap_or_default();
+                let mut d = DevToolsWindow::new(view.clone(), devtools_title(&page));
+                return window_create_top_level(Some(&mut d)).is_some() as _;
+            }
             let tab = CREATING.with_borrow_mut(Option::take);
-            let (Some(tab), Some(view), 0) = (tab, popup_browser_view, is_devtools) else {
+            let (Some(tab), Some(view)) = (tab, popup_browser_view) else {
                 // DevTools, or a page Chrome opened by itself: CEF's own
                 // window (client.rs `stray_client` adopts the latter).
                 return 0;
@@ -222,6 +234,77 @@ wrap_window_delegate! {
         }
 
         fn can_resize(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            1
+        }
+
+        fn can_close(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            1
+        }
+    }
+}
+
+/// The DevTools window's title for the page at `url`, as Chrome names it.
+fn devtools_title(url: &str) -> String {
+    let page = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    format!("DevTools - {page}")
+}
+
+wrap_browser_view_delegate! {
+    struct DevToolsView {}
+
+    impl ViewDelegate {}
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            // CEF refuses Alloy for DevTools.
+            sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME.into()
+        }
+    }
+}
+
+wrap_window_delegate! {
+    struct DevToolsWindow {
+        view: BrowserView,
+        title: String,
+    }
+
+    impl ViewDelegate {}
+
+    impl PanelDelegate {}
+
+    impl WindowDelegate {
+        fn on_window_created(&self, window: Option<&mut Window>) {
+            let Some(w) = window else { return };
+            w.add_child_view(Some(&mut View::from(&self.view)));
+            w.set_title(Some(&CefString::from(self.title.as_str())));
+            w.show();
+        }
+
+        fn initial_bounds(&self, _window: Option<&mut Window>) -> Rect {
+            Rect {
+                x: 0,
+                y: 0,
+                width: 1100,
+                height: 760,
+            }
+        }
+
+        fn initial_show_state(&self, _window: Option<&mut Window>) -> ShowState {
+            sys::cef_show_state_t::CEF_SHOW_STATE_NORMAL.into()
+        }
+
+        fn can_resize(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            1
+        }
+
+        fn can_maximize(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
+            1
+        }
+
+        fn can_minimize(&self, _window: Option<&mut Window>) -> ::std::os::raw::c_int {
             1
         }
 
