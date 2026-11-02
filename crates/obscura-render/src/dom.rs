@@ -2915,6 +2915,10 @@ fn resolve_inline_percentage_heights(
     place: &mut dyn FnMut(&mut TaffyTree<usize>, &[taffy::NodeId], bool),
     // The boxes with a percentage-height style, when indexed.
     indexed: Option<&[(taffy::NodeId, NodeId)]>,
+    // Before the first layout: only the boxes whose parent's content height
+    // its style fixes (`fixed_content_height`), which need no layout to
+    // resolve. After it: only the others.
+    before_layout: bool,
 ) -> bool {
     // Only a box with a percentage height can change, and only the layouts on
     // the path to it are read: walk those paths alone.
@@ -2997,6 +3001,17 @@ fn resolve_inline_percentage_heights(
         .iter()
         .map(|&(_, parent_box, _)| fixed_content_height(taffy_tree, parent_box))
         .collect();
+    // A height its parent's style fixes is resolved before the first layout,
+    // which lays the box out at it at once; one that needs a layout is
+    // resolved after it.
+    let (acting, from_style): (Vec<_>, Vec<_>) = acting
+        .into_iter()
+        .zip(from_style)
+        .filter(|(_, height)| height.is_some() == before_layout)
+        .unzip();
+    if acting.is_empty() {
+        return false;
+    }
     let parents: Vec<taffy::NodeId> = acting
         .iter()
         .zip(&from_style)
@@ -10723,6 +10738,17 @@ fn layout_dom_once(
                     hosts
                 });
 
+            resolve_inline_percentage_heights(
+                tree,
+                &mut taffy_tree,
+                taffy_root,
+                &id_map,
+                &styles,
+                &definite_height_nodes,
+                &mut |_: &mut TaffyTree<usize>, _: &[taffy::NodeId], _: bool| {},
+                percent_height_boxes.as_deref(),
+                true,
+            );
             #[cfg(feature = "paint")]
             {
                 // Table used-width pass. A grid table is built at width:auto, so
@@ -11332,6 +11358,7 @@ fn layout_dom_once(
                         tree.place_deferred(nodes, children, &mut measure)
                     },
                     percent_height_boxes.as_deref(),
+                    false,
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
@@ -11506,6 +11533,8 @@ fn layout_dom_once(
                     &mut |tree: &mut TaffyTree<usize>, nodes: &[taffy::NodeId], children: bool| {
                         tree.place_deferred(nodes, children, &mut measure)
                     },
+                    None,
+                    false,
                 ) {
                     let _ =
                         taffy_tree.compute_layout_with_measure(taffy_root, available, &mut measure);
