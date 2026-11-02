@@ -9,13 +9,14 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use cef::{
     rc::Rc as _, sys, wrap_client, wrap_dev_tools_message_observer, wrap_display_handler,
     wrap_focus_handler, wrap_life_span_handler, wrap_load_handler, Browser, BrowserSettings,
-    CefString, Client, ContextMenuHandler, DevToolsMessageObserver, DictionaryValue,
-    DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource, Frame, ImplBrowser,
-    ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver, ImplDisplayHandler, ImplFocusHandler,
-    ImplFrame, ImplLifeSpanHandler, ImplLoadHandler, JsdialogHandler, KeyboardHandler,
-    LifeSpanHandler, LoadHandler, PermissionHandler, PopupFeatures, Registration, RequestHandler,
-    WindowInfo, WindowOpenDisposition, WrapClient, WrapDevToolsMessageObserver, WrapDisplayHandler,
-    WrapFocusHandler, WrapLifeSpanHandler, WrapLoadHandler,
+    CefString, Client, CommandHandler, ContextMenuHandler, DevToolsMessageObserver,
+    DictionaryValue, DisplayHandler, DownloadHandler, FindHandler, FocusHandler, FocusSource,
+    Frame, ImplBrowser, ImplBrowserHost, ImplClient, ImplDevToolsMessageObserver,
+    ImplDisplayHandler, ImplFocusHandler, ImplFrame, ImplLifeSpanHandler, ImplLoadHandler,
+    JsdialogHandler, KeyboardHandler, LifeSpanHandler, LoadHandler, PermissionHandler,
+    PopupFeatures, Registration, RequestHandler, WindowInfo, WindowOpenDisposition, WrapClient,
+    WrapDevToolsMessageObserver, WrapDisplayHandler, WrapFocusHandler, WrapLifeSpanHandler,
+    WrapLoadHandler,
 };
 use serde_json::{json, Value};
 
@@ -110,6 +111,7 @@ pub fn new(ctx: TabCtx) -> Client {
         handlers::context_menu::new(ctx.sink.clone()),
         handlers::find::new(ctx.sink.clone()),
         handlers::languages::new(),
+        handlers::chrome::handler(ctx.sink.clone()),
     )
 }
 
@@ -126,6 +128,7 @@ wrap_client! {
         context_menu: ContextMenuHandler,
         find: FindHandler,
         request: RequestHandler,
+        command: CommandHandler,
     }
 
     impl Client {
@@ -162,6 +165,9 @@ wrap_client! {
         }
         fn request_handler(&self) -> Option<RequestHandler> {
             Some(self.request.clone())
+        }
+        fn command_handler(&self) -> Option<CommandHandler> {
+            Some(self.command.clone())
         }
     }
 }
@@ -292,6 +298,7 @@ wrap_life_span_handler! {
             let Some(browser) = browser else { return };
             let id = browser.identifier();
             self.ctx.sink.bind(id, self.ctx.tab);
+            super::keep_browser(id, Some(browser));
             let tab = self.ctx.tab;
             POPUPS.with_borrow_mut(|p| p.retain(|_, t| *t != tab));
             CREATED.with_borrow_mut(|c| {
@@ -315,6 +322,7 @@ wrap_life_span_handler! {
             if let Some(b) = browser {
                 self.ctx.sink.unbind(b.identifier());
                 super::forget_browser(b.identifier());
+                super::keep_browser(b.identifier(), None);
             }
             set_place(self.ctx.tab, None);
             CLOSED.with_borrow_mut(|c| c.push(self.ctx.tab));

@@ -132,6 +132,33 @@ pub fn browser_of(target: &str) -> Option<i32> {
     targets().lock().ok()?.get(target).copied()
 }
 
+/// Every open browser by its id, so code off CEF's UI thread (the relay)
+/// can reach one through [`with_browser`].
+fn browsers() -> &'static Mutex<HashMap<i32, cef::Browser>> {
+    static BROWSERS: OnceLock<Mutex<HashMap<i32, cef::Browser>>> = OnceLock::new();
+    BROWSERS.get_or_init(Default::default)
+}
+
+/// `browser` was created; `None` once the browser `id` closed.
+pub(crate) fn keep_browser(id: i32, browser: Option<&cef::Browser>) {
+    if let Ok(mut b) = browsers().lock() {
+        match browser {
+            Some(browser) => b.insert(id, browser.clone()),
+            None => b.remove(&id),
+        };
+    }
+}
+
+/// Run `job` with the browser `id` on CEF's UI thread; false when no such
+/// browser is open.
+pub fn with_browser(id: i32, job: impl FnOnce(&cef::Browser) + Send + 'static) -> bool {
+    let Some(browser) = browsers().lock().ok().and_then(|b| b.get(&id).cloned()) else {
+        return false;
+    };
+    handlers::on_ui(move || job(&browser));
+    true
+}
+
 /// Run a CEF subprocess (renderer, GPU, utility, zygote) when this process
 /// is one, and return its exit code. Call first thing in `main`, before
 /// anything else touches the process (logging, locks, windows).

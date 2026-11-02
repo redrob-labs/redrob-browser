@@ -53,6 +53,19 @@ fn ko(en: &str) -> Option<&'static str> {
         "Manage windows on all your displays" => "모든 디스플레이의 창 관리",
         "Know when you're actively using this device" => "기기를 사용 중인지 확인",
         "Use another feature of your computer" => "컴퓨터의 다른 기능 사용",
+        "Open a type of link" => "특정 종류의 링크 열기",
+        "Edit files and folders on your device" => "기기의 파일과 폴더 수정",
+        "Use your keyboard" => "키보드 사용",
+        "Use and move your mouse pointer" => "마우스 포인터 사용 및 이동",
+        "Look for and connect to devices on your local network" => {
+            "로컬 네트워크의 기기 찾기 및 연결"
+        }
+        "Use your motion sensors" => "동작 센서 사용",
+        "Play protected content" => "보호된 콘텐츠 재생",
+        "Use your virtual reality device" => "가상 현실 기기 사용",
+        "Sign you in with an identity service" => "ID 서비스로 로그인",
+        "Install itself as an app" => "앱으로 설치",
+        "Scroll and zoom the tab you share" => "공유하는 탭 스크롤 및 확대/축소",
         "Back" => "뒤로",
         "Forward" => "앞으로",
         "Open link in new tab" => "새 탭에서 링크 열기",

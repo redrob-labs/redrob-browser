@@ -5,6 +5,7 @@
 //! The window draws what they report with `ui::Prompts`; ops the engine does
 //! not handle itself go to [`run_op`].
 
+pub mod chrome;
 pub mod context_menu;
 pub mod cookies;
 pub mod download;

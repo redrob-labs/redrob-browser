@@ -657,6 +657,29 @@ async fn serve(
                 }));
                 continue;
             }
+            "Redrob.chromeCommand" => {
+                // A Chrome command (IDC_*, cef_command_ids.h) on the tab of
+                // this session or of `targetId`, as its menu entry runs it.
+                let target = params["targetId"]
+                    .as_str()
+                    .map(str::to_string)
+                    .or_else(|| session.as_deref().and_then(|s| hub.target_of(s)))
+                    .or_else(|| page.clone())
+                    .unwrap_or_default();
+                let command = params["command"].as_i64().unwrap_or(0) as i32;
+                let ran = command > 0
+                    && crate::cef::browser_of(&target).is_some_and(|b| {
+                        crate::cef::with_browser(b, move |browser| {
+                            crate::cef::handlers::chrome::run(browser, command);
+                        })
+                    });
+                let _ = to_client.send(reply(if ran {
+                    Ok(json!({}))
+                } else {
+                    Err("no window tab for this target, or no command".into())
+                }));
+                continue;
+            }
             m if m.starts_with("Redrob.") => {
                 let _ = to_client.send(reply(Err(format!("'{m}' wasn't found"))));
                 continue;

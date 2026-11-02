@@ -70,7 +70,40 @@ wrap_resource_request_handler! {
             }
             ReturnValue::CONTINUE
         }
+
+        fn on_protocol_execution(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            allow_os_execution: Option<&mut ::std::os::raw::c_int>,
+        ) {
+            // mailto:, tel:, zoommtg: and the rest go to the program the
+            // system has for them, after Chrome's "Open ...?" dialog, as in
+            // Chrome. Without this a page with a resource handler gets
+            // ERR_UNKNOWN_URL_SCHEME.
+            let url = request.map(|r| super::text(&r.url())).unwrap_or_default();
+            if let Some(allow) = allow_os_execution {
+                *allow = external_ok(&url) as _;
+            }
+        }
     }
+}
+
+/// Whether a URL of a scheme Chromium does not know may go to the system's
+/// handler: any but the schemes that run code or read files, which Chrome
+/// never hands out either.
+pub fn external_ok(url: &str) -> bool {
+    let scheme = url
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    !scheme.is_empty()
+        && !matches!(
+            scheme.as_str(),
+            "javascript" | "vbscript" | "file" | "data" | "shell" | "ms-msdt" | "search-ms"
+        )
 }
 
 wrap_request_handler! {

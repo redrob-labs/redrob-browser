@@ -24,6 +24,24 @@ pub struct Place {
 /// hidden flag at creation).
 const AWAY: i32 = -30_000;
 
+/// The runtime style of every page (docs/CEF.md, docs/FEATURES.md): Chrome
+/// style, so pages get Chrome's own features (print preview, extensions,
+/// autofill, passwords, chrome:// pages, choosers, page info). macOS: CEF
+/// always uses Alloy for a page inside a parent NSView.
+pub fn style() -> cef::RuntimeStyle {
+    let s = if chrome_style() {
+        cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_CHROME
+    } else {
+        cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY
+    };
+    s.into()
+}
+
+/// Whether pages run in Chrome style ([`style`]).
+pub fn chrome_style() -> bool {
+    !cfg!(target_os = "macos") && std::env::var_os("REDROB_ALLOY").is_none()
+}
+
 /// How a browser's page is created: a child of `place.parent`, hidden
 /// unless `shown`.
 pub fn child_info(place: Place, shown: bool) -> WindowInfo {
@@ -53,8 +71,7 @@ pub fn child_info(place: Place, shown: bool) -> WindowInfo {
         }
     };
     let info = WindowInfo {
-        // Alloy style: a page without Chrome's own window around it.
-        runtime_style: cef::sys::cef_runtime_style_t::CEF_RUNTIME_STYLE_ALLOY.into(),
+        runtime_style: style(),
         ..Default::default()
     }
     .set_as_child(raw_handle(place.parent), &bounds);
