@@ -289,6 +289,12 @@ fn ko(en: &str) -> Option<&'static str> {
             "주소창에 > 다음에 쓴 요청이 여기로 가요. 이 컴퓨터 안의 주소만 쓸 수 있어요."
         }
         "Profile folder" => "프로필 폴더",
+        "About Redrob Browser" => "레드롭 브라우저 정보",
+        "Version {0}, with Chromium {1}" => "버전 {0}, Chromium {1} 기반",
+        "Open-source licences" => "오픈소스 라이선스",
+        "The licences come with the installed browser." => {
+            "라이선스는 설치된 브라우저에 함께 들어 있어요."
+        }
         "Update now" => "지금 업데이트",
         "Restart to update" => "다시 시작해서 업데이트",
         "Redrob Browser {0} is ready." => "Redrob Browser {0}이 준비됐어요.",

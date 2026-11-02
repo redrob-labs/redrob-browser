@@ -13,10 +13,13 @@ use obscura_mcp::window::Cdp;
 
 #[derive(clap::Subcommand)]
 pub enum TabCmd {
-    /// List open tabs: id, URL, title, window and whether an agent opened it.
+    /// List open tabs: id, URL, title, window, whether an agent opened it
+    /// and whether it is its window's front tab.
     List,
-    /// Open a new agent tab and print its id.
+    /// Open a new agent tab behind the person's current one and print its id.
     Open { url: String },
+    /// Bring a tab to the front of its window.
+    Activate { id: String },
     /// Navigate a tab and wait for it to load.
     Go { id: String, url: String },
     /// Print the page as an outline of elements with [ref=N] handles.
@@ -60,16 +63,18 @@ pub async fn run(cmd: TabCmd) -> anyhow::Result<()> {
         TabCmd::List => {
             for t in c.list().await? {
                 println!(
-                    "{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}",
                     t.id,
                     t.url,
                     t.title,
                     t.window.map(|w| format!("window {w}")).unwrap_or_default(),
-                    if t.agent { "agent" } else { "" }
+                    if t.agent { "agent" } else { "" },
+                    if t.active { "active" } else { "" }
                 );
             }
         }
         TabCmd::Open { url } => println!("{}", c.open(&url).await?),
+        TabCmd::Activate { id } => c.activate(&id).await?,
         TabCmd::Go { id, url } => c.go(&id, &url).await?,
         TabCmd::Read { id } => print!("{}", c.read(&id).await?),
         TabCmd::Click { id, r#ref } => c.click(&id, r#ref).await?,

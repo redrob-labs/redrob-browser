@@ -40,7 +40,7 @@ command -v "$patchelf" >/dev/null || { echo "patchelf is needed (apt-get install
 
 if [ "$build" = 1 ]; then
   # Exactly the release job's build.
-  cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render,redrob-shell/media
+  cargo build --release -p obscura-cli -p redrob-shell --features obscura-cli/render
 fi
 
 target="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release"

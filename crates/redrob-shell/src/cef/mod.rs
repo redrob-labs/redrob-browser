@@ -18,7 +18,7 @@ pub mod osr;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -140,9 +140,89 @@ pub struct Config {
     pub cache: Option<PathBuf>,
 }
 
-static DEVTOOLS_PORT: AtomicU16 = AtomicU16::new(0);
 static STARTED: AtomicBool = AtomicBool::new(false);
 static CACHE: OnceLock<Option<PathBuf>> = OnceLock::new();
+
+/// How agents reach Chromium's DevTools protocol: through the window's relay
+/// only (relay.rs), which holds this.
+pub enum DevTools {
+    /// `--remote-debugging-pipe`: Chromium reads commands on fd 3 and writes
+    /// replies on fd 4, in this process. No port: nothing else on the
+    /// machine can connect, and the relay's checks cannot be bypassed.
+    #[cfg(unix)]
+    Pipe {
+        commands: std::fs::File,
+        replies: std::fs::File,
+    },
+    /// A loopback port (Windows, where Chromium's copy of the C runtime only
+    /// sees pipes handed over at process start).
+    Port(u16),
+}
+
+static DEVTOOLS: Mutex<Option<DevTools>> = Mutex::new(None);
+/// The browser process passes `--remote-debugging-pipe` (cef/app.rs).
+pub(crate) static PIPE: AtomicBool = AtomicBool::new(false);
+
+/// Put Chromium's DevTools pipe on fds 3 and 4. Call first thing in the
+/// browser process, before anything else opens a file (which would take
+/// those numbers).
+pub fn reserve_devtools_pipe() {
+    #[cfg(unix)]
+    {
+        fn pipe() -> Option<(libc::c_int, libc::c_int)> {
+            let mut fds = [0; 2];
+            // SAFETY: fds has room for the two descriptors.
+            (unsafe { libc::pipe(fds.as_mut_ptr()) } == 0).then_some((fds[0], fds[1]))
+        }
+        /// Move `fd` to `to`, close-on-exec: Chromium uses it in this process,
+        /// and no program this one starts may inherit it.
+        fn place(fd: libc::c_int, to: libc::c_int) -> bool {
+            // SAFETY: plain descriptor calls on descriptors this function owns.
+            unsafe {
+                if fd != to && libc::dup2(fd, to) < 0 {
+                    return false;
+                }
+                if fd != to {
+                    libc::close(fd);
+                }
+                libc::fcntl(to, libc::F_SETFD, libc::FD_CLOEXEC) == 0
+            }
+        }
+        /// Our end: above the low numbers, close-on-exec.
+        fn ours(fd: libc::c_int) -> Option<std::fs::File> {
+            use std::os::fd::FromRawFd;
+            // SAFETY: fd is a fresh pipe end; the File owns its copy.
+            unsafe {
+                let high = libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10);
+                libc::close(fd);
+                (high >= 0).then(|| std::fs::File::from_raw_fd(high))
+            }
+        }
+        let (Some((cmd_r, cmd_w)), Some((rep_r, rep_w))) = (pipe(), pipe()) else {
+            return;
+        };
+        // Our ends first, so the dup2s below cannot land on them.
+        let (Some(commands), Some(replies)) = (ours(cmd_w), ours(rep_r)) else {
+            return;
+        };
+        let (cmd_r, rep_w) = {
+            // SAFETY: as above.
+            let r = unsafe { libc::fcntl(cmd_r, libc::F_DUPFD_CLOEXEC, 10) };
+            let w = unsafe { libc::fcntl(rep_w, libc::F_DUPFD_CLOEXEC, 10) };
+            unsafe {
+                libc::close(cmd_r);
+                libc::close(rep_w);
+            }
+            (r, w)
+        };
+        if cmd_r < 0 || rep_w < 0 || !place(cmd_r, 3) || !place(rep_w, 4) {
+            return;
+        }
+        *DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(DevTools::Pipe { commands, replies });
+        PIPE.store(true, Ordering::SeqCst);
+    }
+}
 
 /// Start Chromium in this (the browser) process.
 pub fn start(config: Config) -> anyhow::Result<()> {
@@ -151,13 +231,19 @@ pub fn start(config: Config) -> anyhow::Result<()> {
         std::fs::create_dir_all(c)?;
     }
     let _ = CACHE.set(config.cache.clone());
-    // Agents and `redrob-browser tab` reach the tabs through Chromium's own
-    // DevTools server, on loopback only, on a port nothing else holds.
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .unwrap_or(0);
-    DEVTOOLS_PORT.store(port, Ordering::SeqCst);
+    // Agents and `redrob-browser tab` reach the tabs through the window's
+    // relay, which speaks to Chromium over the DevTools pipe; only where
+    // there is none, over a loopback port nothing else holds.
+    let port = if PIPE.load(Ordering::SeqCst) {
+        0
+    } else {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map(|a| a.port())
+            .unwrap_or(0);
+        *DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner()) = Some(DevTools::Port(port));
+        port
+    };
 
     let resources = resources_dir();
     let mut settings = cef::Settings {
@@ -233,10 +319,17 @@ pub fn on_terminate(quit: impl Fn() + Send + 'static) {
     let _ = quit;
 }
 
-/// Chromium's DevTools port on 127.0.0.1, once Chromium runs.
-pub fn devtools_port() -> Option<u16> {
-    let port = DEVTOOLS_PORT.load(Ordering::SeqCst);
-    (STARTED.load(Ordering::SeqCst) && port != 0).then_some(port)
+/// Chromium's DevTools connection, once Chromium runs; handed out once, to
+/// the relay.
+pub fn take_devtools() -> Option<DevTools> {
+    if !STARTED.load(Ordering::SeqCst) {
+        return None;
+    }
+    let mut d = DEVTOOLS.lock().unwrap_or_else(|e| e.into_inner());
+    match d.as_ref()? {
+        DevTools::Port(0) => None,
+        _ => d.take(),
+    }
 }
 
 /// The request context for the window's tabs: the profile's cookies,

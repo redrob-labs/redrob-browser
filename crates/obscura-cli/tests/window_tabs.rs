@@ -1,7 +1,10 @@
 //! `redrob-browser tab ...` and the MCP `window_*` tools against a real
 //! Chromium DevTools endpoint, which speaks what the window's CEF tabs do.
-//! Skipped when no Chromium is found (`REDROB_TEST_CHROMIUM`, or Playwright's
-//! download under ~/.cache/ms-playwright).
+//!
+//! With `REDROB_TEST_WINDOW=<path to redrob-browser-window>` they drive the
+//! real window instead (on `$DISPLAY`, with a scratch profile), through its
+//! relay. Else a headless Chromium (`REDROB_TEST_CHROMIUM`, or Playwright's
+//! download under ~/.cache/ms-playwright); skipped when there is none.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -23,6 +26,17 @@ struct Chromium {
 
 impl Drop for Chromium {
     fn drop(&mut self) {
+        // The window quits on SIGTERM, closing its pages first.
+        #[cfg(unix)]
+        unsafe {
+            libc::kill(self.child.id() as i32, libc::SIGTERM);
+        }
+        for _ in 0..100 {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_dir_all(&self.dir);
@@ -45,7 +59,40 @@ fn binary() -> Option<PathBuf> {
     found.pop()
 }
 
+/// The real window, with a profile of its own under the test's folder.
+fn window(name: &str, bin: PathBuf) -> Chromium {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("window-tabs-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let endpoint = dir.join("redrob-browser/Default/engine/ws-endpoint");
+    let child = Command::new(bin)
+        .env("XDG_DATA_HOME", &dir)
+        .stdout(Stdio::null())
+        .stderr(std::fs::File::create(dir.join("window.log")).unwrap())
+        .spawn()
+        .unwrap();
+    let mut c = Chromium {
+        child,
+        dir,
+        ws: String::new(),
+    };
+    for _ in 0..600 {
+        if let Ok(t) = std::fs::read_to_string(&endpoint) {
+            if t.starts_with("ws://") {
+                c.ws = t.trim().to_string();
+                return c;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the window wrote no relay address");
+}
+
 fn chromium(name: &str) -> Option<Chromium> {
+    if let Some(bin) = std::env::var_os("REDROB_TEST_WINDOW") {
+        return Some(window(name, PathBuf::from(bin)));
+    }
     let Some(bin) = binary() else {
         eprintln!("no Chromium binary: skipped");
         return None;
@@ -119,7 +166,33 @@ fn cli_drives_chromium_tabs() {
     };
     let id = tab(&chrome, &["open", PAGE]).trim().to_string();
     assert!(!id.is_empty());
-    assert!(tab(&chrome, &["list"]).lines().any(|l| l.starts_with(&id)));
+    let line = |chrome: &Chromium| {
+        tab(chrome, &["list"])
+            .lines()
+            .find(|l| l.starts_with(&id))
+            .map(str::to_string)
+            .unwrap_or_else(|| panic!("{id} not listed"))
+    };
+    let real_window = std::env::var_os("REDROB_TEST_WINDOW").is_some();
+    if real_window {
+        // An agent tab of window 1, behind the person's tab.
+        let l = line(&chrome);
+        assert!(l.contains("\twindow 1\tagent\t"), "{l}");
+        assert!(!l.ends_with("active"), "{l}");
+        // The person's own tab is listed too, unmarked as an agent's.
+        let all = tab(&chrome, &["list"]);
+        assert!(
+            all.lines()
+                .any(|l| !l.starts_with(&id) && l.contains("\twindow 1\t\t")),
+            "{all}"
+        );
+    }
+    tab(&chrome, &["activate", &id]);
+    if real_window {
+        std::thread::sleep(Duration::from_millis(300));
+        let l = line(&chrome);
+        assert!(l.ends_with("\tactive"), "{l}");
+    }
 
     let outline = tab(&chrome, &["read", &id]);
     assert!(outline.contains("Hello window"), "{outline}");
@@ -216,6 +289,7 @@ fn mcp_drives_chromium_tabs() {
         .collect();
     for n in [
         "window_tab_list",
+        "window_tab_activate",
         "window_snapshot",
         "window_screenshot",
         "window_evaluate",
@@ -229,6 +303,25 @@ fn mcp_drives_chromium_tabs() {
         .to_string();
     let list = m.tool("window_tab_list", json!({}));
     assert!(list["text"].as_str().unwrap().contains(&id));
+    m.tool("window_tab_activate", json!({ "id": id }));
+    if std::env::var_os("REDROB_TEST_WINDOW").is_some() {
+        std::thread::sleep(Duration::from_millis(300));
+        let tabs: Value = serde_json::from_str(
+            m.tool("window_tab_list", json!({}))["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        let me = tabs
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == id.as_str())
+            .unwrap();
+        assert_eq!(me["agent"], true, "{tabs}");
+        assert_eq!(me["active"], true, "{tabs}");
+        assert_eq!(me["window"], 1, "{tabs}");
+    }
     let outline = m.tool("window_snapshot", json!({ "id": id }))["text"]
         .as_str()
         .unwrap()
