@@ -392,7 +392,8 @@ pub fn keys(ctx: &Context) {
         return;
     }
     use egui::{Key, Modifiers};
-    let [down, up, right, left, enter] = ctx.input_mut(|i| {
+    // Counted: keys pressed fast can arrive in one pass.
+    let [downs, ups, rights, lefts, enters] = ctx.input_mut(|i| {
         [
             Key::ArrowDown,
             Key::ArrowUp,
@@ -400,8 +401,9 @@ pub fn keys(ctx: &Context) {
             Key::ArrowLeft,
             Key::Enter,
         ]
-        .map(|k| i.consume_key(Modifiers::NONE, k))
+        .map(|k| i.count_and_consume_key(Modifiers::NONE, k))
     });
+    let (down, up, right, left, enter) = (downs > 0, ups > 0, rights > 0, lefts > 0, enters > 0);
     let mut n = nav(ctx);
     let open = sides(ctx).len();
     n.level = n.level.min(open);
@@ -416,13 +418,13 @@ pub fn keys(ctx: &Context) {
     grow(&mut n.index, l + 1);
     grow(&mut n.rows, l + 1);
     let rows = n.rows[l];
-    if (down || up) && rows > 0 {
-        n.index[l] = Some(match (n.index[l], down) {
-            (None, true) => 0,
-            (None, false) => rows - 1,
-            (Some(i), true) => (i + 1) % rows,
-            (Some(i), false) => (i + rows - 1) % rows,
-        });
+    if rows > 0 {
+        for _ in 0..downs {
+            n.index[l] = Some(n.index[l].map_or(0, |i| (i + 1) % rows));
+        }
+        for _ in 0..ups {
+            n.index[l] = Some(n.index[l].map_or(rows - 1, |i| (i + rows - 1) % rows));
+        }
     }
     if left && l > 0 {
         let mut s = sides(ctx);
