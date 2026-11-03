@@ -571,7 +571,16 @@ pub const LABEL_X: f32 = PAD + ICON_SLOT + PAD;
 /// A row that only says something (who is signed in), muted.
 pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
     let p = *theme::palette(ui);
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), Sense::hover());
+    // Wrapped to the menu's width: a long note grows taller, not clipped.
+    let wrap = (ui.available_width() - LABEL_X - PAD).max(40.0);
+    let galley = ui.painter().layout(
+        text.to_owned(),
+        egui::FontId::proportional(12.0),
+        p.ink_muted,
+        wrap,
+    );
+    let h = (galley.size().y + ROW - 12.0).max(ROW);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), h), Sense::hover());
     if let Some(icon) = icon {
         icon.paint(
             ui,
@@ -582,13 +591,9 @@ pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
             p.ink_muted,
         );
     }
-    ui.painter_at(rect.shrink2(Vec2::new(PAD, 0.0))).text(
-        egui::pos2(rect.left() + LABEL_X, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(12.0),
-        p.ink_muted,
-    );
+    let top = rect.center().y - galley.size().y / 2.0;
+    ui.painter()
+        .galley(egui::pos2(rect.left() + LABEL_X, top), galley, p.ink_muted);
 }
 
 /// An item of a side menu marking the current choice.
@@ -639,11 +644,22 @@ pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) 
     if open != key || !any_open(ctx) {
         return;
     }
-    if ctx
-        .input(|i| i.viewport().monitor_size)
-        .is_some_and(|m| at.x + width > m.x)
-    {
-        at.x = (left - width).max(0.0);
+    // Beside the menu, never over it: to its right, else to its left,
+    // else on the side with more room, narrowed to fit (its text wraps).
+    let mut width = width;
+    if let Some(m) = ctx.input(|i| i.viewport().monitor_size) {
+        let right = (m.x - at.x).max(0.0);
+        let left_room = left.max(0.0);
+        if width > right {
+            if width <= left_room {
+                at.x = left - width;
+            } else if left_room > right {
+                width = left_room;
+                at.x = 0.0;
+            } else {
+                width = right;
+            }
+        }
     }
     let c = ctx.clone();
     show(ctx, Slot::Submenu, key, at, width, |ui| {
