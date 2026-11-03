@@ -32,6 +32,8 @@ pub enum Shortcut {
     Back,
     Forward,
     History,
+    Downloads,
+    Fullscreen,
     DevTools,
     MoveTabLeft,
     MoveTabRight,
@@ -42,6 +44,18 @@ pub enum Shortcut {
     ZoomOut,
     ZoomReset,
     Print,
+    /// Ctrl+Shift+D: every tab into a new bookmarks folder.
+    BookmarkAll,
+    /// Ctrl+Shift+B: the bookmarks bar shown or not.
+    BookmarkBar,
+    /// Ctrl+Shift+O: the bookmarks manager.
+    BookmarkManager,
+    /// Ctrl+Shift+Delete: delete browsing data.
+    ClearData,
+    /// Shift+Esc: Chrome's task manager.
+    TaskManager,
+    /// Ctrl+S: save the page.
+    SavePage,
     /// Not taken from the page: it closes the window's menus and bars.
     Escape,
 }
@@ -75,6 +89,10 @@ pub fn shortcut(vk: i32, flags: u32) -> Option<Shortcut> {
         _ if cmd && shift && ch(b'G') => FindPrev,
         _ if cmd && shift && vk == 0x21 => MoveTabLeft,
         _ if cmd && shift && vk == 0x22 => MoveTabRight,
+        _ if cmd && shift && ch(b'D') => BookmarkAll,
+        _ if cmd && shift && ch(b'B') => BookmarkBar,
+        _ if cmd && shift && ch(b'O') => BookmarkManager,
+        _ if cmd && shift && vk == 0x2E => ClearData,
         _ if ctrl && shift && vk == 0x09 => PrevTab,
         _ if ctrl && !shift && vk == 0x09 => NextTab,
         // Ctrl++ is Ctrl+Shift+= on most layouts.
@@ -87,9 +105,11 @@ pub fn shortcut(vk: i32, flags: u32) -> Option<Shortcut> {
         _ if cmd && ch(b'D') => Bookmark,
         _ if cmd && ch(b'R') => Reload,
         _ if cmd && ch(b'H') => History,
+        _ if cmd && ch(b'J') => Downloads,
         _ if cmd && ch(b'F') => Find,
         _ if cmd && ch(b'G') => FindNext,
         _ if cmd && ch(b'P') => Print,
+        _ if cmd && ch(b'S') => SavePage,
         _ if cmd && vk == 0x21 => PrevTab,
         _ if cmd && vk == 0x22 => NextTab,
         // = and + (main row and keypad), - (main row and keypad), 0.
@@ -102,8 +122,10 @@ pub fn shortcut(vk: i32, flags: u32) -> Option<Shortcut> {
         _ if plain && vk == 0x74 => Reload,
         _ if plain && vk == 0x75 => Address,
         _ if plain && vk == 0x7B => DevTools,
+        _ if plain && vk == 0x7A => Fullscreen,
         _ if plain && vk == 0x72 => FindNext,
         _ if shift && flags & (CONTROL | ALT | COMMAND) == 0 && vk == 0x72 => FindPrev,
+        _ if shift && flags & (CONTROL | ALT | COMMAND) == 0 && vk == 0x1B => TaskManager,
         _ if plain && vk == 0x1B => Escape,
         _ => return None,
     })
@@ -125,6 +147,11 @@ pub fn from_egui(ctx: &egui::Context) -> Vec<Shortcut> {
         (shift, Key::G, FindPrev),
         (shift, Key::PageUp, MoveTabLeft),
         (shift, Key::PageDown, MoveTabRight),
+        (shift, Key::D, BookmarkAll),
+        (shift, Key::B, BookmarkBar),
+        (shift, Key::O, BookmarkManager),
+        (shift, Key::Delete, ClearData),
+        (Modifiers::SHIFT, Key::Escape, TaskManager),
         (Modifiers::CTRL | Modifiers::SHIFT, Key::Tab, PrevTab),
         (Modifiers::CTRL, Key::Tab, NextTab),
         (cmd, Key::T, NewTab),
@@ -135,9 +162,11 @@ pub fn from_egui(ctx: &egui::Context) -> Vec<Shortcut> {
         (cmd, Key::D, Bookmark),
         (cmd, Key::R, Reload),
         (cmd, Key::H, History),
+        (cmd, Key::J, Downloads),
         (cmd, Key::F, Find),
         (cmd, Key::G, FindNext),
         (cmd, Key::P, Print),
+        (cmd, Key::S, SavePage),
         (cmd, Key::PageUp, PrevTab),
         (cmd, Key::PageDown, NextTab),
         (cmd, Key::Plus, ZoomIn),
@@ -150,6 +179,7 @@ pub fn from_egui(ctx: &egui::Context) -> Vec<Shortcut> {
         (none, Key::F5, Reload),
         (none, Key::F6, Address),
         (none, Key::F12, DevTools),
+        (none, Key::F11, Fullscreen),
         (Modifiers::SHIFT, Key::F3, FindPrev),
         (none, Key::F3, FindNext),
     ];

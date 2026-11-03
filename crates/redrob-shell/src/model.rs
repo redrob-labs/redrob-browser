@@ -166,6 +166,27 @@ pub struct Bookmark {
     pub folder: String,
 }
 
+/// The folder of "Other bookmarks", Chrome's second root: bookmarks not on
+/// the bar. Its subfolders are `"{OTHER}/name"`.
+pub const OTHER: &str = "\u{1}other";
+
+/// Whether `folder` is "Other bookmarks" or inside it.
+pub fn is_other(folder: &str) -> bool {
+    folder == OTHER || folder.starts_with(&format!("{OTHER}/"))
+}
+
+/// A folder path as people read it: its root's name for the roots.
+pub fn folder_label(folder: &str) -> String {
+    let other = crate::i18n::t("Other bookmarks");
+    if folder.is_empty() {
+        crate::i18n::t("Bookmarks bar").to_string()
+    } else if let Some(rest) = folder.strip_prefix(OTHER) {
+        format!("{other}{rest}")
+    } else {
+        folder.to_string()
+    }
+}
+
 #[derive(Clone)]
 pub struct HistoryEntry {
     pub url: String,
@@ -175,6 +196,7 @@ pub struct HistoryEntry {
     pub last_visit: u64,
 }
 
+#[derive(Clone)]
 pub struct Suggestion {
     pub url: String,
     pub title: String,
@@ -669,11 +691,92 @@ impl Model {
         }
     }
 
+    /// Address bar suggestions for `input` (see [`SuggestIndex::suggest`]).
+    #[cfg(test)]
+    pub fn suggest(&self, input: &str, limit: usize) -> Vec<Suggestion> {
+        SuggestIndex::new(self).suggest(input, limit)
+    }
+
+    /// Forget a history entry (Shift+Delete on an address bar suggestion).
+    pub fn remove_history(&mut self, url: &str) {
+        self.history.retain(|h| h.url != url);
+    }
+}
+
+/// Bookmarks and history ready for the address bar to search as the
+/// person types: lowercased once, history in the order rows are offered
+/// (visits, then the last visit). Made when the address bar takes the
+/// keyboard, so a letter typed costs one pass over it that stops at the
+/// first rows that fit, not lowercasing and sorting every row.
+pub struct SuggestIndex {
+    bookmarks: Vec<IndexRow>,
+    history: Vec<IndexRow>,
+}
+
+struct IndexRow {
+    url: String,
+    title: String,
+    /// The address lowercased, without its scheme and `www.`.
+    url_key: String,
+    title_key: String,
+}
+
+impl IndexRow {
+    fn new(url: &str, title: &str) -> Self {
+        let u = url.to_lowercase();
+        let url_key = u
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_start_matches("www.")
+            .to_string();
+        IndexRow {
+            url: url.to_string(),
+            title: title.to_string(),
+            url_key,
+            title_key: title.to_lowercase(),
+        }
+    }
+
+    fn matches(&self, q: &str) -> bool {
+        self.url_key.contains(q) || self.title_key.contains(q)
+    }
+}
+
+impl SuggestIndex {
+    pub fn new(model: &Model) -> Self {
+        let mut history: Vec<&HistoryEntry> = model.history.iter().collect();
+        history.sort_by(|a, b| {
+            b.visits
+                .cmp(&a.visits)
+                .then(b.last_visit.cmp(&a.last_visit))
+        });
+        SuggestIndex {
+            bookmarks: model
+                .bookmarks
+                .iter()
+                .map(|b| IndexRow::new(&b.url, &b.title))
+                .collect(),
+            history: history
+                .into_iter()
+                .map(|h| IndexRow::new(&h.url, &h.title))
+                .collect(),
+        }
+    }
+
+    /// A history row went (Shift+Delete).
+    pub fn remove_history(&mut self, url: &str) {
+        self.history.retain(|h| h.url != url);
+    }
+
     /// Address bar suggestions for `input`, as Chrome orders them: what was
     /// typed first (a search, or the address when it is one), then
     /// bookmarks, then history by visits and recency, and the search last
     /// when the first row is the address. At most `limit`.
     pub fn suggest(&self, input: &str, limit: usize) -> Vec<Suggestion> {
+        crate::trace::time("suggest", || self.suggest_untimed(input, limit))
+    }
+
+    fn suggest_untimed(&self, input: &str, limit: usize) -> Vec<Suggestion> {
         let q = input.trim().to_lowercase();
         let mut out = Vec::new();
         if q.is_empty() || limit == 0 {
@@ -699,56 +802,33 @@ impl Model {
         out.push(first);
         // Room left for the rows that match.
         let room = limit.saturating_sub(1 + usize::from(last.is_some()));
-        let matches = |url: &str, title: &str| {
-            let u = url.to_lowercase();
-            let u = u
-                .trim_start_matches("https://")
-                .trim_start_matches("http://")
-                .trim_start_matches("www.");
-            u.starts_with(&q) || u.contains(&q) || title.to_lowercase().contains(&q)
+        let mut rows: Vec<Suggestion> = Vec::new();
+        let picked = |rows: &[Suggestion], kind, list: &[IndexRow], room: usize| {
+            let mut add = Vec::new();
+            for r in list {
+                if rows.len() + add.len() >= room {
+                    break;
+                }
+                if r.url != typed
+                    && r.matches(&q)
+                    && !rows.iter().any(|s: &Suggestion| s.url == r.url)
+                {
+                    add.push(Suggestion {
+                        url: r.url.clone(),
+                        title: r.title.clone(),
+                        kind,
+                    });
+                }
+            }
+            add
         };
-        let mut rows = Vec::new();
-        for b in &self.bookmarks {
-            if rows.len() < room && b.url != typed && matches(&b.url, &b.title) {
-                rows.push(Suggestion {
-                    url: b.url.clone(),
-                    title: b.title.clone(),
-                    kind: SuggestionKind::Bookmark,
-                });
-            }
-        }
-        let mut hist: Vec<&HistoryEntry> = self
-            .history
-            .iter()
-            .filter(|h| {
-                h.url != typed
-                    && matches(&h.url, &h.title)
-                    && !rows.iter().any(|s: &Suggestion| s.url == h.url)
-            })
-            .collect();
-        hist.sort_by(|a, b| {
-            b.visits
-                .cmp(&a.visits)
-                .then(b.last_visit.cmp(&a.last_visit))
-        });
-        for h in hist {
-            if rows.len() >= room {
-                break;
-            }
-            rows.push(Suggestion {
-                url: h.url.clone(),
-                title: h.title.clone(),
-                kind: SuggestionKind::History,
-            });
-        }
+        let b = picked(&rows, SuggestionKind::Bookmark, &self.bookmarks, room);
+        rows.extend(b);
+        let h = picked(&rows, SuggestionKind::History, &self.history, room);
+        rows.extend(h);
         out.extend(rows);
         out.extend(last);
         out
-    }
-
-    /// Forget a history entry (Shift+Delete on an address bar suggestion).
-    pub fn remove_history(&mut self, url: &str) {
-        self.history.retain(|h| h.url != url);
     }
 }
 

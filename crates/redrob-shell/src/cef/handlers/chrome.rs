@@ -131,6 +131,10 @@ pub fn instead(command: i32) -> Option<Instead> {
             Shortcut(crate::cef::keys::Shortcut::Address)
         }
         BOOKMARK_THIS_TAB => Shortcut(crate::cef::keys::Shortcut::Bookmark),
+        BOOKMARK_ALL_TABS => Shortcut(crate::cef::keys::Shortcut::BookmarkAll),
+        SHOW_BOOKMARK_BAR => Shortcut(crate::cef::keys::Shortcut::BookmarkBar),
+        SHOW_BOOKMARK_MANAGER => Shortcut(crate::cef::keys::Shortcut::BookmarkManager),
+        CLEAR_BROWSING_DATA => Shortcut(crate::cef::keys::Shortcut::ClearData),
         SELECT_NEXT_TAB => Shortcut(crate::cef::keys::Shortcut::NextTab),
         SELECT_PREVIOUS_TAB => Shortcut(crate::cef::keys::Shortcut::PrevTab),
         MOVE_TAB_NEXT => Shortcut(crate::cef::keys::Shortcut::MoveTabRight),
@@ -152,14 +156,11 @@ pub fn instead(command: i32) -> Option<Instead> {
         }
         SHOW_DOWNLOADS => Open("chrome://downloads/"),
         OPTIONS => Open("chrome://settings/"),
-        CLEAR_BROWSING_DATA => Open("chrome://settings/clearBrowserData"),
         MANAGE_EXTENSIONS => Open("chrome://extensions/"),
-        SHOW_BOOKMARK_MANAGER => Open("chrome://bookmarks/"),
         ABOUT | HELP_PAGE_VIA_KEYBOARD => Open("chrome://settings/help"),
         VIEW_SOURCE => ViewSource,
         CLOSE_WINDOW | EXIT | FULLSCREEN | SHOW_APP_MENU | FOCUS_MENU_BAR | FOCUS_NEXT_PANE
-        | FOCUS_PREVIOUS_PANE | FOCUS_BOOKMARKS | SHOW_BOOKMARK_BAR | DUPLICATE_TAB
-        | BOOKMARK_ALL_TABS | HOME => Nothing,
+        | FOCUS_PREVIOUS_PANE | FOCUS_BOOKMARKS | DUPLICATE_TAB | HOME => Nothing,
         c if (SELECT_TAB_0..=SELECT_LAST_TAB).contains(&c) => Nothing,
         _ => return None,
     })

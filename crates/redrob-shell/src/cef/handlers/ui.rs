@@ -131,6 +131,8 @@ pub struct Prompts {
     menu: Option<(TabId, Menu)>,
     find: Option<FindBar>,
     zoom: Option<(TabId, u32, Instant)>,
+    /// Each tab's zoom, in percent, where it is not 100.
+    zooms: std::collections::HashMap<TabId, u32>,
     /// A menu, dialog or the find bar closed: the page gets the keyboard back.
     refocus: bool,
 }
@@ -170,7 +172,10 @@ impl Prompts {
                     }
                 }
             }
-            Event::Zoom(p) => self.zoom = Some((tab, p, Instant::now())),
+            Event::Zoom(p) => {
+                self.zooms.insert(tab, p);
+                self.zoom = Some((tab, p, Instant::now()));
+            }
             Event::Clipboard(text) => ctx.copy_text(text),
             Event::Navigated(url) => {
                 // A new document: its find results and menu are gone.
@@ -199,8 +204,14 @@ impl Prompts {
         std::mem::take(&mut self.refocus)
     }
 
+    /// The tab's zoom, in percent (the app menu shows it).
+    pub fn zoom_of(&self, tab: TabId) -> u32 {
+        self.zooms.get(&tab).copied().unwrap_or(100)
+    }
+
     /// The tab closed: answer what it still asks, as dismissed.
     pub fn close_tab(&mut self, tab: TabId) {
+        self.zooms.remove(&tab);
         for (_, p) in extract(&mut self.permissions, |(t, _)| *t == tab) {
             p.answer(Answer::Dismiss);
         }
@@ -306,10 +317,10 @@ impl Prompts {
         let at = crate::popup::to_screen(ctx, page.min + egui::vec2(12.0, 4.0));
         crate::popup::show(
             ctx,
+            crate::popup::Slot::Prompt,
             egui::Id::new(("permission", p.prompt_id)),
             at,
             360.0,
-            false,
             |ui| {
                 ui.set_max_width(340.0);
                 ui.horizontal(|ui| {
@@ -356,10 +367,10 @@ impl Prompts {
         let at = crate::popup::to_screen(ctx, page.min + egui::vec2(12.0, 4.0));
         crate::popup::show(
             ctx,
+            crate::popup::Slot::Prompt,
             egui::Id::new(("external", url.as_str())),
             at,
             360.0,
-            false,
             |ui| {
                 ui.set_max_width(340.0);
                 ui.strong(tr("Open with another app?"));
@@ -584,9 +595,16 @@ impl Prompts {
         let text = trf("Zoom: {0}%", &percent);
         let w = 140.0;
         let pos = crate::popup::to_screen(ctx, egui::pos2(page.max.x - w - 12.0, page.min.y + 8.0));
-        crate::popup::show(ctx, egui::Id::new("zoom-badge"), pos, w, true, |ui| {
-            ui.label(text);
-        });
+        crate::popup::show(
+            ctx,
+            crate::popup::Slot::Badge,
+            egui::Id::new("zoom-badge"),
+            pos,
+            w,
+            |ui| {
+                ui.label(text);
+            },
+        );
         ctx.request_repaint_after(shown.saturating_sub(at.elapsed()));
     }
 }

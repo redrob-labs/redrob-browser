@@ -29,6 +29,7 @@ mod self_update;
 mod startup;
 mod strip;
 mod theme;
+mod trace;
 mod updater;
 mod vault;
 
@@ -203,11 +204,28 @@ struct Suggest {
     arrowed: bool,
     /// The window's place on screen when the list opened.
     origin: Option<egui::Pos2>,
+    /// The rows for `typed`, worked out once each time it changes.
+    list: Vec<model::Suggestion>,
+    /// What the rows come from, made when the address bar takes the
+    /// keyboard and dropped when it gives it up.
+    index: Option<model::SuggestIndex>,
 }
 
 impl Suggest {
+    /// The list closes; the address bar may still have the keyboard.
     fn close(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            index: self.index.take(),
+            ..Self::default()
+        };
+    }
+
+    /// The rows for what was typed now.
+    fn refresh(&mut self, model: &model::Model) {
+        let index = self.index.get_or_insert_with(|| {
+            trace::time("suggestion index", || model::SuggestIndex::new(model))
+        });
+        self.list = index.suggest(&self.typed, SUGGESTIONS);
     }
 }
 
@@ -358,6 +376,21 @@ struct Window {
     site_info: Option<(TabId, cef::handlers::site_info::SiteInfo)>,
     /// The page info bubble shows the certificate.
     site_cert: bool,
+    /// Show the bookmarks bar (the "bookmark_bar" setting), once read.
+    bookmark_bar: Option<bool>,
+    /// The reading list (the "reading_list" setting), once read.
+    reading_list: Option<Vec<ReadingItem>>,
+    /// Which of Chrome's page commands the active tab can run, as it last
+    /// answered (`Op::Commands`, asked when the menu opens).
+    page_commands: Option<(TabId, cdp::PageCommands)>,
+}
+
+/// A page saved to read later.
+#[derive(Clone)]
+struct ReadingItem {
+    url: String,
+    title: String,
+    read: bool,
 }
 
 impl Window {
@@ -603,6 +636,11 @@ impl Window {
                 self.focus_page = true;
             } else if t.url == NEW_TAB {
                 self.focus_address = true;
+            } else {
+                // One of our own pages: the window takes the keyboard back
+                // from the page that had it, which is no longer on screen,
+                // so the shortcuts keep working.
+                self.take_keyboard = true;
             }
         }
     }
@@ -721,6 +759,10 @@ impl Window {
             }
             if let Event::SiteInfo(info) = event {
                 self.site_info = Some((tab, info));
+                continue;
+            }
+            if let Event::Commands(c) = event {
+                self.page_commands = Some((tab, c));
                 continue;
             }
             // Only the tab on screen can have the keyboard or the pointer,
@@ -842,6 +884,7 @@ impl Window {
                 | Event::Status(_)
                 | Event::SiteInfo(_)
                 | Event::PopupClosed
+                | Event::Commands(_)
                 | Event::Badges => {}
             }
             let url_now = t.url.clone();
@@ -889,6 +932,8 @@ impl Window {
     /// The window's shortcuts: from egui while the chrome has the keyboard,
     /// from Chromium while the page has it (cef/keys.rs).
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        // The open menu's arrows and Enter first (popup::keys).
+        popup::keys(ctx);
         let mut all = std::mem::take(&mut self.page_shortcuts);
         all.extend(cef::keys::from_egui(ctx));
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
@@ -907,20 +952,11 @@ impl Window {
                 self.open_tab(NEW_TAB, true);
             }
             Shortcut::CloseTab => self.close_tab(a),
-            Shortcut::ReopenTab => match self.model.closed.pop() {
-                Some(model::Closed::Tab { url, .. }) => {
-                    self.open_tab(&url, true);
+            Shortcut::ReopenTab => {
+                if let Some(c) = self.model.closed.pop() {
+                    self.reopen(c);
                 }
-                Some(model::Closed::Group { title, color, tabs }) => {
-                    let urls: Vec<String> = tabs.into_iter().map(|(u, _)| u).collect();
-                    if let Some(g) = self.open_all_in_group(&urls, &title) {
-                        if let Some(g) = self.model.group_mut(g) {
-                            g.color = color;
-                        }
-                    }
-                }
-                None => {}
-            },
+            }
             Shortcut::NewWindow => self.requests.push(browser::Request::NewWindow),
             Shortcut::NewIncognito => self.open_incognito(),
             Shortcut::Address => self.focus_address = true,
@@ -957,9 +993,31 @@ impl Window {
                 self.open_tab(internal::HISTORY, true);
             }
             Shortcut::DevTools => self.devtools(),
+            Shortcut::Downloads => self.show_downloads = true,
+            Shortcut::Fullscreen => {
+                let on = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!on));
+            }
+            Shortcut::BookmarkAll => self.bookmark_all_tabs(),
+            Shortcut::BookmarkBar => {
+                let on = !self.bookmark_bar_shown();
+                self.set_bookmark_bar(on);
+            }
+            Shortcut::BookmarkManager => {
+                self.open_tab(internal::BOOKMARKS, true);
+            }
+            Shortcut::ClearData => {
+                self.open_tab(internal::CLEAR_DATA, true);
+            }
+            Shortcut::TaskManager => self.chrome_command(cef::handlers::chrome::id::TASK_MANAGER),
+            Shortcut::SavePage => self.chrome_command(cef::handlers::chrome::id::SAVE_PAGE),
             Shortcut::MoveTabLeft if a > 0 => self.model.move_tab_regroup(a, a - 1),
             Shortcut::MoveTabRight if a + 1 < n => self.model.move_tab_regroup(a, a + 1),
             Shortcut::Escape => {
+                // A side menu first, as in Chrome, then the menu.
+                if popup::escape(ctx) {
+                    return;
+                }
                 popup::close_menus(ctx);
                 // Escape in the address bar: its text goes back to the
                 // page's address and the page gets the keyboard back.
@@ -1752,140 +1810,633 @@ impl Window {
         }
     }
 
-    /// The ⋯ menu at the end of the toolbar.
+    /// The ⋯ menu at the end of the toolbar, laid out as Chrome 156's:
+    /// every row the same height with an icon slot, shortcuts right-aligned,
+    /// and its groups' items in side menus beside it (popup::side_item).
     fn menu(&mut self, ui: &mut egui::Ui) {
+        use egui::{KeyboardShortcut, Modifiers};
+        use popup::{item, side_item, side_menu};
         let r = theme::icon_button(ui, Icon::More, t("Menu"));
-        let item = |ui: &mut egui::Ui, icon: Icon, text: &str| {
-            let p = theme::palette(ui);
-            ui.add(
-                egui::Button::image_and_text(icon.image(16.0, p.ink_secondary), text)
-                    .frame(false)
-                    .min_size(Vec2::new(220.0, 30.0)),
-            )
-        };
-        popup::menu(&r, 248.0, true, |ui| {
-            if item(ui, Icon::Plus, t("New tab")).clicked() {
+        let ctx = ui.ctx().clone();
+        let window = ctx.viewport_id();
+        let keys = |m: Modifiers, k: Key| ctx.format_shortcut(&KeyboardShortcut::new(m, k));
+        let cmd = Modifiers::COMMAND;
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let active = self.active_id();
+        if r.clicked() {
+            // What Chrome can do on this page: its translate, cast, save and
+            // QR rows show only where they work.
+            if let Some(id) = active {
+                self.op(id, Op::Commands);
+            }
+        }
+        let anchor = r.rect;
+        let zoom = active.map_or(100, |id| self.prompts.zoom_of(id));
+        let (url, title) = self
+            .model
+            .active_tab()
+            .map(|t| (t.url.clone(), t.title.clone()))
+            .unwrap_or_default();
+        let web = url != NEW_TAB && !internal::is_internal(&url) && !url.is_empty();
+        let chrome = cef::native::chrome_style();
+        let cmds = self
+            .page_commands
+            .filter(|(t, _)| Some(*t) == active)
+            .map(|(_, c)| c)
+            .unwrap_or_default();
+        let key = |name: &str| egui::Id::new(("redrob-menu", name));
+        let [passwords, history, bookmarks, groups, extensions] =
+            ["passwords", "history", "bookmarks", "groups", "extensions"].map(key);
+        let [find_edit, share, tools, help, bar, import, reading] = [
+            "find-edit",
+            "share",
+            "tools",
+            "help",
+            "bookmark-bar",
+            "import",
+            "reading-list",
+        ]
+        .map(key);
+        let signed_in = self
+            .profile
+            .as_ref()
+            .and_then(|p| p.setting("account_email"))
+            .filter(|e| !e.is_empty());
+        popup::menu(&r, MENU_WIDTH, true, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if item(ui, Some(Icon::Plus), t("New tab"), &keys(cmd, Key::T)).clicked() {
                 self.open_tab(NEW_TAB, true);
                 ui.close();
             }
-            if item(ui, Icon::Plus, t("New window")).clicked() {
+            if item(ui, Some(Icon::Browser), t("New window"), &keys(cmd, Key::N)).clicked() {
                 self.requests.push(browser::Request::NewWindow);
                 ui.close();
             }
-            if item(ui, Icon::Incognito, t("New incognito window")).clicked() {
+            if item(
+                ui,
+                Some(Icon::Incognito),
+                t("New incognito window"),
+                &keys(cmd_shift, Key::N),
+            )
+            .clicked()
+            {
                 self.open_incognito();
                 ui.close();
             }
-            ui.separator();
-            if item(ui, Icon::History, t("History")).clicked() {
-                self.open_tab(internal::HISTORY, true);
+            popup::separator(ui);
+            if signed_in.is_some() {
+                if item(ui, Some(Icon::SignOut), t("Sign out"), "").clicked() {
+                    account::sign_out();
+                    if let Some(p) = &self.profile {
+                        let _ = p.set_setting("account_name", "");
+                        let _ = p.set_setting("account_email", "");
+                    }
+                    ui.close();
+                }
+            } else if item(ui, Some(Icon::SignIn), t("Sign in to Redrob"), "").clicked() {
+                account::sign_in(self.account_tx.clone());
                 ui.close();
             }
-            if item(ui, Icon::Download, t("Downloads")).clicked() {
+            popup::separator(ui);
+            side_item(ui, passwords, Some(Icon::Key), t("Passwords and autofill"));
+            side_item(ui, history, Some(Icon::History), t("History"));
+            if item(ui, Some(Icon::Download), t("Downloads"), &keys(cmd, Key::J)).clicked() {
                 self.show_downloads = true;
                 ui.close();
             }
-            if item(ui, Icon::Key, t("Passwords")).clicked() {
+            side_item(
+                ui,
+                bookmarks,
+                Some(Icon::Bookmark),
+                t("Bookmarks and lists"),
+            );
+            side_item(ui, groups, Some(Icon::Stack), t("Tab groups"));
+            side_item(ui, extensions, Some(Icon::Plug), t("Extensions"));
+            if item(
+                ui,
+                Some(Icon::Trash),
+                t("Delete browsing data..."),
+                &keys(cmd_shift, Key::Delete),
+            )
+            .clicked()
+            {
+                self.open_tab(internal::CLEAR_DATA, true);
+                ui.close();
+            }
+            popup::separator(ui);
+            match zoom_row(ui, zoom, fullscreen, web) {
+                Some(ZoomAction::Step(step)) => {
+                    if let Some(id) = active {
+                        self.op(id, Op::Zoom(step));
+                    }
+                }
+                Some(ZoomAction::Fullscreen) => {
+                    ui.ctx().send_viewport_cmd_to(
+                        window,
+                        egui::ViewportCommand::Fullscreen(!fullscreen),
+                    );
+                    ui.close();
+                }
+                None => {}
+            }
+            popup::separator(ui);
+            if item(ui, Some(Icon::Print), t("Print..."), &keys(cmd, Key::P)).clicked() {
+                if let Some(id) = active {
+                    self.op(id, Op::Print);
+                }
+                ui.close();
+            }
+            if cmds.translate && item(ui, Some(Icon::Translate), t("Translate..."), "").clicked() {
+                self.chrome_command(cef::handlers::chrome::id::SHOW_TRANSLATE);
+                ui.close();
+            }
+            side_item(ui, find_edit, Some(Icon::Search), t("Find and edit"));
+            side_item(ui, share, Some(Icon::Share), t("Cast, save, and share"));
+            side_item(ui, tools, Some(Icon::Tool), t("More tools"));
+            popup::separator(ui);
+            side_item(ui, help, Some(Icon::Help), t("Help"));
+            if item(ui, Some(Icon::Settings), t("Settings"), "").clicked() {
+                self.open_tab(internal::SETTINGS, true);
+                ui.close();
+            }
+            if item(ui, Some(Icon::Power), t("Exit"), "").clicked() {
+                self.requests.push(browser::Request::Quit);
+                ui.close();
+            }
+            popup::separator(ui);
+            match &signed_in {
+                Some(email) => popup::note(ui, Some(Icon::User), &tf("Signed in as {0}", &[email])),
+                None => popup::note(ui, Some(Icon::User), t("Not signed in")),
+            }
+        });
+        if !popup::any_open(&ctx) {
+            return;
+        }
+
+        // The side menus, from this window's pass (popup::side_item).
+        side_menu(&ctx, passwords, 260.0, |ui| {
+            if item(ui, Some(Icon::Key), t("Password Manager"), "").clicked() {
                 self.open_tab(internal::PASSWORDS, true);
                 ui.close();
             }
-            if item(ui, Icon::BookOpen, t("Reading mode")).clicked() {
-                if let Some(id) = self.active_id() {
+            if chrome {
+                if item(ui, Some(Icon::Card), t("Payment methods"), "").clicked() {
+                    self.open_tab("chrome://settings/payments", true);
+                    ui.close();
+                }
+                if item(ui, Some(Icon::Map), t("Addresses and more"), "").clicked() {
+                    self.open_tab("chrome://settings/addresses", true);
+                    ui.close();
+                }
+            }
+        });
+        side_menu(&ctx, history, 340.0, |ui| {
+            if item(ui, Some(Icon::History), t("History"), &keys(cmd, Key::H)).clicked() {
+                self.open_tab(internal::HISTORY, true);
+                ui.close();
+            }
+            if !self.model.closed.is_empty() {
+                popup::separator(ui);
+                popup::note(ui, None, t("Recently closed"));
+                let mut reopen = None;
+                for (k, c) in self.model.closed.iter().rev().take(8).enumerate() {
+                    let shortcut = if k == 0 {
+                        keys(cmd_shift, Key::T)
+                    } else {
+                        String::new()
+                    };
+                    let (glyph, label) = match c {
+                        model::Closed::Tab { url, title } => (
+                            popup::Glyph::Icon(Icon::Globe),
+                            if title.is_empty() { url } else { title }.clone(),
+                        ),
+                        model::Closed::Group { title, tabs, .. } => (
+                            popup::Glyph::Icon(Icon::Stack),
+                            tf(
+                                "{0} ({1} tabs)",
+                                &[
+                                    &if title.is_empty() {
+                                        t("Unnamed group")
+                                    } else {
+                                        title.as_str()
+                                    },
+                                    &tabs.len(),
+                                ],
+                            ),
+                        ),
+                    };
+                    if item(ui, glyph, &theme::elide(&label, 40), &shortcut).clicked() {
+                        reopen = Some(self.model.closed.len() - 1 - k);
+                        ui.close();
+                    }
+                }
+                if let Some(i) = reopen {
+                    let c = self.model.closed.remove(i);
+                    self.reopen(c);
+                }
+            }
+            let mut recent: Vec<&model::HistoryEntry> = self.model.history.iter().collect();
+            if !recent.is_empty() {
+                recent.sort_unstable_by_key(|h| std::cmp::Reverse(h.last_visit));
+                popup::separator(ui);
+                popup::note(ui, None, t("Recent"));
+                let mut go = None;
+                for h in recent.iter().take(8) {
+                    let label = if h.title.is_empty() { &h.url } else { &h.title };
+                    if item(ui, Some(Icon::Globe), &theme::elide(label, 40), "").clicked() {
+                        go = Some(h.url.clone());
+                        ui.close();
+                    }
+                }
+                if let Some(u) = go {
+                    self.open_tab(&u, true);
+                }
+            }
+        });
+        let bookmarked = self.model.is_bookmarked(&url);
+        side_menu(&ctx, bookmarks, 320.0, |ui| {
+            let label = if bookmarked {
+                t("Remove bookmark for this tab")
+            } else {
+                t("Bookmark this tab")
+            };
+            let star = if bookmarked {
+                Icon::StarFilled
+            } else {
+                Icon::Star
+            };
+            if web && item(ui, Some(star), label, &keys(cmd, Key::D)).clicked() {
+                self.toggle_bookmark();
+                ui.close();
+            }
+            if item(
+                ui,
+                Some(Icon::FolderPlus),
+                t("Bookmark all tabs"),
+                &keys(cmd_shift, Key::D),
+            )
+            .clicked()
+            {
+                self.bookmark_all_tabs();
+                ui.close();
+            }
+            popup::separator(ui);
+            side_item(ui, bar, popup::Glyph::None, t("Show bookmarks bar"));
+            if item(
+                ui,
+                Some(Icon::List),
+                t("Open bookmarks manager"),
+                &keys(cmd_shift, Key::O),
+            )
+            .clicked()
+            {
+                self.open_tab(internal::BOOKMARKS, true);
+                ui.close();
+            }
+            side_item(
+                ui,
+                import,
+                popup::Glyph::None,
+                t("Import bookmarks and settings"),
+            );
+            popup::separator(ui);
+            side_item(ui, reading, Some(Icon::Book), t("Reading list"));
+            popup::separator(ui);
+            popup::note(ui, None, t("Bookmarks"));
+            let marks = &self.model.bookmarks;
+            for f in bookmark_folders(marks)
+                .iter()
+                .filter(|f| folder_parent(f).is_empty())
+            {
+                if !model::is_other(f) {
+                    side_item(ui, folder_key(f), Some(Icon::Folder), &theme::elide(f, 36));
+                }
+            }
+            let mut go = None;
+            for b in marks.iter().filter(|b| b.folder.is_empty()) {
+                let label = if b.title.is_empty() { &b.url } else { &b.title };
+                if item(ui, Some(Icon::Globe), &theme::elide(label, 40), "").clicked() {
+                    go = Some(b.url.clone());
+                    ui.close();
+                }
+            }
+            side_item(
+                ui,
+                folder_key(model::OTHER),
+                Some(Icon::Folder),
+                t("Other bookmarks"),
+            );
+            if let Some(u) = go {
+                self.navigate(u);
+            }
+        });
+        side_menu(&ctx, bar, 240.0, |ui| {
+            let on = self.bookmark_bar_shown();
+            let flip = keys(cmd_shift, Key::B);
+            for (choice, label) in [(true, t("Always")), (false, t("Never"))] {
+                let shortcut = if choice == on { "" } else { flip.as_str() };
+                if popup::choice_with(ui, label, choice == on, shortcut).clicked() {
+                    self.set_bookmark_bar(choice);
+                    ui.close();
+                }
+            }
+        });
+        side_menu(&ctx, import, 320.0, |ui| self.import_menu(ui));
+        side_menu(&ctx, reading, 320.0, |ui| {
+            let saved = self.reading_list().iter().any(|r| r.url == url);
+            if web
+                && !saved
+                && item(ui, Some(Icon::Plus), t("Add tab to reading list"), "").clicked()
+            {
+                let entry = ReadingItem {
+                    url: url.clone(),
+                    title: title.clone(),
+                    read: false,
+                };
+                self.reading_list().insert(0, entry);
+                self.save_reading_list();
+                ui.close();
+            }
+            let list = self.reading_list().clone();
+            if list.is_empty() {
+                popup::note(ui, None, t("Pages you save to read later show here."));
+            }
+            let mut go = None;
+            for read in [false, true] {
+                let part: Vec<&ReadingItem> = list.iter().filter(|r| r.read == read).collect();
+                if part.is_empty() {
+                    continue;
+                }
+                popup::separator(ui);
+                popup::note(ui, None, if read { t("Read") } else { t("Unread") });
+                for r in part {
+                    let label = if r.title.is_empty() { &r.url } else { &r.title };
+                    if item(ui, Some(Icon::Globe), &theme::elide(label, 40), "").clicked() {
+                        go = Some(r.url.clone());
+                        ui.close();
+                    }
+                }
+            }
+            if let Some(u) = go {
+                for r in self.reading_list().iter_mut().filter(|r| r.url == u) {
+                    r.read = true;
+                }
+                self.save_reading_list();
+                self.navigate(u);
+            }
+        });
+        // Every folder that is open, outermost first: each opens from a row
+        // of the one before it.
+        let open = popup::open_sides(&ctx);
+        if !open.is_empty() {
+            let marks = self.model.bookmarks.clone();
+            let mut go = None;
+            for f in bookmark_folders(&marks) {
+                let k = folder_key(&f);
+                if !open.contains(&k) {
+                    continue;
+                }
+                side_menu(&ctx, k, 320.0, |ui| {
+                    if let Some(u) = folder_side_menu(ui, &marks, &f) {
+                        go = Some(u);
+                    }
+                });
+            }
+            if let Some(u) = go {
+                self.navigate(u);
+            }
+        }
+        side_menu(&ctx, groups, 300.0, |ui| {
+            if item(ui, Some(Icon::Plus), t("Create new tab group"), "").clicked() {
+                self.open_tab_with(NEW_TAB, true, false);
+                let a = self.model.active;
+                self.model.new_group(&[a]);
+                self.save_session();
+                ui.close();
+            }
+            if self.model.groups.is_empty() {
+                return;
+            }
+            popup::separator(ui);
+            let dark = ui.visuals().dark_mode;
+            let mut show = None;
+            for g in &self.model.groups {
+                let n = self
+                    .model
+                    .tabs
+                    .iter()
+                    .filter(|t| t.group == Some(g.id))
+                    .count();
+                let name = if g.title.is_empty() {
+                    t("Unnamed group")
+                } else {
+                    g.title.as_str()
+                };
+                let label = tf("{0} ({1} tabs)", &[&name, &n]);
+                let dot = popup::Glyph::Dot(strip::group_color(g.color, dark));
+                if item(ui, dot, &theme::elide(&label, 40), "").clicked() {
+                    show = Some(g.id);
+                    ui.close();
+                }
+            }
+            if let Some(g) = show {
+                if let Some(i) = self.model.tabs.iter().position(|t| t.group == Some(g)) {
+                    if let Some(g) = self.model.group_mut(g) {
+                        g.collapsed = false;
+                    }
+                    self.select_tab(i);
+                    self.save_session();
+                }
+            }
+        });
+        side_menu(&ctx, extensions, 320.0, |ui| {
+            if item(ui, Some(Icon::Plug), t("Manage extensions"), "").clicked() {
+                self.open_tab("chrome://extensions/", true);
+                ui.close();
+            }
+            if item(ui, Some(Icon::External), t("Visit Chrome Web Store"), "").clicked() {
+                self.open_tab(
+                    "https://chromewebstore.google.com/category/extensions",
+                    true,
+                );
+                ui.close();
+            }
+            let all = cef::handlers::extensions::list();
+            if all.is_empty() {
+                return;
+            }
+            popup::separator(ui);
+            let mut run = None;
+            for e in all.iter() {
+                let tex = e.icon.as_ref().and_then(|p| self.ext_texture(ui.ctx(), p));
+                let glyph = tex.map_or(popup::Glyph::Icon(Icon::Plug), popup::Glyph::Image);
+                if item(ui, glyph, &theme::elide(&e.name, 36), "").clicked() {
+                    run = Some(e.clone());
+                    ui.close();
+                }
+            }
+            if let Some(e) = run {
+                let ctx = ui.ctx().clone();
+                self.run_extension(&ctx, &e, anchor);
+            }
+        });
+        side_menu(&ctx, find_edit, 260.0, |ui| {
+            if item(ui, Some(Icon::Search), t("Find..."), &keys(cmd, Key::F)).clicked() {
+                self.page_shortcuts.push(Shortcut::Find);
+                ui.close();
+            }
+            popup::separator(ui);
+            for (glyph, label, k, e) in [
+                (None, t("Cut"), Key::X, cdp::Edit::Cut),
+                (Some(Icon::Copy), t("Copy"), Key::C, cdp::Edit::Copy),
+                (Some(Icon::Clipboard), t("Paste"), Key::V, cdp::Edit::Paste),
+            ] {
+                if item(ui, glyph, label, &keys(cmd, k)).clicked() {
+                    if let Some(id) = active {
+                        self.op(id, Op::Edit(e));
+                    }
+                    ui.close();
+                }
+            }
+        });
+        side_menu(&ctx, share, 280.0, |ui| {
+            if cmds.save
+                && item(
+                    ui,
+                    Some(Icon::Save),
+                    t("Save page as..."),
+                    &keys(cmd, Key::S),
+                )
+                .clicked()
+            {
+                self.chrome_command(cef::handlers::chrome::id::SAVE_PAGE);
+                ui.close();
+            }
+            // Cast and the QR code are Chrome bubbles anchored to Chrome's own
+            // toolbar, which a page in this window does not have: they would
+            // open nothing, so they are not offered.
+            if cmds.save && web {
+                popup::separator(ui);
+            }
+            if web && item(ui, Some(Icon::Link), t("Copy link"), "").clicked() {
+                ui.ctx().copy_text(url.clone());
+                self.notice = Some(t("Link copied.").to_string());
+                ui.close();
+            }
+            if !(web || cmds.save) {
+                popup::note(ui, None, t("Nothing to share on this page."));
+            }
+        });
+        side_menu(&ctx, tools, 300.0, |ui| {
+            if web && item(ui, Some(Icon::BookOpen), t("Reading mode"), "").clicked() {
+                if let Some(id) = active {
                     self.op(id, Op::Reader);
                 }
                 ui.close();
             }
-            if item(ui, Icon::Code, t("Developer tools")).clicked() {
+            if cmds.task_manager
+                && item(
+                    ui,
+                    Some(Icon::Gauge),
+                    t("Task manager"),
+                    &keys(Modifiers::SHIFT, Key::Escape),
+                )
+                .clicked()
+            {
+                self.chrome_command(cef::handlers::chrome::id::TASK_MANAGER);
+                ui.close();
+            }
+            popup::separator(ui);
+            if item(
+                ui,
+                Some(Icon::Code),
+                t("Developer tools"),
+                &keys(cmd_shift, Key::I),
+            )
+            .clicked()
+            {
                 self.devtools();
                 ui.close();
             }
-            if item(ui, Icon::Settings, t("Settings")).clicked() {
-                self.open_tab(internal::SETTINGS, true);
-                ui.close();
-            }
-            if item(ui, Icon::Code, t("Open logs folder")).clicked() {
+            if item(ui, Some(Icon::FolderOpen), t("Open logs folder"), "").clicked() {
                 startup::open_log_dir();
                 ui.close();
             }
-            ui.separator();
-            let signed_in = self
-                .profile
-                .as_ref()
-                .and_then(|p| p.setting("account_email"))
-                .filter(|e| !e.is_empty());
-            match signed_in {
-                Some(email) => {
-                    ui.add_space(2.0);
-                    ui.weak(tf("Signed in as {0}", &[&email]));
-                    if item(ui, Icon::User, t("Sign out")).clicked() {
-                        account::sign_out();
-                        if let Some(p) = &self.profile {
-                            let _ = p.set_setting("account_name", "");
-                            let _ = p.set_setting("account_email", "");
-                        }
-                        ui.close();
-                    }
-                }
-                None => {
-                    if item(ui, Icon::SignIn, t("Sign in to Redrob")).clicked() {
-                        account::sign_in(self.account_tx.clone());
-                        ui.close();
-                    }
-                }
-            }
-            popup::submenu(ui, t("Language"), |ui| {
-                let now = i18n::current();
-                for (lang, name) in [(i18n::Lang::En, "English"), (i18n::Lang::Ko, "한국어")] {
-                    if ui.selectable_label(now == lang, name).clicked() {
-                        i18n::set(lang);
-                        if let Some(p) = &self.profile {
-                            let _ = p.set_setting("language", i18n::code(lang));
-                        }
-                        ui.close();
-                    }
-                }
-            });
-            popup::submenu(ui, t("Import"), |ui| {
-                let sources = import_chrome::sources();
-                if sources.is_empty() {
-                    ui.weak(t("No Chrome, Chromium, Edge or Brave profile found"));
-                }
-                for s in &sources {
-                    if ui.button(tf("Import from {0}", &[&s.name])).clicked() {
-                        self.import_from(s);
-                        ui.close();
-                    }
-                    if s.profile.join("Login Data").exists()
-                        && ui
-                            .button(tf("Import passwords from {0}", &[&s.name]))
-                            .clicked()
-                    {
-                        let scratch = self
-                            .profile
-                            .as_ref()
-                            .map(|p| p.dir.join("import-tmp"))
-                            .unwrap_or_else(std::env::temp_dir);
-                        let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
-                            Ok((l, n)) => (Ok(l), n),
-                            Err(e) => (Err(e), 0),
-                        };
-                        self.import_passwords(logins, skipped, s.name);
-                        ui.close();
-                    }
-                }
-                // Chrome's "Export passwords" writes this file to the Downloads folder.
-                let csv = profile::downloads_dir().join("Chrome Passwords.csv");
-                if csv.exists()
-                    && ui
-                        .button(t("Import passwords from Chrome Passwords.csv"))
-                        .clicked()
-                {
-                    let logins = import_chrome::import_passwords_csv(&csv);
-                    self.import_passwords(logins, 0, t("the CSV file"));
-                    ui.close();
-                }
-            });
         });
+        side_menu(&ctx, help, 260.0, |ui| {
+            if item(ui, Some(Icon::Info), t("About Redrob Browser"), "").clicked() {
+                self.open_tab(internal::ABOUT, true);
+                ui.close();
+            }
+            if item(ui, Some(Icon::Bug), t("Report an issue"), "").clicked() {
+                self.open_tab(ISSUES_URL, true);
+                ui.close();
+            }
+        });
+    }
+
+    /// Import bookmarks and settings: from each browser found, and the
+    /// passwords file Chrome exports.
+    fn import_menu(&mut self, ui: &mut egui::Ui) {
+        use popup::item;
+        let sources = import_chrome::sources();
+        if sources.is_empty() {
+            popup::note(
+                ui,
+                None,
+                t("No Chrome, Chromium, Edge or Brave profile found"),
+            );
+        }
+        for s in &sources {
+            if item(
+                ui,
+                popup::Glyph::None,
+                &tf("Import from {0}", &[&s.name]),
+                "",
+            )
+            .clicked()
+            {
+                self.import_from(s);
+                ui.close();
+            }
+            if s.profile.join("Login Data").exists()
+                && item(
+                    ui,
+                    popup::Glyph::None,
+                    &tf("Import passwords from {0}", &[&s.name]),
+                    "",
+                )
+                .clicked()
+            {
+                let scratch = self
+                    .profile
+                    .as_ref()
+                    .map(|p| p.dir.join("import-tmp"))
+                    .unwrap_or_else(std::env::temp_dir);
+                let (logins, skipped) = match import_chrome::import_passwords(s, &scratch) {
+                    Ok((l, n)) => (Ok(l), n),
+                    Err(e) => (Err(e), 0),
+                };
+                self.import_passwords(logins, skipped, s.name);
+                ui.close();
+            }
+        }
+        // Chrome's "Export passwords" writes this file to the Downloads folder.
+        let csv = profile::downloads_dir().join("Chrome Passwords.csv");
+        if csv.exists()
+            && item(
+                ui,
+                None,
+                t("Import passwords from Chrome Passwords.csv"),
+                "",
+            )
+            .clicked()
+        {
+            let logins = import_chrome::import_passwords_csv(&csv);
+            self.import_passwords(logins, 0, t("the CSV file"));
+            ui.close();
+        }
     }
 
     /// Private windows share one process with its own memory-only engine.
@@ -1971,6 +2522,144 @@ impl Window {
             self.open_tab(&url, true);
         } else {
             self.navigate(url);
+        }
+    }
+
+    /// Bring back something closed (a tab, or a whole group).
+    fn reopen(&mut self, c: model::Closed) {
+        match c {
+            model::Closed::Tab { url, .. } => {
+                self.open_tab(&url, true);
+            }
+            model::Closed::Group { title, color, tabs } => {
+                let urls: Vec<String> = tabs.into_iter().map(|(u, _)| u).collect();
+                if let Some(g) = self.open_all_in_group(&urls, &title) {
+                    if let Some(g) = self.model.group_mut(g) {
+                        g.color = color;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Delete browsing data (redrob://settings/clearBrowserData).
+    fn clear_browsing_data(&mut self, c: internal::Clear) {
+        if c.history {
+            if let Some(p) = &self.profile {
+                let _ = p.clear_history_since(c.since);
+            }
+            self.model.history.retain(|h| h.last_visit < c.since);
+            self.suggest.index = None;
+            self.top_sites = None;
+        }
+        if c.cookies || c.cache {
+            if let Some(id) = self.active_id() {
+                self.op(
+                    id,
+                    Op::ClearBrowsingData {
+                        cookies: c.cookies,
+                        cache: c.cache,
+                    },
+                );
+            }
+        }
+        self.notice = Some(t("Browsing data deleted.").to_string());
+    }
+
+    /// One of Chrome's own commands on the tab on screen.
+    fn chrome_command(&mut self, command: i32) {
+        if let Some(id) = self.active_id() {
+            self.op(id, Op::Chrome(command));
+        }
+    }
+
+    /// Ctrl+Shift+D: the window's web pages into a new folder on the
+    /// bookmarks bar, named so it is not mixed with another.
+    fn bookmark_all_tabs(&mut self) {
+        let pages: Vec<(String, String)> = self
+            .model
+            .tabs
+            .iter()
+            .filter(|t| t.url.starts_with("http://") || t.url.starts_with("https://"))
+            .map(|t| (t.url.clone(), t.title.clone()))
+            .collect();
+        if pages.is_empty() {
+            return;
+        }
+        let base = t("Saved tabs");
+        let taken = |name: &str| {
+            self.model
+                .bookmarks
+                .iter()
+                .any(|b| b.folder == name || b.folder.starts_with(&format!("{name}/")))
+        };
+        let mut name = base.to_string();
+        let mut n = 2;
+        while taken(&name) {
+            name = format!("{base} ({n})");
+            n += 1;
+        }
+        for (url, title) in pages {
+            self.model.bookmarks.push(model::Bookmark {
+                url,
+                title,
+                folder: name.clone(),
+            });
+        }
+        self.save_bookmarks();
+        self.notice = Some(tf("Bookmarked the tabs in \"{0}\".", &[&name]));
+    }
+
+    fn bookmark_bar_shown(&mut self) -> bool {
+        if self.bookmark_bar.is_none() {
+            let v = self
+                .profile
+                .as_ref()
+                .and_then(|p| p.setting("bookmark_bar"))
+                .is_none_or(|v| v != "never");
+            self.bookmark_bar = Some(v);
+        }
+        self.bookmark_bar.unwrap_or(true)
+    }
+
+    fn set_bookmark_bar(&mut self, on: bool) {
+        self.bookmark_bar = Some(on);
+        if let Some(p) = &self.profile {
+            let _ = p.set_setting("bookmark_bar", if on { "always" } else { "never" });
+        }
+    }
+
+    fn reading_list(&mut self) -> &mut Vec<ReadingItem> {
+        let profile = self.profile.as_ref();
+        self.reading_list.get_or_insert_with(|| {
+            let text = profile.and_then(|p| p.setting("reading_list"));
+            let v: serde_json::Value = text
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default();
+            v.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|e| {
+                            Some(ReadingItem {
+                                url: e["url"].as_str()?.to_string(),
+                                title: e["title"].as_str().unwrap_or_default().to_string(),
+                                read: e["read"].as_bool().unwrap_or(false),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    fn save_reading_list(&mut self) {
+        let list: Vec<serde_json::Value> = self
+            .reading_list()
+            .iter()
+            .map(|r| serde_json::json!({ "url": r.url, "title": r.title, "read": r.read }))
+            .collect();
+        if let Some(p) = &self.profile {
+            let _ = p.set_setting("reading_list", &serde_json::Value::Array(list).to_string());
         }
     }
 
@@ -2265,6 +2954,10 @@ impl Window {
                         ui.ctx().request_repaint();
                     }
                     if field.gained_focus() {
+                        // Ready before the first letter (model::SuggestIndex).
+                        self.suggest.index = Some(trace::time("suggestion index", || {
+                            model::SuggestIndex::new(&self.model)
+                        }));
                         // Select all, like every browser, so typing replaces the address.
                         if let Some(mut state) =
                             egui::TextEdit::load_state(ui.ctx(), self.address_id)
@@ -2280,12 +2973,16 @@ impl Window {
                     if field.changed() {
                         self.open_suggestions(ui.ctx());
                     }
+                    if field.lost_focus() {
+                        // History may change before it is next used.
+                        self.suggest.index = None;
+                    }
                     if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                         // The row the arrow keys picked, else what was typed
                         // (the first row).
                         let picked = (list_open && self.suggest.arrowed)
-                            .then(|| self.model.suggest(&self.suggest.typed, SUGGESTIONS))
-                            .and_then(|l| l.into_iter().nth(self.suggest.sel));
+                            .then(|| self.suggest.list.get(self.suggest.sel).cloned())
+                            .flatten();
                         if let Some(s) = picked {
                             go = Some(s.url);
                         } else if let Some(prompt) = agent_prompt(&self.address) {
@@ -2359,7 +3056,10 @@ impl Window {
             sel: 0,
             arrowed: false,
             origin: Some(popup::screen_origin(ctx)),
+            list: Vec::new(),
+            index: self.suggest.index.take(),
         };
+        self.suggest.refresh(&self.model);
     }
 
     /// Whether the suggestion list is on screen. It closes, as Chrome's
@@ -2398,6 +3098,12 @@ impl Window {
     /// Forget a history row (Shift+Delete or its remove button).
     fn forget_history(&mut self, url: &str) {
         self.model.remove_history(url);
+        if let Some(index) = &mut self.suggest.index {
+            index.remove_history(url);
+        }
+        if self.suggest.open {
+            self.suggest.refresh(&self.model);
+        }
         if let Some(p) = &self.profile {
             let _ = p.delete_history(url);
         }
@@ -2426,7 +3132,7 @@ impl Window {
         if !(down || up || tab || delete) {
             return;
         }
-        let mut list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let mut list = self.suggest.list.clone();
         let Some(last) = list.len().checked_sub(1) else {
             return;
         };
@@ -2458,7 +3164,7 @@ impl Window {
         if delete && list[sel].kind == SuggestionKind::History {
             let url = list[sel].url.clone();
             self.forget_history(&url);
-            list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+            list = self.suggest.list.clone();
             sel = sel.min(list.len().saturating_sub(1));
         }
         let Some(row) = list.get(sel) else {
@@ -2478,7 +3184,7 @@ impl Window {
         p: theme::Palette,
         field_rect: Rect,
     ) -> Option<String> {
-        let list = self.model.suggest(&self.suggest.typed, SUGGESTIONS);
+        let list = std::mem::take(&mut self.suggest.list);
         let sel = self.suggest.sel.min(list.len().saturating_sub(1));
         let at = popup::to_screen(
             ctx,
@@ -2486,10 +3192,11 @@ impl Window {
         );
         let (go, forget) = popup::show(
             ctx,
-            egui::Id::new("suggestions"),
+            popup::Slot::Suggestions,
+            // Remembered by its row count: each opens measured.
+            egui::Id::new(("suggestions", list.len())),
             at,
             field_rect.width(),
-            false,
             |ui| {
                 let mut go = None;
                 let mut forget = None;
@@ -2582,6 +3289,7 @@ impl Window {
                 (go, forget)
             },
         );
+        self.suggest.list = list;
         if let Some(url) = forget {
             self.forget_history(&url);
             if self.suggest.arrowed {
@@ -2604,6 +3312,9 @@ impl Window {
     }
 
     fn bookmarks_bar(&mut self, ui: &mut egui::Ui) {
+        if !self.bookmark_bar_shown() {
+            return;
+        }
         let p = *theme::palette(ui);
         let top_level: Vec<(usize, model::Bookmark)> = self
             .model
@@ -2615,7 +3326,12 @@ impl Window {
             .collect();
         // The bar's folders: the first part of each folder path, in order.
         let mut folders: Vec<String> = Vec::new();
-        for b in &self.model.bookmarks {
+        for b in self
+            .model
+            .bookmarks
+            .iter()
+            .filter(|b| !model::is_other(&b.folder))
+        {
             if let Some(top) = b.folder.split('/').next().filter(|f| !f.is_empty()) {
                 if !folders.iter().any(|f| f == top) {
                     folders.push(top.to_string());
@@ -3145,7 +3861,15 @@ impl Window {
                         &mut self.internal,
                         self.profile.as_ref(),
                         self.vault.as_mut(),
+                        &self.model.bookmarks,
                     );
+                    if let Some(url) = act.remove_bookmark {
+                        self.model.bookmarks.retain(|b| b.url != url);
+                        self.save_bookmarks();
+                    }
+                    if let Some(c) = act.clear {
+                        self.clear_browsing_data(c);
+                    }
                     if let Some(choice) = act.theme {
                         theme::set_preference(&ctx, &choice);
                         if let Some(p) = &self.profile {
@@ -3268,6 +3992,137 @@ enum OpenAll {
     Tabs,
     Window,
     Group,
+}
+
+/// The ⋯ menu's width, as Chrome's.
+/// Where "Report an issue" goes.
+const ISSUES_URL: &str = "https://github.com/redrob-labs/redrob-browser/issues/new";
+
+/// Every bookmarks folder (and every folder above one), parents before
+/// their folders; "Other bookmarks" always.
+fn bookmark_folders(marks: &[model::Bookmark]) -> Vec<String> {
+    let mut all = std::collections::BTreeSet::new();
+    all.insert(model::OTHER.to_string());
+    for b in marks {
+        let mut path = b.folder.as_str();
+        while !path.is_empty() {
+            all.insert(path.to_string());
+            path = folder_parent(path);
+        }
+    }
+    all.into_iter().collect()
+}
+
+/// The folder a folder is in ("" for the bookmarks bar).
+fn folder_parent(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(p, _)| p)
+}
+
+/// The side menu of a bookmarks folder in the ⋯ menu.
+fn folder_key(path: &str) -> egui::Id {
+    egui::Id::new(("redrob-menu-folder", path))
+}
+
+/// A bookmarks folder's side menu: its folders, then its bookmarks.
+/// Returns the bookmark clicked.
+fn folder_side_menu(ui: &mut egui::Ui, marks: &[model::Bookmark], path: &str) -> Option<String> {
+    let folders = bookmark_folders(marks);
+    let mut any = false;
+    for f in folders.iter().filter(|f| folder_parent(f) == path) {
+        any = true;
+        let name = f.rsplit('/').next().unwrap_or(f);
+        popup::side_item(
+            ui,
+            folder_key(f),
+            Some(Icon::Folder),
+            &theme::elide(name, 36),
+        );
+    }
+    let mut go = None;
+    for b in marks.iter().filter(|b| b.folder == path) {
+        any = true;
+        let label = if b.title.is_empty() { &b.url } else { &b.title };
+        if popup::item(ui, Some(Icon::Globe), &theme::elide(label, 40), "").clicked() {
+            go = Some(b.url.clone());
+            ui.close();
+        }
+    }
+    if !any {
+        popup::note(ui, None, t("(empty)"));
+    }
+    go
+}
+
+const MENU_WIDTH: f32 = 312.0;
+
+/// What the ⋯ menu's zoom row asks for.
+enum ZoomAction {
+    Step(cef::handlers::zoom::Step),
+    Fullscreen,
+}
+
+/// Chrome's zoom row: the label, then − percent + and full screen at the
+/// right edge. Zoom applies to web pages only.
+fn zoom_row(ui: &mut egui::Ui, percent: u32, fullscreen: bool, web: bool) -> Option<ZoomAction> {
+    use cef::handlers::zoom::Step;
+    let p = *theme::palette(ui);
+    let (rect, hover) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), popup::ROW), Sense::hover());
+    if hover.hovered() && popup::pointer_moved(ui) {
+        popup::close_side(ui.ctx());
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + popup::LABEL_X, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        t("Zoom"),
+        egui::FontId::proportional(13.0),
+        p.ink_primary,
+    );
+    let side = 28.0;
+    let cell = |right: f32, width: f32| {
+        Rect::from_min_size(
+            egui::pos2(right - width, rect.center().y - side / 2.0),
+            Vec2::new(width, side),
+        )
+    };
+    let button = |ui: &mut egui::Ui, at: Rect, icon: Icon, tip: &str, enabled: bool| {
+        let mut c = ui.new_child(egui::UiBuilder::new().max_rect(at));
+        theme::icon_button_sized(&mut c, icon, tip, side, enabled).clicked()
+    };
+    let mut act = None;
+    let full = cell(rect.right() - 4.0, side);
+    let tip = if fullscreen {
+        t("Exit full screen")
+    } else {
+        t("Full screen")
+    };
+    if button(ui, full, Icon::Fullscreen, tip, true) {
+        act = Some(ZoomAction::Fullscreen);
+    }
+    // A rule between the zoom controls and full screen, as in Chrome.
+    let rule_x = full.left() - 6.0;
+    ui.painter().vline(
+        rule_x,
+        (rect.top() + 6.0)..=(rect.bottom() - 6.0),
+        Stroke::new(1.0, p.border_subtle),
+    );
+    let plus = cell(rule_x - 6.0, side);
+    if button(ui, plus, Icon::Plus, t("Zoom in"), web) {
+        act = Some(ZoomAction::Step(Step::In));
+    }
+    let label = cell(plus.left(), 52.0);
+    ui.painter().text(
+        label.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("{percent}%"),
+        egui::FontId::proportional(13.0),
+        if web { p.ink_primary } else { p.ink_muted },
+    );
+    let minus = cell(label.left(), side);
+    if button(ui, minus, Icon::Minus, t("Zoom out"), web) {
+        act = Some(ZoomAction::Step(Step::Out));
+    }
+    act
 }
 
 /// Every bookmark in folder `path` and the folders inside it, as Chrome's
