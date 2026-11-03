@@ -311,6 +311,36 @@ pub enum Icon {
     Folder,
     Plug,
     BookOpen,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Translate,
+    Bookmark,
+    Minus,
+    Fullscreen,
+    Power,
+    Print,
+    FolderOpen,
+    SignOut,
+    Browser,
+    Trash,
+    Share,
+    Tool,
+    Help,
+    Card,
+    Map,
+    FolderPlus,
+    List,
+    Book,
+    External,
+    Copy,
+    Clipboard,
+    Save,
+    Link,
+    Gauge,
+    Info,
+    Bug,
+    Stack,
 }
 
 impl Icon {
@@ -346,6 +376,36 @@ impl Icon {
             Icon::Folder => svg!("folder"),
             Icon::Plug => svg!("plug"),
             Icon::BookOpen => svg!("bookOpen"),
+            Icon::Check => svg!("check"),
+            Icon::ChevronDown => svg!("chevronDown"),
+            Icon::ChevronRight => svg!("chevronRight"),
+            Icon::Translate => svg!("translate"),
+            Icon::Bookmark => svg!("bookmark"),
+            Icon::Minus => svg!("minus"),
+            Icon::Fullscreen => svg!("fullscreen"),
+            Icon::Power => svg!("power"),
+            Icon::Print => svg!("print"),
+            Icon::FolderOpen => svg!("folderOpen"),
+            Icon::SignOut => svg!("signOut"),
+            Icon::Browser => svg!("browser"),
+            Icon::Trash => svg!("trash"),
+            Icon::Share => svg!("share"),
+            Icon::Tool => svg!("tool"),
+            Icon::Help => svg!("help"),
+            Icon::Card => svg!("card"),
+            Icon::Map => svg!("map"),
+            Icon::FolderPlus => svg!("folderPlus"),
+            Icon::List => svg!("list"),
+            Icon::Book => svg!("book"),
+            Icon::External => svg!("external"),
+            Icon::Copy => svg!("copy"),
+            Icon::Clipboard => svg!("clipboard"),
+            Icon::Save => svg!("save"),
+            Icon::Link => svg!("link"),
+            Icon::Gauge => svg!("gauge"),
+            Icon::Info => svg!("info"),
+            Icon::Bug => svg!("bug"),
+            Icon::Stack => svg!("stack"),
         }
     }
 
@@ -381,6 +441,41 @@ impl Icon {
 
     pub fn paint(self, ui: &Ui, rect: Rect, tint: Color32) {
         self.image(rect.width(), tint).paint_at(ui, rect);
+    }
+
+    /// Rasterize the icons the address bar's suggestions and the menus
+    /// show, at the sizes they show them, ahead of the first letter typed
+    /// or menu opened (each is an SVG parsed and drawn on first use).
+    pub fn warm(ctx: &egui::Context) {
+        use Icon::*;
+        // The texture `Image::paint_at` asks for: exactly its pixel size.
+        let px = |side: f32| (side * ctx.pixels_per_point()).round() as u32;
+        let at = |icons: &[Icon], side: f32| {
+            for i in icons {
+                let image = i.image(side, Color32::WHITE);
+                let _ = image.source(ctx).load(
+                    ctx,
+                    egui::TextureOptions::default(),
+                    egui::SizeHint::Size {
+                        width: px(side),
+                        height: px(side),
+                        maintain_aspect_ratio: false,
+                    },
+                );
+            }
+        };
+        at(
+            &[
+                Globe, Star, History, Search, Close, Plus, Incognito, Download, Key, BookOpen,
+                Code, Settings, User, SignIn, SignOut, Translate, Bookmark, Minus, Fullscreen,
+                Power, Print, FolderOpen, Check, Folder, Plug, Browser, Trash, Share, Tool, Help,
+                Card, Map, FolderPlus, List, Book, External, Copy, Clipboard, Save, Link, Gauge,
+                Info, Bug, Stack, StarFilled,
+            ],
+            16.0,
+        );
+        at(&[Close], 14.0);
+        at(&[ChevronRight, ChevronDown], 14.0);
     }
 }
 

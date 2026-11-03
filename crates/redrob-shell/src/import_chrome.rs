@@ -81,13 +81,14 @@ pub fn import(source: &Source, scratch: &Path) -> anyhow::Result<Imported> {
         let text = std::fs::read_to_string(&bookmarks)?;
         let json: Value = serde_json::from_str(&text)?;
         let roots = &json["roots"];
-        let folder = format!("Imported from {}", source.name);
-        // The bookmarks bar stays the bookmarks bar; everything else goes in a folder.
+        // Chrome's roots stay its roots: the bar is the bar, other
+        // bookmarks are Other bookmarks, mobile ones a folder in it.
+        let other = crate::model::OTHER;
         walk(&roots["bookmark_bar"], "", &mut out.bookmarks);
-        walk(&roots["other"], &folder, &mut out.bookmarks);
+        walk(&roots["other"], other, &mut out.bookmarks);
         walk(
             &roots["synced"],
-            &format!("{folder}/Mobile"),
+            &format!("{other}/Mobile bookmarks"),
             &mut out.bookmarks,
         );
     }

@@ -1,8 +1,9 @@
 //! The browser's own pages, drawn by the window instead of the engine:
-//! redrob://history, redrob://passwords and redrob://settings.
+//! redrob://history, redrob://passwords, redrob://bookmarks and
+//! redrob://settings (with its delete-browsing-data and about pages).
 
 use crate::i18n::{self, t, tf};
-use crate::model::HistoryEntry;
+use crate::model::{Bookmark, HistoryEntry};
 use crate::profile::Profile;
 use crate::theme::{self, size, Icon};
 use crate::vault::{AgentPolicy, Vault};
@@ -10,6 +11,11 @@ use crate::vault::{AgentPolicy, Vault};
 pub const HISTORY: &str = "redrob://history";
 pub const PASSWORDS: &str = "redrob://passwords";
 pub const SETTINGS: &str = "redrob://settings";
+pub const BOOKMARKS: &str = "redrob://bookmarks";
+/// Chrome's "Delete browsing data" (Ctrl+Shift+Delete).
+pub const CLEAR_DATA: &str = "redrob://settings/clearBrowserData";
+/// About Redrob Browser (Help in the menu).
+pub const ABOUT: &str = "redrob://settings/help";
 
 pub fn is_internal(url: &str) -> bool {
     url.starts_with("redrob://")
@@ -20,6 +26,9 @@ pub fn title(url: &str) -> &'static str {
         HISTORY => t("History"),
         PASSWORDS => t("Passwords"),
         SETTINGS => t("Settings"),
+        BOOKMARKS => t("Bookmarks"),
+        CLEAR_DATA => t("Delete browsing data"),
+        ABOUT => t("About Redrob Browser"),
         _ => t("Redrob Browser"),
     }
 }
@@ -32,6 +41,22 @@ pub struct State {
     history_limit: u32,
     password_origin: Option<String>,
     server_input: Option<String>,
+    bookmark_query: String,
+    /// Delete browsing data: the time range (seconds back, 0 for all time)
+    /// and what goes.
+    clear_range: Option<u64>,
+    clear_history: Option<bool>,
+    clear_cookies: Option<bool>,
+    clear_cache: Option<bool>,
+}
+
+/// What "Delete data" deletes.
+pub struct Clear {
+    /// History since this Unix time (0: all of it), when `history`.
+    pub since: u64,
+    pub history: bool,
+    pub cookies: bool,
+    pub cache: bool,
 }
 
 /// What a page asks the window to do.
@@ -46,6 +71,9 @@ pub struct Actions {
     /// A day of history opened at once: its pages, and the group's name
     /// when they open as a tab group.
     pub open_all: Option<(Vec<String>, Option<String>)>,
+    /// A bookmark removed in the bookmarks manager, by address.
+    pub remove_bookmark: Option<String>,
+    pub clear: Option<Clear>,
 }
 
 pub fn ui(
@@ -54,6 +82,7 @@ pub fn ui(
     s: &mut State,
     profile: Option<&Profile>,
     vault: Option<&mut Vault>,
+    bookmarks: &[Bookmark],
 ) -> Actions {
     let mut act = Actions::default();
     egui::ScrollArea::vertical()
@@ -82,6 +111,18 @@ pub fn ui(
                 SETTINGS => {
                     theme::page_header(ui, Icon::Settings, t("Settings"), "");
                     settings(ui, s, profile, &mut act);
+                }
+                BOOKMARKS => {
+                    theme::page_header(ui, Icon::Bookmark, t("Bookmarks"), "");
+                    bookmarks_page(ui, s, bookmarks, &mut act);
+                }
+                CLEAR_DATA => {
+                    theme::page_header(ui, Icon::Trash, t("Delete browsing data"), "");
+                    clear_data(ui, s, &mut act);
+                }
+                ABOUT => {
+                    theme::page_header(ui, Icon::Info, t("About Redrob Browser"), "");
+                    about(ui, &mut act);
                 }
                 _ => {
                     theme::page_header(ui, Icon::Globe, title(url), "");
@@ -454,6 +495,109 @@ fn settings(ui: &mut egui::Ui, s: &mut State, profile: Option<&Profile>, act: &m
         }
     });
     about(ui, act);
+}
+
+/// The bookmarks manager: every folder's bookmarks, to open or remove.
+fn bookmarks_page(ui: &mut egui::Ui, s: &mut State, bookmarks: &[Bookmark], act: &mut Actions) {
+    let w = (ui.available_width() - 120.0).clamp(200.0, 420.0);
+    theme::text_field(
+        ui,
+        &mut s.bookmark_query,
+        t("Search bookmarks"),
+        w,
+        Some(Icon::Search),
+    );
+    ui.add_space(size::SPACE_4);
+    let q = s.bookmark_query.to_lowercase();
+    let shown: Vec<&Bookmark> = bookmarks
+        .iter()
+        .filter(|b| {
+            q.is_empty() || b.title.to_lowercase().contains(&q) || b.url.to_lowercase().contains(&q)
+        })
+        .collect();
+    if shown.is_empty() {
+        theme::card(ui, "", "", |ui| theme::empty_note(ui, t("No bookmarks.")));
+        return;
+    }
+    let mut folders: Vec<&str> = Vec::new();
+    for b in &shown {
+        if !folders.contains(&b.folder.as_str()) {
+            folders.push(&b.folder);
+        }
+    }
+    folders.sort_by_key(|f| (crate::model::is_other(f), *f));
+    for folder in folders {
+        theme::card(ui, &crate::model::folder_label(folder), "", |ui| {
+            for b in shown.iter().filter(|b| b.folder == folder) {
+                let title = if b.title.is_empty() { &b.url } else { &b.title };
+                let host = url::Url::parse(&b.url)
+                    .ok()
+                    .and_then(|u| u.host_str().map(str::to_string))
+                    .unwrap_or_default();
+                let (r, removed) = theme::list_row(
+                    ui,
+                    &badge_letter(if host.is_empty() { title } else { &host }),
+                    &theme::elide(title, 90),
+                    &theme::elide(&b.url, 110),
+                    "",
+                    true,
+                );
+                if removed {
+                    act.remove_bookmark = Some(b.url.clone());
+                } else if r.clicked() {
+                    act.open = Some(b.url.clone());
+                } else if r.middle_clicked() {
+                    act.open_new_tab = Some(b.url.clone());
+                }
+            }
+        });
+    }
+}
+
+/// Delete browsing data, as Chrome's dialog: a time range and what goes.
+fn clear_data(ui: &mut egui::Ui, s: &mut State, act: &mut Actions) {
+    theme::card(ui, t("Time range"), "", |ui| {
+        let items = [
+            ("3600", t("Last hour")),
+            ("86400", t("Last 24 hours")),
+            ("604800", t("Last 7 days")),
+            ("0", t("All time")),
+        ];
+        let now = s.clear_range.get_or_insert(3600).to_string();
+        if let Some(id) = theme::segmented(ui, &items, &now) {
+            s.clear_range = Some(id.parse().unwrap_or(0));
+        }
+    });
+    let history = s.clear_history.get_or_insert(true);
+    let mut h = *history;
+    let mut c = *s.clear_cookies.get_or_insert(true);
+    let mut k = *s.clear_cache.get_or_insert(true);
+    theme::card(
+        ui,
+        t("What to delete"),
+        t("Cookies and cached files go for all time, whatever the range."),
+        |ui| {
+            ui.checkbox(&mut h, t("Browsing history"));
+            ui.checkbox(&mut c, t("Cookies and other site data"));
+            ui.checkbox(&mut k, t("Cached images and files"));
+            ui.add_space(size::SPACE_3);
+            if theme::button(ui, t("Delete data"), true).clicked() && (h || c || k) {
+                let since = match s.clear_range.unwrap_or(3600) {
+                    0 => 0,
+                    back => crate::model::now().saturating_sub(back),
+                };
+                act.clear = Some(Clear {
+                    since,
+                    history: h,
+                    cookies: c,
+                    cache: k,
+                });
+            }
+        },
+    );
+    s.clear_history = Some(h);
+    s.clear_cookies = Some(c);
+    s.clear_cache = Some(k);
 }
 
 /// The version, and the licences of Chromium and everything it is built
