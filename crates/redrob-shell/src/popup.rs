@@ -798,12 +798,17 @@ fn row(
         right = x - 12.0;
     }
     let x = icon_rect.right() + PAD;
-    let label_painter = ui.painter_at(Rect::from_x_y_ranges(x..=right, rect.y_range()));
-    label_painter.text(
-        egui::pos2(x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
+    // One line, cut with "…" before it reaches the shortcut or chevron.
+    let mut job = egui::text::LayoutJob::simple_singleline(
+        label.to_owned(),
         egui::FontId::proportional(13.0),
+        p.ink_primary,
+    );
+    job.wrap = egui::text::TextWrapping::truncate_at_width((right - x).max(0.0));
+    let g = painter.layout_job(job);
+    painter.galley(
+        egui::pos2(x, rect.center().y - g.size().y / 2.0),
+        g,
         p.ink_primary,
     );
     (r, run, open)
@@ -938,25 +943,14 @@ pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) 
     if !any_open(ctx) {
         return;
     }
-    let (_, mut at, left) = s[i];
-    // Beside the menu, never over it: to its right, else to its left,
-    // else on the side with more room, narrowed to fit (its text wraps).
+    let (_, mut at, _) = s[i];
     // Its window is `width` plus the frame's 1 point border on each side.
     const BORDER: f32 = 2.0;
     let mut width = width;
     if let Some(m) = ctx.input(|i| i.viewport().monitor_size) {
-        let right = (m.x - at.x - BORDER).max(0.0);
-        let left_room = (left - BORDER).max(0.0);
-        if width > right {
-            if width <= left_room {
-                at.x = left - width - BORDER;
-            } else if left_room > right {
-                width = left_room;
-                at.x = 0.0;
-            } else {
-                width = right;
-            }
-        }
+        let (x, w) = place_side(&s[..=i], m.x, width + BORDER);
+        at.x = x;
+        width = w - BORDER;
     }
     // Taller than the screen below its row: moved up, as far as the top,
     // and scrolled when taller than the screen.
@@ -981,6 +975,103 @@ pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) 
                 end(&c, i + 1);
             });
     });
+}
+
+/// Where the last of `chain` goes, `w` wide on a screen `screen` wide:
+/// its x and its width. Each entry records the row that opened the next
+/// menu (its right edge + 8 and left edge - 8), so `chain` spans every
+/// open menu it must not cover. It keeps its parent's direction, as
+/// Chrome cascades; else takes the other side; else the side with more
+/// free room, narrowed (its labels end in "…"). Only a screen too narrow
+/// for even that puts it over an ancestor.
+fn place_side(chain: &[Side], screen: f32, w: f32) -> (f32, f32) {
+    const MIN: f32 = 180.0;
+    const EPS: f32 = 0.5;
+    let Some(&(_, at, left)) = chain.last() else {
+        return (0.0, w);
+    };
+    let right_x = at.x;
+    // Every open menu's x span, its frame included.
+    let spans: Vec<(f32, f32)> = chain.iter().map(|&(_, a, l)| (l, a.x)).collect();
+    let room_right = spans
+        .iter()
+        .filter(|s| s.1 > right_x + EPS)
+        .map(|s| s.0.max(right_x))
+        .fold(screen, f32::min)
+        - right_x;
+    let room_left = left
+        - spans
+            .iter()
+            .filter(|s| s.0 < left - EPS)
+            .map(|s| s.1.min(left))
+            .fold(0.0, f32::max);
+    // The parent went left of its own parent: keep going left.
+    let leftward = chain.len() >= 2 && {
+        let (p, gp) = (spans[chain.len() - 1], spans[chain.len() - 2]);
+        p.0 < gp.0
+    };
+    let fits_right = room_right >= w;
+    let fits_left = room_left >= w;
+    match (leftward, fits_right, fits_left) {
+        (false, true, _) | (true, true, false) => (right_x, w),
+        (_, _, true) => (left - w, w),
+        _ if room_right.max(room_left) >= MIN => {
+            if room_right >= room_left {
+                (right_x, room_right)
+            } else {
+                (left - room_left, room_left)
+            }
+        }
+        // No free room anywhere: beside its parent on the screen's wider
+        // side, over an older menu.
+        _ => {
+            let r = (screen - right_x).max(0.0);
+            let l = left.max(0.0);
+            if w <= r {
+                (right_x, w)
+            } else if w <= l {
+                (left - w, w)
+            } else if l > r {
+                (0.0, l)
+            } else {
+                (right_x, r)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod place_tests {
+    use super::*;
+
+    fn side(left: f32, right: f32) -> Side {
+        (Id::new(left as i32), egui::pos2(right, 0.0), left)
+    }
+
+    #[test]
+    fn cascades_left_past_every_ancestor() {
+        // Menu at the screen's right edge (1100..1400): Bookmarks opens left
+        // of it, then a folder opens left of Bookmarks, not back over the
+        // menu.
+        let menu = side(1092.0, 1408.0);
+        let (x1, _) = place_side(&[menu], 1420.0, 300.0);
+        assert_eq!(x1, 792.0);
+        let bm = side(x1, x1 + 300.0);
+        let (x2, w2) = place_side(&[menu, bm], 1420.0, 300.0);
+        assert_eq!((x2, w2), (492.0, 300.0));
+    }
+
+    #[test]
+    fn narrow_screen_shrinks_instead_of_covering() {
+        // 640 wide: menu 320..640, Bookmarks 0..312; the folder has no
+        // free room, so it may only cover an ancestor as a last resort,
+        // but with room on the right it stays right.
+        let menu = side(312.0, 648.0);
+        let (x1, w1) = place_side(&[menu], 640.0, 320.0);
+        assert!(x1 + w1 <= 312.5);
+        let free = place_side(&[side(400.0, 700.0)], 1920.0, 300.0);
+        assert_eq!(free, (700.0, 300.0));
+    }
 }
 
 /// A separator between a menu's groups.
