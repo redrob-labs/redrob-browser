@@ -137,6 +137,9 @@ pub fn instead(command: i32) -> Option<Instead> {
         CLEAR_BROWSING_DATA => Shortcut(crate::cef::keys::Shortcut::ClearData),
         SELECT_NEXT_TAB => Shortcut(crate::cef::keys::Shortcut::NextTab),
         SELECT_PREVIOUS_TAB => Shortcut(crate::cef::keys::Shortcut::PrevTab),
+        SELECT_TAB_0..=SELECT_LAST_TAB => Shortcut(crate::cef::keys::Shortcut::SelectTab(
+            (command - SELECT_TAB_0) as u8,
+        )),
         MOVE_TAB_NEXT => Shortcut(crate::cef::keys::Shortcut::MoveTabRight),
         MOVE_TAB_PREVIOUS => Shortcut(crate::cef::keys::Shortcut::MoveTabLeft),
         SHOW_HISTORY => Shortcut(crate::cef::keys::Shortcut::History),
@@ -161,7 +164,6 @@ pub fn instead(command: i32) -> Option<Instead> {
         VIEW_SOURCE => ViewSource,
         CLOSE_WINDOW | EXIT | FULLSCREEN | SHOW_APP_MENU | FOCUS_MENU_BAR | FOCUS_NEXT_PANE
         | FOCUS_PREVIOUS_PANE | FOCUS_BOOKMARKS | DUPLICATE_TAB | HOME => Nothing,
-        c if (SELECT_TAB_0..=SELECT_LAST_TAB).contains(&c) => Nothing,
         _ => return None,
     })
 }
@@ -248,7 +250,14 @@ mod tests {
             instead(id::RESTORE_TAB),
             Some(Instead::Shortcut(Shortcut::ReopenTab))
         );
-        assert_eq!(instead(id::SELECT_TAB_0 + 3), Some(Instead::Nothing));
+        assert_eq!(
+            instead(id::SELECT_TAB_0 + 3),
+            Some(Instead::Shortcut(Shortcut::SelectTab(3)))
+        );
+        assert_eq!(
+            instead(id::SELECT_LAST_TAB),
+            Some(Instead::Shortcut(Shortcut::SelectTab(8)))
+        );
         assert_eq!(
             instead(id::OPTIONS),
             Some(Instead::Open("chrome://settings/"))

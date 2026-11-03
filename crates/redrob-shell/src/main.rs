@@ -972,6 +972,18 @@ impl Window {
                     self.select_tab(i);
                 }
             }
+            // Ctrl+1..8: the nth tab shown in the strip; Ctrl+9: the last.
+            Shortcut::SelectTab(k) => {
+                let shown: Vec<usize> = (0..n).filter(|i| self.model.tab_shown(*i)).collect();
+                let pick = if k >= 8 {
+                    shown.last()
+                } else {
+                    shown.get(k as usize)
+                };
+                if let Some(&i) = pick {
+                    self.select_tab(i);
+                }
+            }
             Shortcut::PrevTab if n > 1 => {
                 if let Some(i) = self.model.next_shown(true) {
                     self.select_tab(i);

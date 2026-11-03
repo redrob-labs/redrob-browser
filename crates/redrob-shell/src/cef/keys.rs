@@ -56,6 +56,8 @@ pub enum Shortcut {
     TaskManager,
     /// Ctrl+S: save the page.
     SavePage,
+    /// Ctrl+1..Ctrl+8: that tab; Ctrl+9 (`8`): the last tab.
+    SelectTab(u8),
     /// Not taken from the page: it closes the window's menus and bars.
     Escape,
 }
@@ -110,6 +112,9 @@ pub fn shortcut(vk: i32, flags: u32) -> Option<Shortcut> {
         _ if cmd && ch(b'G') => FindNext,
         _ if cmd && ch(b'P') => Print,
         _ if cmd && ch(b'S') => SavePage,
+        // Ctrl+1..9, main row and keypad.
+        _ if cmd && (0x31..=0x39).contains(&vk) => SelectTab((vk - 0x31) as u8),
+        _ if cmd && (0x61..=0x69).contains(&vk) => SelectTab((vk - 0x61) as u8),
         _ if cmd && vk == 0x21 => PrevTab,
         _ if cmd && vk == 0x22 => NextTab,
         // = and + (main row and keypad), - (main row and keypad), 0.
@@ -183,11 +188,27 @@ pub fn from_egui(ctx: &egui::Context) -> Vec<Shortcut> {
         (Modifiers::SHIFT, Key::F3, FindPrev),
         (none, Key::F3, FindNext),
     ];
+    let digits = [
+        Key::Num1,
+        Key::Num2,
+        Key::Num3,
+        Key::Num4,
+        Key::Num5,
+        Key::Num6,
+        Key::Num7,
+        Key::Num8,
+        Key::Num9,
+    ];
     let mut out = Vec::new();
     ctx.input_mut(|i| {
         for (m, k, s) in table {
             if i.consume_key(*m, *k) {
                 out.push(*s);
+            }
+        }
+        for (n, k) in digits.iter().enumerate() {
+            if i.consume_key(cmd, *k) {
+                out.push(SelectTab(n as u8));
             }
         }
     });
@@ -266,4 +287,22 @@ fn edit(browser: &Browser, e: &KeyEvent) -> ::std::os::raw::c_int {
 
 pub fn handler(sink: Sink) -> KeyboardHandler {
     Keys::new(sink)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_digits_pick_tabs() {
+        let cmd = if cfg!(target_os = "macos") {
+            COMMAND
+        } else {
+            CONTROL
+        };
+        assert_eq!(shortcut(0x31, cmd), Some(Shortcut::SelectTab(0)));
+        assert_eq!(shortcut(0x39, cmd), Some(Shortcut::SelectTab(8)));
+        assert_eq!(shortcut(0x63, cmd), Some(Shortcut::SelectTab(2)));
+        assert_eq!(shortcut(0x31, 0), None);
+    }
 }

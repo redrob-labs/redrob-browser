@@ -1040,40 +1040,6 @@ fn place_side(chain: &[Side], screen: f32, w: f32) -> (f32, f32) {
     }
 }
 
-#[cfg(test)]
-mod place_tests {
-    use super::*;
-
-    fn side(left: f32, right: f32) -> Side {
-        (Id::new(left as i32), egui::pos2(right, 0.0), left)
-    }
-
-    #[test]
-    fn cascades_left_past_every_ancestor() {
-        // Menu at the screen's right edge (1100..1400): Bookmarks opens left
-        // of it, then a folder opens left of Bookmarks, not back over the
-        // menu.
-        let menu = side(1092.0, 1408.0);
-        let (x1, _) = place_side(&[menu], 1420.0, 300.0);
-        assert_eq!(x1, 792.0);
-        let bm = side(x1, x1 + 300.0);
-        let (x2, w2) = place_side(&[menu, bm], 1420.0, 300.0);
-        assert_eq!((x2, w2), (492.0, 300.0));
-    }
-
-    #[test]
-    fn narrow_screen_shrinks_instead_of_covering() {
-        // 640 wide: menu 320..640, Bookmarks 0..312; the folder has no
-        // free room, so it may only cover an ancestor as a last resort,
-        // but with room on the right it stays right.
-        let menu = side(312.0, 648.0);
-        let (x1, w1) = place_side(&[menu], 640.0, 320.0);
-        assert!(x1 + w1 <= 312.5);
-        let free = place_side(&[side(400.0, 700.0)], 1920.0, 300.0);
-        assert_eq!(free, (700.0, 300.0));
-    }
-}
-
 /// A separator between a menu's groups.
 pub fn separator(ui: &mut Ui) {
     let p = theme::palette(ui);
@@ -1126,4 +1092,38 @@ pub fn status(ctx: &Context, page: Rect, link: &str) {
     show(ctx, Slot::Status, id, at, page.width() * 0.6, |ui| {
         ui.label(egui::RichText::new(text).size(12.0));
     });
+}
+
+#[cfg(test)]
+mod place_tests {
+    use super::*;
+
+    fn side(left: f32, right: f32) -> Side {
+        (Id::new(left as i32), egui::pos2(right, 0.0), left)
+    }
+
+    #[test]
+    fn cascades_left_past_every_ancestor() {
+        // Menu at the screen's right edge (1100..1400): Bookmarks opens left
+        // of it, then a folder opens left of Bookmarks, not back over the
+        // menu.
+        let menu = side(1092.0, 1408.0);
+        let (x1, _) = place_side(&[menu], 1420.0, 300.0);
+        assert_eq!(x1, 792.0);
+        let bm = side(x1, x1 + 300.0);
+        let (x2, w2) = place_side(&[menu, bm], 1420.0, 300.0);
+        assert_eq!((x2, w2), (492.0, 300.0));
+    }
+
+    #[test]
+    fn narrow_screen_shrinks_instead_of_covering() {
+        // 640 wide: menu 320..640, Bookmarks 0..312; the folder has no
+        // free room, so it may only cover an ancestor as a last resort,
+        // but with room on the right it stays right.
+        let menu = side(312.0, 648.0);
+        let (x1, w1) = place_side(&[menu], 640.0, 320.0);
+        assert!(x1 + w1 <= 312.5);
+        let free = place_side(&[side(400.0, 700.0)], 1920.0, 300.0);
+        assert_eq!(free, (700.0, 300.0));
+    }
 }
