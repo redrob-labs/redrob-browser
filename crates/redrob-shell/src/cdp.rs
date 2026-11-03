@@ -120,6 +120,36 @@ pub enum Op {
     ClearSiteData(String),
     /// Reading mode on or off (cef/handlers/reader.rs).
     Reader,
+    /// Run one of Chrome's own commands on the page (cef/handlers/chrome.rs
+    /// `id`), when Chrome has it enabled there.
+    Chrome(i32),
+    /// Cut, copy or paste in the page, as its context menu does.
+    Edit(Edit),
+    /// Which of Chrome's own page commands work on this page now: answered
+    /// with `Event::Commands`.
+    Commands,
+    /// Delete every cookie and site's stored data, and the cache.
+    ClearBrowsingData {
+        cookies: bool,
+        cache: bool,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edit {
+    Cut,
+    Copy,
+    Paste,
+}
+
+/// Which of Chrome's own page commands work on a page (`Op::Commands`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PageCommands {
+    pub translate: bool,
+    pub cast: bool,
+    pub save: bool,
+    pub qr: bool,
+    pub task_manager: bool,
 }
 
 /// The browser window a command came from. A tab belongs to the window that
@@ -236,6 +266,8 @@ pub enum Event {
     /// An extension's toolbar badge changed (cef/handlers/extensions.rs).
     /// Sent with tab 0.
     Badges,
+    /// What `Op::Commands` asked.
+    Commands(PageCommands),
     Error(String),
 }
 
@@ -880,6 +912,14 @@ impl Engine {
                 "Storage.clearDataForOrigin",
                 json!({ "origin": origin, "storageTypes": "all" }),
             ),
+            Op::ClearBrowsingData { cookies, cache } => {
+                if cookies {
+                    client::devtools_send(&browser, "Network.clearBrowserCookies", json!({}));
+                }
+                if cache {
+                    client::devtools_send(&browser, "Network.clearBrowserCache", json!({}));
+                }
+            }
             Op::Close => {
                 if self.popup.as_ref().is_some_and(|p| p.page == tab) {
                     self.close_popup();

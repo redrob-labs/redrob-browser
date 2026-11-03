@@ -37,8 +37,10 @@ pub fn to_screen(ctx: &Context, p: Pos2) -> Pos2 {
 pub enum Slot {
     Suggestions,
     Menu,
-    /// The side menu of a menu's item (Language, Import).
-    Submenu,
+    /// The side menu at this depth of the open menu (0 opens from the menu
+    /// itself, 1 from that side menu, ...). The first two are kept made;
+    /// deeper ones are made when a folder that deep opens.
+    Side(u8),
     /// The page's context menu, which Chromium opens.
     PageMenu,
     /// A permission or "open with another app" prompt.
@@ -51,11 +53,12 @@ pub enum Slot {
 
 impl Slot {
     /// In the order they are made: the address bar's first.
-    const ALL: [Slot; 8] = [
+    const ALL: [Slot; 9] = [
         Slot::Suggestions,
         Slot::Menu,
         Slot::Tip,
-        Slot::Submenu,
+        Slot::Side(0),
+        Slot::Side(1),
         Slot::PageMenu,
         Slot::Status,
         Slot::Badge,
@@ -295,13 +298,206 @@ fn open_id() -> Id {
     Id::new("redrob-open-menu")
 }
 
-/// The open side menu of the open menu, and where it goes on screen.
-/// The open side menu's key, its top-left past the menu's right edge, and
-/// the menu's left edge (it opens there where the screen ends).
+/// An open side menu: its key, its top-left past its parent's right edge,
+/// and the parent's left edge (it opens there where the screen ends).
 type Side = (Id, Pos2, f32);
 
+/// The open side menus of the open menu, outermost first: the one at `i`
+/// opened from a row of the one at `i - 1` (of the menu itself for 0).
 fn side_id() -> Id {
-    Id::new("redrob-open-side-menu")
+    Id::new("redrob-open-side-menus")
+}
+
+fn sides(ctx: &Context) -> Vec<Side> {
+    ctx.data(|d| d.get_temp::<Vec<Side>>(side_id()))
+        .unwrap_or_default()
+}
+
+fn set_sides(ctx: &Context, s: Vec<Side>) {
+    ctx.data_mut(|d| d.insert_temp(side_id(), s));
+}
+
+/// The depth of the menu being drawn: 0 for the menu, `i + 1` for the side
+/// menu at `i`.
+fn depth_id() -> Id {
+    Id::new("redrob-menu-drawing-depth")
+}
+
+fn depth(ctx: &Context) -> usize {
+    ctx.data(|d| d.get_temp::<usize>(depth_id())).unwrap_or(0)
+}
+
+/// The keyboard's place in the open menus, as Chrome's: the highlighted
+/// row of each depth, and the depth the arrows move in.
+#[derive(Clone, Default)]
+struct Nav {
+    level: usize,
+    index: Vec<Option<usize>>,
+    /// Rows each depth drew last pass, for the arrows to wrap around.
+    rows: Vec<usize>,
+    /// Rows drawn so far this pass, per depth.
+    drawn: Vec<usize>,
+    /// The highlight follows the keyboard, not the pointer, until it moves.
+    keyboard: bool,
+    /// Enter was pressed: the highlighted row runs this pass.
+    activate: bool,
+    /// Right arrow: the highlighted row opens its side menu this pass.
+    open: bool,
+}
+
+fn nav_id() -> Id {
+    Id::new("redrob-menu-nav")
+}
+
+fn nav(ctx: &Context) -> Nav {
+    ctx.data(|d| d.get_temp::<Nav>(nav_id()))
+        .unwrap_or_default()
+}
+
+fn set_nav(ctx: &Context, n: Nav) {
+    ctx.data_mut(|d| d.insert_temp(nav_id(), n));
+}
+
+fn grow<T: Clone + Default>(v: &mut Vec<T>, len: usize) {
+    if v.len() < len {
+        v.resize(len, T::default());
+    }
+}
+
+/// Start drawing the menu at depth `d`: its rows are counted from 0.
+fn begin(ctx: &Context, d: usize) {
+    ctx.data_mut(|data| data.insert_temp(depth_id(), d));
+    let mut n = nav(ctx);
+    grow(&mut n.drawn, d + 1);
+    n.drawn[d] = 0;
+    set_nav(ctx, n);
+}
+
+/// Done drawing the menu at depth `d`.
+fn end(ctx: &Context, d: usize) {
+    let mut n = nav(ctx);
+    grow(&mut n.drawn, d + 1);
+    grow(&mut n.rows, d + 1);
+    n.rows[d] = n.drawn[d];
+    set_nav(ctx, n);
+    ctx.data_mut(|data| data.insert_temp(depth_id(), 0usize));
+}
+
+/// The keys of the open menu, read from the window's input before the
+/// menus are drawn (the menus' own windows never get the keyboard):
+/// Up and Down move the highlight, Right or Enter open a side menu, Left
+/// closes one, Enter runs the row. Escape is [`escape`].
+pub fn keys(ctx: &Context) {
+    if !any_open(ctx) {
+        return;
+    }
+    use egui::{Key, Modifiers};
+    let [down, up, right, left, enter] = ctx.input_mut(|i| {
+        [
+            Key::ArrowDown,
+            Key::ArrowUp,
+            Key::ArrowRight,
+            Key::ArrowLeft,
+            Key::Enter,
+        ]
+        .map(|k| i.consume_key(Modifiers::NONE, k))
+    });
+    let mut n = nav(ctx);
+    let open = sides(ctx).len();
+    n.level = n.level.min(open);
+    n.activate = false;
+    n.open = false;
+    if !(down || up || right || left || enter) {
+        set_nav(ctx, n);
+        return;
+    }
+    n.keyboard = true;
+    let l = n.level;
+    grow(&mut n.index, l + 1);
+    grow(&mut n.rows, l + 1);
+    let rows = n.rows[l];
+    if (down || up) && rows > 0 {
+        n.index[l] = Some(match (n.index[l], down) {
+            (None, true) => 0,
+            (None, false) => rows - 1,
+            (Some(i), true) => (i + 1) % rows,
+            (Some(i), false) => (i + rows - 1) % rows,
+        });
+    }
+    if left && l > 0 {
+        let mut s = sides(ctx);
+        s.truncate(l - 1);
+        set_sides(ctx, s);
+        n.index.truncate(l);
+        n.level = l - 1;
+    }
+    n.open = right;
+    n.activate = enter;
+    set_nav(ctx, n);
+    ctx.request_repaint();
+}
+
+/// Escape: closes the innermost side menu, else the menu. True when it
+/// closed a side menu only.
+pub fn escape(ctx: &Context) -> bool {
+    let mut s = sides(ctx);
+    if s.pop().is_none() {
+        return false;
+    }
+    let len = s.len();
+    set_sides(ctx, s);
+    let mut n = nav(ctx);
+    n.level = n.level.min(len);
+    n.index.truncate(n.level + 1);
+    set_nav(ctx, n);
+    ctx.request_repaint();
+    true
+}
+
+/// What a row of a menu does this pass.
+pub struct Act {
+    r: Response,
+    run: bool,
+}
+
+impl Act {
+    /// Clicked, or Enter pressed while it is highlighted.
+    pub fn clicked(&self) -> bool {
+        self.r.clicked() || self.run
+    }
+}
+
+/// Count a row of the menu being drawn and say whether the keyboard has it:
+/// (highlighted, Enter runs it, Right opens it).
+fn nav_row(ui: &Ui, r: &Response) -> (bool, bool, bool) {
+    let ctx = ui.ctx();
+    let d = depth(ctx);
+    let mut n = nav(ctx);
+    grow(&mut n.drawn, d + 1);
+    grow(&mut n.index, d + 1);
+    let index = n.drawn[d];
+    n.drawn[d] += 1;
+    if r.hovered() && ui.input(|i| i.pointer.is_moving() || i.pointer.any_pressed()) {
+        n.keyboard = false;
+        n.level = d;
+        n.index[d] = Some(index);
+    }
+    let mine = n.index[d] == Some(index) && n.level == d;
+    let lit = if n.keyboard {
+        n.index[d] == Some(index) && n.level >= d
+    } else {
+        r.hovered()
+    };
+    let run = mine && n.activate;
+    let open = mine && n.open;
+    if run {
+        n.activate = false;
+    }
+    if open {
+        n.open = false;
+    }
+    set_nav(ctx, n);
+    (lit, run, open)
 }
 
 fn is_open(ctx: &Context, id: Id) -> bool {
@@ -319,7 +515,8 @@ fn set_open(ctx: &Context, id: Option<Id>) {
     });
     ctx.data_mut(|d| {
         d.remove::<Id>(Id::new("redrob-open-submenu"));
-        d.remove::<Side>(side_id());
+        d.remove::<Vec<Side>>(side_id());
+        d.remove::<Nav>(nav_id());
     });
 }
 
@@ -408,7 +605,9 @@ pub fn menu(r: &Response, width: f32, right: bool, add: impl FnOnce(&mut Ui)) {
     let c = ctx.clone();
     show(&ctx, Slot::Menu, id, at, width, |ui| {
         ui.set_width(width - 12.0);
-        closable(&c, ui, add)
+        begin(&c, 0);
+        closable(&c, ui, add);
+        end(&c, 0);
     });
 }
 
@@ -451,9 +650,9 @@ pub fn submenu(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     let sub_id = Id::new("redrob-open-submenu");
     let id = ui.id().with(("submenu", label));
     let open = ctx.data(|d| d.get_temp::<Id>(sub_id)) == Some(id);
-    let r = row(
+    let (r, ..) = row(
         ui,
-        None,
+        Glyph::None,
         label,
         "",
         Some(if open {
@@ -461,6 +660,7 @@ pub fn submenu(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
         } else {
             Icon::ChevronRight
         }),
+        false,
         false,
     );
     if r.clicked() || (r.hovered() && !open) {
@@ -484,23 +684,47 @@ pub const ROW: f32 = 32.0;
 const ICON_SLOT: f32 = 16.0;
 const PAD: f32 = 12.0;
 
-/// One menu row: an icon slot (empty for `None`), the label, then a muted
-/// shortcut or a chevron at the right edge. `checked` marks the current
-/// choice (a language) with a check in the icon slot.
+/// What sits in a row's icon slot.
+#[derive(Clone, Copy)]
+pub enum Glyph {
+    None,
+    Icon(Icon),
+    /// An image of its own (an extension's icon), drawn untinted.
+    Image(egui::TextureId),
+    /// A tab group's colour, as a dot.
+    Dot(egui::Color32),
+}
+
+impl From<Option<Icon>> for Glyph {
+    fn from(i: Option<Icon>) -> Self {
+        i.map_or(Glyph::None, Glyph::Icon)
+    }
+}
+
+/// One menu row: an icon slot (empty for [`Glyph::None`]), the label, then
+/// a muted shortcut or a chevron at the right edge. `checked` marks the
+/// current choice with a check in the icon slot. A `nav` row is one the
+/// keyboard moves through: returns whether Enter runs it and Right opens it.
 fn row(
     ui: &mut Ui,
-    icon: Option<Icon>,
+    glyph: Glyph,
     label: &str,
     shortcut: &str,
     end: Option<Icon>,
     checked: bool,
-) -> Response {
+    nav: bool,
+) -> (Response, bool, bool) {
     let p = *theme::palette(ui);
     let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), Sense::click());
+    let (lit, run, open) = if nav {
+        nav_row(ui, &r)
+    } else {
+        (r.hovered(), false, false)
+    };
     if !ui.is_rect_visible(rect) {
-        return r;
+        return (r, run, open);
     }
-    if r.hovered() || r.has_focus() {
+    if lit {
         ui.painter().rect_filled(
             rect,
             egui::CornerRadius::same(theme::size::RADIUS_SM),
@@ -511,9 +735,14 @@ fn row(
         egui::pos2(rect.left() + PAD + ICON_SLOT / 2.0, rect.center().y),
         Vec2::splat(ICON_SLOT),
     );
-    let icon = if checked { Some(Icon::Check) } else { icon };
-    if let Some(icon) = icon {
-        icon.paint(
+    let glyph = if checked {
+        Glyph::Icon(Icon::Check)
+    } else {
+        glyph
+    };
+    match glyph {
+        Glyph::None => {}
+        Glyph::Icon(icon) => icon.paint(
             ui,
             icon_rect,
             if checked {
@@ -521,7 +750,13 @@ fn row(
             } else {
                 p.ink_secondary
             },
-        );
+        ),
+        Glyph::Image(tex) => {
+            egui::Image::new((tex, Vec2::splat(ICON_SLOT))).paint_at(ui, icon_rect);
+        }
+        Glyph::Dot(c) => {
+            ui.painter().circle_filled(icon_rect.center(), 5.0, c);
+        }
     }
     let painter = ui.painter_at(rect);
     let mut right = rect.right() - PAD;
@@ -552,23 +787,24 @@ fn row(
         egui::FontId::proportional(13.0),
         p.ink_primary,
     );
-    r
+    (r, run, open)
 }
 
 /// A menu item: an icon slot, the label and its shortcut, right-aligned.
-/// Hovering it closes the open side menu, as in Chrome.
-pub fn item(ui: &mut Ui, icon: Option<Icon>, label: &str, shortcut: &str) -> Response {
-    let r = row(ui, icon, label, shortcut, None, false);
+/// Hovering it closes the side menus opened from its menu, as in Chrome.
+pub fn item(ui: &mut Ui, icon: impl Into<Glyph>, label: &str, shortcut: &str) -> Act {
+    let (r, run, _) = row(ui, icon.into(), label, shortcut, None, false, true);
     if r.hovered() {
         close_side(ui.ctx());
     }
-    r
+    Act { r, run }
 }
 
 /// Where a row's label starts: past its icon slot.
 pub const LABEL_X: f32 = PAD + ICON_SLOT + PAD;
 
-/// A row that only says something (who is signed in), muted.
+/// A row that only says something (who is signed in, a list's heading),
+/// muted.
 pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
     let p = *theme::palette(ui);
     // Wrapped to the menu's width: a long note grows taller, not clipped.
@@ -596,27 +832,54 @@ pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
         .galley(egui::pos2(rect.left() + LABEL_X, top), galley, p.ink_muted);
 }
 
-/// An item of a side menu marking the current choice.
-pub fn choice(ui: &mut Ui, label: &str, current: bool) -> Response {
-    row(ui, None, label, "", None, current)
+/// An item of a side menu marking the current choice, with a shortcut at
+/// its end (the key that picks it).
+pub fn choice_with(ui: &mut Ui, label: &str, current: bool, shortcut: &str) -> Act {
+    let (r, run, _) = row(ui, Glyph::None, label, shortcut, None, current, true);
+    if r.hovered() {
+        close_side(ui.ctx());
+    }
+    Act { r, run }
 }
 
-/// Close the open side menu (another row of its menu is hovered).
+/// The keys of the open side menus, outermost first.
+pub fn open_sides(ctx: &Context) -> Vec<Id> {
+    sides(ctx).into_iter().map(|(k, ..)| k).collect()
+}
+
+/// Close the side menus opened from the menu being drawn (another of its
+/// rows is hovered).
 pub fn close_side(ctx: &Context) {
-    if ctx.data(|d| d.get_temp::<Side>(side_id())).is_some() {
-        ctx.data_mut(|d| d.remove::<Side>(side_id()));
+    let d = depth(ctx);
+    let mut s = sides(ctx);
+    if s.len() > d {
+        s.truncate(d);
+        set_sides(ctx, s);
+        let mut n = nav(ctx);
+        n.level = n.level.min(d);
+        set_nav(ctx, n);
         ctx.request_repaint();
     }
 }
 
-/// A menu item whose side menu `key` opens to its right while it is
-/// hovered or clicked; the window draws that menu with [`side_menu`],
-/// from its own pass (eframe draws a window opened from a popup's pass,
-/// but never hands it its clicks).
-pub fn side_item(ui: &mut Ui, key: Id, icon: Option<Icon>, label: &str) {
+/// A menu item whose side menu `key` opens beside it while it is hovered
+/// or clicked, or with Right or Enter; the window draws that menu with
+/// [`side_menu`], from its own pass (eframe draws a window opened from a
+/// popup's pass, but never hands it its clicks).
+pub fn side_item(ui: &mut Ui, key: Id, icon: impl Into<Glyph>, label: &str) {
     let ctx = ui.ctx().clone();
-    let r = row(ui, icon, label, "", Some(Icon::ChevronRight), false);
-    let open = ctx.data(|d| d.get_temp::<Side>(side_id())).map(|(k, ..)| k) == Some(key);
+    let d = depth(&ctx);
+    let (r, run, right) = row(
+        ui,
+        icon.into(),
+        label,
+        "",
+        Some(Icon::ChevronRight),
+        false,
+        true,
+    );
+    let mut s = sides(&ctx);
+    let open = s.get(d).map(|(k, ..)| *k) == Some(key);
     if open {
         ui.painter().rect_filled(
             r.rect,
@@ -624,26 +887,39 @@ pub fn side_item(ui: &mut Ui, key: Id, icon: Option<Icon>, label: &str) {
             theme::palette(ui).surface_sunken.gamma_multiply(0.6),
         );
     }
-    if (r.hovered() || r.clicked()) && !open {
+    let keyboard = run || right;
+    if (r.hovered() || r.clicked() || keyboard) && !open {
         let origin: Pos2 = ctx
             .data(|d| d.get_temp(drawing_at_id()))
             .unwrap_or_default();
         // Its first row level with this one, past the menu's edge.
         let at = origin + Vec2::new(r.rect.right() + 8.0, r.rect.top());
         let left = origin.x + r.rect.left() - 8.0;
-        ctx.data_mut(|d| d.insert_temp(side_id(), (key, at, left)));
+        s.truncate(d);
+        s.push((key, at, left));
+        set_sides(&ctx, s);
         ctx.request_repaint();
+    }
+    if keyboard {
+        // The keyboard goes into it, on its first row.
+        let mut n = nav(&ctx);
+        n.level = d + 1;
+        grow(&mut n.index, d + 2);
+        n.index[d + 1] = Some(0);
+        set_nav(&ctx, n);
     }
 }
 
 /// The side menu `key`, while its item opened it.
 pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) {
-    let Some((open, mut at, left)) = ctx.data(|d| d.get_temp::<Side>(side_id())) else {
+    let s = sides(ctx);
+    let Some(i) = s.iter().position(|(k, ..)| *k == key) else {
         return;
     };
-    if open != key || !any_open(ctx) {
+    if !any_open(ctx) {
         return;
     }
+    let (_, mut at, left) = s[i];
     // Beside the menu, never over it: to its right, else to its left,
     // else on the side with more room, narrowed to fit (its text wraps).
     let mut width = width;
@@ -661,10 +937,28 @@ pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) 
             }
         }
     }
+    // Taller than the screen below its row: moved up, as far as the top,
+    // and scrolled when taller than the screen.
+    let screen_h = ctx
+        .input(|i| i.viewport().monitor_size)
+        .map_or(4000.0, |m| m.y);
+    let known: Option<Vec2> = ctx.data(|d| d.get_temp(key.with("size")));
+    if let Some(size) = known {
+        at.y = at.y.min(screen_h - size.y).max(0.0);
+    }
     let c = ctx.clone();
-    show(ctx, Slot::Submenu, key, at, width, |ui| {
+    let slot = Slot::Side(i.min(u8::MAX as usize) as u8);
+    show(ctx, slot, key, at, width, |ui| {
         ui.set_width(width - 12.0);
-        closable(&c, ui, add)
+        ui.spacing_mut().item_spacing.y = 0.0;
+        egui::ScrollArea::vertical()
+            .max_height(screen_h - 16.0)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                begin(&c, i + 1);
+                closable(&c, ui, add);
+                end(&c, i + 1);
+            });
     });
 }
 

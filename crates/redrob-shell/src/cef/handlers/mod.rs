@@ -107,6 +107,33 @@ pub fn run_op(sink: &Sink, browser: &Browser, op: Op) {
         }
         Op::Print => print::print(sink, browser),
         Op::Reader => reader::toggle(browser),
+        Op::Chrome(command) => {
+            if crate::cef::native::chrome_style() {
+                chrome::run(browser, command);
+            }
+        }
+        Op::Edit(e) => {
+            let frame = browser.focused_frame().or_else(|| browser.main_frame());
+            if let Some(f) = frame {
+                match e {
+                    crate::cdp::Edit::Cut => f.cut(),
+                    crate::cdp::Edit::Copy => f.copy(),
+                    crate::cdp::Edit::Paste => f.paste(),
+                }
+            }
+        }
+        Op::Commands => {
+            let chrome = crate::cef::native::chrome_style();
+            let on = |c: i32| chrome && chrome::enabled(browser, c);
+            let commands = crate::cdp::PageCommands {
+                translate: on(chrome::id::SHOW_TRANSLATE),
+                cast: on(chrome::id::ROUTE_MEDIA),
+                save: on(chrome::id::SAVE_PAGE),
+                qr: on(chrome::id::QRCODE_GENERATOR),
+                task_manager: on(chrome::id::TASK_MANAGER),
+            };
+            sink.send(browser.identifier(), Event::Commands(commands));
+        }
         _ => {}
     }
 }

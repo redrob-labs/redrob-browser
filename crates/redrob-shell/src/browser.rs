@@ -537,6 +537,9 @@ impl Browser {
             ext_read_at: 0.0,
             site_info: None,
             site_cert: false,
+            bookmark_bar: None,
+            reading_list: None,
+            page_commands: None,
             last_title: String::new(),
         }
     }

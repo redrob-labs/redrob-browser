@@ -166,6 +166,27 @@ pub struct Bookmark {
     pub folder: String,
 }
 
+/// The folder of "Other bookmarks", Chrome's second root: bookmarks not on
+/// the bar. Its subfolders are `"{OTHER}/name"`.
+pub const OTHER: &str = "\u{1}other";
+
+/// Whether `folder` is "Other bookmarks" or inside it.
+pub fn is_other(folder: &str) -> bool {
+    folder == OTHER || folder.starts_with(&format!("{OTHER}/"))
+}
+
+/// A folder path as people read it: its root's name for the roots.
+pub fn folder_label(folder: &str) -> String {
+    let other = crate::i18n::t("Other bookmarks");
+    if folder.is_empty() {
+        crate::i18n::t("Bookmarks bar").to_string()
+    } else if let Some(rest) = folder.strip_prefix(OTHER) {
+        format!("{other}{rest}")
+    } else {
+        folder.to_string()
+    }
+}
+
 #[derive(Clone)]
 pub struct HistoryEntry {
     pub url: String,
