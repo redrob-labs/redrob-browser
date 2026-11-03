@@ -98,6 +98,50 @@
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/plug.svg",
       "sha256": "a9049afac41660369c12a020c6557f6ddf2e070956ead07b60fb1b7df64dd4c8"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/check.svg",
+      "sha256": "b25503788f22ab08e2dbd3adb0001148a8efdd488c510dd8a50a5bb3ff78eb81"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/chevronDown.svg",
+      "sha256": "5b0fa83b20781f75f9f1cdb61bb6abab7e0c5f9fad4d0eccde7c0e2db69f7f15"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/chevronRight.svg",
+      "sha256": "94be3b91be359adc98117bec1d1e826ae11aa249e1f8079dc874a18e056d4c42"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/translate.svg",
+      "sha256": "7e0e8b3a3f0b0fef0b2e4924edc765df52789e1e0d4e781bf27efeae69ac2be9"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/bookmark.svg",
+      "sha256": "a9fa3cba428fd307a47c91ddcad8c8782cc9db49f4f068c2bfb86b126da948a7"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/minus.svg",
+      "sha256": "c7fbf5760622bf28895e47d4db67cb54acf759c832dbe49504728fc0cfc27cc1"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/fullscreen.svg",
+      "sha256": "db796263e14f127f98f342415560e0ae3fe5af2d640c47b837960a1053cec4ad"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/power.svg",
+      "sha256": "582e8377a7fd5535d778b8a62fce5cc7780c20c51e5917fc2ecac43aad82ffc4"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/print.svg",
+      "sha256": "63ecbc28207dda639e794c514f7c1414d318da1873d545199999df3318ae5e64"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/folderOpen.svg",
+      "sha256": "77fff86a3d509d9516227e373b09aed5f0747ebc0e9964533e388dfc5fab043e"
+    },
+    {
+      "file": "crates/redrob-shell/assets/redrob-ui/icons/signOut.svg",
+      "sha256": "eb3cc68bdb113612ec13c7c9319af24c34cefd61755552517eb1e2ad2c2befc5"
     }
   ],
   "font": {

@@ -8,8 +8,17 @@
 //! of its own: an egui viewport without a frame, above the browser window,
 //! which on X11 the window manager does not manage (override-redirect) and
 //! so never takes the keyboard from the window or the page.
+//!
+//! Chrome keeps its omnibox popup and menu widgets alive, and so does the
+//! window: one popup window per [`Slot`], made in the window's first
+//! frames and kept off screen while nothing shows in it. Opening one then
+//! moves a window that already has its GPU surface, instead of creating an
+//! OS window and a swapchain on the first letter typed.
 
-use egui::{Context, Id, Pos2, Rect, Response, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId};
+use crate::theme::{self, Icon};
+use egui::{
+    Context, Id, Pos2, Rect, Response, Sense, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportId,
+};
 
 /// Where the window's inner area starts on screen, in points.
 pub fn screen_origin(ctx: &Context) -> Pos2 {
@@ -22,20 +31,129 @@ pub fn to_screen(ctx: &Context, p: Pos2) -> Pos2 {
     p + screen_origin(ctx).to_vec2()
 }
 
-/// Show `add` in a popup window with its top-left at `at` (on screen, in
-/// points), sized to what it draws, at most `max_width` wide.
-/// `passthrough`: clicks go through it (tooltips, bubbles).
+/// The popup windows of a browser window, one each. Those that cannot be
+/// open together share one: menus (one open at a time), prompts.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Slot {
+    Suggestions,
+    Menu,
+    /// The side menu of a menu's item (Language, Import).
+    Submenu,
+    /// The page's context menu, which Chromium opens.
+    PageMenu,
+    /// A permission or "open with another app" prompt.
+    Prompt,
+    Tip,
+    Status,
+    /// The zoom level, for a moment after it changes.
+    Badge,
+}
+
+impl Slot {
+    /// In the order they are made: the address bar's first.
+    const ALL: [Slot; 8] = [
+        Slot::Suggestions,
+        Slot::Menu,
+        Slot::Tip,
+        Slot::Submenu,
+        Slot::PageMenu,
+        Slot::Status,
+        Slot::Badge,
+        Slot::Prompt,
+    ];
+
+    /// Clicks go through it (tooltips, bubbles).
+    fn passthrough(self) -> bool {
+        matches!(self, Slot::Tip | Slot::Status | Slot::Badge)
+    }
+
+    /// This slot's window for the browser window whose pass this is.
+    fn viewport(self, ctx: &Context) -> ViewportId {
+        ViewportId::from_hash_of(("redrob-popup", ctx.viewport_id(), self))
+    }
+
+    /// Everything about the window but its place and size: the same for
+    /// every frame, as a change of most of it makes eframe recreate it.
+    fn builder(self) -> ViewportBuilder {
+        ViewportBuilder::default()
+            .with_title("Redrob Browser")
+            .with_decorations(false)
+            .with_resizable(false)
+            .with_taskbar(false)
+            .with_active(false)
+            .with_always_on_top()
+            .with_override_redirect(true)
+            .with_window_type(if self.passthrough() {
+                egui::X11WindowType::Tooltip
+            } else {
+                egui::X11WindowType::PopupMenu
+            })
+            .with_mouse_passthrough(self.passthrough())
+    }
+}
+
+/// Off screen rather than hidden: showing a window on Windows and macOS
+/// gives it the keyboard.
+const PARKED: Pos2 = egui::pos2(-30000.0, -30000.0);
+
+/// What the window knows of one slot's window.
+#[derive(Clone, Copy, Default)]
+struct SlotState {
+    /// The pass it last showed something in, and what (its id).
+    shown: Option<(u64, Id)>,
+    /// Passes it has shown that in a row.
+    age: u32,
+    /// What it shows now waits off screen until measured.
+    measuring: bool,
+    /// The window exists (made or shown once).
+    made: bool,
+    /// The size it was last given.
+    size: Option<Vec2>,
+    /// Passes left in which its parked window is asked to paint, so eframe
+    /// makes its GPU surface before it is first needed.
+    warm: u8,
+}
+
+fn state_id(ctx: &Context, slot: Slot) -> Id {
+    Id::new(("redrob-popup-state", slot.viewport(ctx)))
+}
+
+fn state(ctx: &Context, slot: Slot) -> SlotState {
+    let id = state_id(ctx, slot);
+    ctx.data(|d| d.get_temp(id)).unwrap_or_default()
+}
+
+fn set_state(ctx: &Context, slot: Slot, s: SlotState) {
+    let id = state_id(ctx, slot);
+    ctx.data_mut(|d| d.insert_temp(id, s));
+}
+
+/// Where the popup being drawn has its top-left on screen (popups do not
+/// nest, so there is one).
+fn drawing_at_id() -> Id {
+    Id::new("redrob-popup-drawing-at")
+}
+
+/// Show `add` in `slot`'s window with its top-left at `at` (on screen, in
+/// points), sized to what it draws, at most `max_width` wide. `id` names
+/// what it shows: its size is remembered by it.
 pub fn show<R>(
     ctx: &Context,
+    slot: Slot,
     id: Id,
     at: Pos2,
     max_width: f32,
-    passthrough: bool,
     add: impl FnOnce(&mut Ui) -> R,
 ) -> R {
     let size_id = id.with("size");
-    let size: Vec2 = ctx
-        .data(|d| d.get_temp(size_id))
+    let known: Option<Vec2> = ctx.data(|d| d.get_temp(size_id));
+    let pass = ctx.cumulative_pass_nr();
+    let mut st = state(ctx, slot);
+    // Shown last pass too (whatever it showed): it stays where it is, and
+    // a change of size happens in place.
+    let continued = st.shown.is_some_and(|(last, _)| last + 1 >= pass);
+    let size = known
+        .or(st.size.filter(|_| continued))
         .unwrap_or(Vec2::new(max_width.min(200.0), 24.0));
     // On the screen: moved left or up where it would leave it.
     let at = match ctx.input(|i| i.viewport().monitor_size) {
@@ -49,45 +167,43 @@ pub fn show<R>(
         ),
         None => at,
     };
-    // A new popup window spends its first two frames off screen: the first
-    // measures what it draws, the second draws it at that size. Shown in
-    // place at once, it came up at a guessed size and grew a frame later
-    // (eframe resizes a window after drawing it), its unpainted part
-    // flashing over the page: the address bar's suggestions on the first
-    // letter typed. Off screen rather than hidden: showing a window on
-    // Windows and macOS gives it the keyboard.
-    let age_id = id.with("age");
-    let pass = ctx.cumulative_pass_nr();
-    let age = match ctx.data(|d| d.get_temp::<(u64, u32)>(age_id)) {
-        Some((last, age)) if last + 1 >= pass => age.saturating_add(u32::from(last != pass)),
-        _ => 0,
-    };
-    ctx.data_mut(|d| d.insert_temp(age_id, (pass, age)));
-    let at = if age < 2 {
+    // Something not measured yet spends its first two frames off screen:
+    // the first measures what it draws, the second draws it at that size.
+    // Shown in place at once, it came up at a guessed size and grew a frame
+    // later (eframe resizes a window after drawing it), its unpainted part
+    // flashing over the page. Once measured, it opens in place.
+    if continued {
+        st.age = st
+            .age
+            .saturating_add(u32::from(st.shown.map(|s| s.0) != Some(pass)));
+    } else {
+        st.age = 0;
+        st.measuring = known.is_none() || !st.made;
+    }
+    if st.measuring && st.age >= 2 {
+        st.measuring = false;
+    }
+    st.shown = Some((pass, id));
+    st.size = Some(size);
+    st.made = true;
+    set_state(ctx, slot, st);
+    let at = if st.measuring {
         ctx.request_repaint();
-        egui::pos2(-30000.0, -30000.0)
+        PARKED
     } else {
         at
     };
-    let builder = ViewportBuilder::default()
-        .with_title("Redrob Browser")
-        .with_decorations(false)
-        .with_resizable(false)
-        .with_taskbar(false)
-        .with_active(false)
-        .with_always_on_top()
-        .with_override_redirect(true)
-        .with_window_type(if passthrough {
-            egui::X11WindowType::Tooltip
-        } else {
-            egui::X11WindowType::PopupMenu
-        })
-        .with_mouse_passthrough(passthrough)
+    let builder = slot
+        .builder()
         .with_position(at.round())
         .with_inner_size(size);
     let parent = ctx.viewport_id();
     let mut add = Some(add);
-    ctx.show_viewport_immediate(ViewportId::from_hash_of(id), builder, |ui, _| {
+    let started = std::time::Instant::now();
+    ctx.data_mut(|d| d.insert_temp(drawing_at_id(), at));
+    let mut drawn = 0.0;
+    let r = ctx.show_viewport_immediate(slot.viewport(ctx), builder, |ui, _| {
+        let t = std::time::Instant::now();
         let room = Rect::from_min_size(Pos2::ZERO, Vec2::new(max_width, 4000.0));
         let mut child = ui.new_child(UiBuilder::new().max_rect(room));
         let frame = egui::Frame::popup(child.style())
@@ -99,14 +215,83 @@ pub fn show<R>(
             ui.ctx().data_mut(|d| d.insert_temp(size_id, used));
             ui.ctx().request_repaint_of(parent);
         }
+        drawn = t.elapsed().as_secs_f64() * 1000.0;
         r.inner
-    })
-    .expect("the popup's contents ran")
+    });
+    if crate::trace::on() {
+        eprintln!(
+            "redrob-browser: popup {slot:?} frame {}: {:.1} ms ({drawn:.1} ms laying out)",
+            st.age,
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    r.expect("the popup's contents ran")
+}
+
+/// Call last in the window's pass: the slots that showed nothing this pass
+/// keep their window, off screen. A slot's window is made the first time
+/// through here, one per pass, so none is made while the person types.
+fn park(ctx: &Context) {
+    // Viewports drawn inside the window: nothing to keep.
+    if ctx.embed_viewports() {
+        return;
+    }
+    let pass = ctx.cumulative_pass_nr();
+    let mut made_one = false;
+    for slot in Slot::ALL {
+        let mut st = state(ctx, slot);
+        if st.shown.is_some_and(|(last, _)| last == pass) {
+            continue;
+        }
+        if !st.made {
+            if made_one {
+                ctx.request_repaint();
+                continue;
+            }
+            made_one = true;
+            st.made = true;
+            crate::cdp::trace(format_args!("popup {slot:?}: window made, parked"));
+            st.warm = 3;
+        }
+        let viewport = slot.viewport(ctx);
+        ctx.show_viewport_deferred(viewport, slot.builder().with_position(PARKED), |_, _| {});
+        if st.warm > 0 {
+            st.warm -= 1;
+            ctx.request_repaint_of(viewport);
+            ctx.request_repaint();
+        }
+        set_state(ctx, slot, st);
+    }
+    // Then what they draw first: their icons.
+    let warmed = Id::new("redrob-popup-icons-warm");
+    if !made_one && !ctx.data(|d| d.get_temp::<bool>(warmed).unwrap_or(false)) {
+        ctx.data_mut(|d| d.insert_temp(warmed, true));
+        crate::trace::time("icons warmed", || Icon::warm(ctx));
+        // And the letters of the sizes they write in, so the first row
+        // drawn does not grow the font atlas glyph by glyph.
+        crate::trace::time("glyphs warmed", || {
+            let ascii: String = (' '..='~').collect();
+            ctx.fonts_mut(|f| {
+                for size in [12.0, 13.0, 14.0] {
+                    let _ = f.layout_no_wrap(
+                        ascii.clone(),
+                        egui::FontId::proportional(size),
+                        egui::Color32::WHITE,
+                    );
+                }
+            });
+        });
+    }
 }
 
 /// Which menu of this window is open: one at a time, as in Chrome.
 fn open_id() -> Id {
     Id::new("redrob-open-menu")
+}
+
+/// The open side menu of the open menu, and where it goes on screen.
+fn side_id() -> Id {
+    Id::new("redrob-open-side-menu")
 }
 
 fn is_open(ctx: &Context, id: Id) -> bool {
@@ -122,7 +307,10 @@ fn set_open(ctx: &Context, id: Option<Id>) {
             d.remove::<Id>(open_id());
         }
     });
-    ctx.data_mut(|d| d.remove::<Id>(Id::new("redrob-open-submenu")));
+    ctx.data_mut(|d| {
+        d.remove::<Id>(Id::new("redrob-open-submenu"));
+        d.remove::<(Id, Pos2)>(side_id());
+    });
 }
 
 /// Close this window's open menu (a click elsewhere, Escape, the page took
@@ -148,6 +336,11 @@ fn toggled(ctx: &Context) {
 /// menu closes the open one, and so does leaving for another program (no
 /// window of this one has the keyboard, and the page does not either).
 pub fn end_frame(ctx: &Context, page_focused: bool) {
+    close_on_leave(ctx, page_focused);
+    park(ctx);
+}
+
+fn close_on_leave(ctx: &Context, page_focused: bool) {
     let toggled = ctx.data_mut(|d| d.remove_temp::<bool>(toggled_id()).unwrap_or(false));
     if !any_open(ctx) {
         return;
@@ -202,9 +395,8 @@ pub fn menu(r: &Response, width: f32, right: bool, add: impl FnOnce(&mut Ui)) {
         r.rect.left()
     };
     let at = to_screen(&ctx, egui::pos2(x, r.rect.bottom() + 2.0));
-    ctx.data_mut(|d| d.insert_temp(Id::new("redrob-menu-at"), at));
     let c = ctx.clone();
-    show(&ctx, id, at, width, false, |ui| {
+    show(&ctx, Slot::Menu, id, at, width, |ui| {
         ui.set_width(width - 12.0);
         closable(&c, ui, add)
     });
@@ -228,7 +420,7 @@ pub fn context_menu(r: &Response, add: impl FnOnce(&mut Ui)) {
     }
     let at: Pos2 = ctx.data(|d| d.get_temp(at_id)).unwrap_or_default();
     let c = ctx.clone();
-    show(&ctx, id, at, 260.0, false, |ui| {
+    show(&ctx, Slot::Menu, id, at, 260.0, |ui| {
         ui.set_min_width(180.0);
         closable(&c, ui, add)
     });
@@ -237,24 +429,29 @@ pub fn context_menu(r: &Response, add: impl FnOnce(&mut Ui)) {
 /// A menu at `at` (on screen) shown while `open`: the page's context menu,
 /// whose opening Chromium reports. Returns what `add` returns.
 pub fn menu_at<R>(ctx: &Context, id: Id, at: Pos2, add: impl FnOnce(&mut Ui) -> R) -> R {
-    show(ctx, id, at, 280.0, false, |ui| {
+    show(ctx, Slot::PageMenu, id, at, 280.0, |ui| {
         ui.set_min_width(200.0);
         add(ui)
     })
 }
 
-/// An item of a menu that opens `add` under it, inside the same menu: a
-/// menu window cannot open another one beside it (eframe draws a window
-/// opened from a popup's pass, but never hands it its clicks).
+/// An item of a menu that opens `add` under it, inside the same menu.
 pub fn submenu(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     let ctx = ui.ctx().clone();
     let sub_id = Id::new("redrob-open-submenu");
     let id = ui.id().with(("submenu", label));
     let open = ctx.data(|d| d.get_temp::<Id>(sub_id)) == Some(id);
-    let r = ui.add(
-        egui::Button::new(format!("{label}  {}", if open { "⌄" } else { "›" }))
-            .frame(false)
-            .min_size(Vec2::new(ui.available_width(), 28.0)),
+    let r = row(
+        ui,
+        None,
+        label,
+        "",
+        Some(if open {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        }),
+        false,
     );
     if r.clicked() || (r.hovered() && !open) {
         ctx.data_mut(|d| {
@@ -269,6 +466,187 @@ pub fn submenu(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
     if open {
         ui.indent(id, add);
     }
+}
+
+/// Height of a menu row, as Chrome's.
+pub const ROW: f32 = 32.0;
+/// Room for a row's icon, shown or not: every label starts at the same x.
+const ICON_SLOT: f32 = 16.0;
+const PAD: f32 = 12.0;
+
+/// One menu row: an icon slot (empty for `None`), the label, then a muted
+/// shortcut or a chevron at the right edge. `checked` marks the current
+/// choice (a language) with a check in the icon slot.
+fn row(
+    ui: &mut Ui,
+    icon: Option<Icon>,
+    label: &str,
+    shortcut: &str,
+    end: Option<Icon>,
+    checked: bool,
+) -> Response {
+    let p = *theme::palette(ui);
+    let (rect, r) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return r;
+    }
+    if r.hovered() || r.has_focus() {
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius::same(theme::size::RADIUS_SM),
+            p.surface_sunken,
+        );
+    }
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(rect.left() + PAD + ICON_SLOT / 2.0, rect.center().y),
+        Vec2::splat(ICON_SLOT),
+    );
+    let icon = if checked { Some(Icon::Check) } else { icon };
+    if let Some(icon) = icon {
+        icon.paint(
+            ui,
+            icon_rect,
+            if checked {
+                p.ink_brand
+            } else {
+                p.ink_secondary
+            },
+        );
+    }
+    let painter = ui.painter_at(rect);
+    let mut right = rect.right() - PAD;
+    if let Some(end) = end {
+        let r = Rect::from_center_size(egui::pos2(right - 7.0, rect.center().y), Vec2::splat(14.0));
+        end.paint(ui, r, p.ink_muted);
+        right = r.left() - 8.0;
+    } else if !shortcut.is_empty() {
+        let g = painter.layout_no_wrap(
+            shortcut.to_string(),
+            egui::FontId::proportional(12.0),
+            p.ink_muted,
+        );
+        let x = right - g.size().x;
+        painter.galley(
+            egui::pos2(x, rect.center().y - g.size().y / 2.0),
+            g,
+            p.ink_muted,
+        );
+        right = x - 12.0;
+    }
+    let x = icon_rect.right() + PAD;
+    let label_painter = ui.painter_at(Rect::from_x_y_ranges(x..=right, rect.y_range()));
+    label_painter.text(
+        egui::pos2(x, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(13.0),
+        p.ink_primary,
+    );
+    r
+}
+
+/// A menu item: an icon slot, the label and its shortcut, right-aligned.
+/// Hovering it closes the open side menu, as in Chrome.
+pub fn item(ui: &mut Ui, icon: Option<Icon>, label: &str, shortcut: &str) -> Response {
+    let r = row(ui, icon, label, shortcut, None, false);
+    if r.hovered() {
+        close_side(ui.ctx());
+    }
+    r
+}
+
+/// Where a row's label starts: past its icon slot.
+pub const LABEL_X: f32 = PAD + ICON_SLOT + PAD;
+
+/// A row that only says something (who is signed in), muted.
+pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
+    let p = *theme::palette(ui);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW), Sense::hover());
+    if let Some(icon) = icon {
+        icon.paint(
+            ui,
+            Rect::from_center_size(
+                egui::pos2(rect.left() + PAD + ICON_SLOT / 2.0, rect.center().y),
+                Vec2::splat(ICON_SLOT),
+            ),
+            p.ink_muted,
+        );
+    }
+    ui.painter_at(rect.shrink2(Vec2::new(PAD, 0.0))).text(
+        egui::pos2(rect.left() + LABEL_X, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(12.0),
+        p.ink_muted,
+    );
+}
+
+/// An item of a side menu marking the current choice.
+pub fn choice(ui: &mut Ui, label: &str, current: bool) -> Response {
+    row(ui, None, label, "", None, current)
+}
+
+/// Close the open side menu (another row of its menu is hovered).
+pub fn close_side(ctx: &Context) {
+    if ctx.data(|d| d.get_temp::<(Id, Pos2)>(side_id())).is_some() {
+        ctx.data_mut(|d| d.remove::<(Id, Pos2)>(side_id()));
+        ctx.request_repaint();
+    }
+}
+
+/// A menu item whose side menu `key` opens to its right while it is
+/// hovered or clicked; the window draws that menu with [`side_menu`],
+/// from its own pass (eframe draws a window opened from a popup's pass,
+/// but never hands it its clicks).
+pub fn side_item(ui: &mut Ui, key: Id, icon: Option<Icon>, label: &str) {
+    let ctx = ui.ctx().clone();
+    let r = row(ui, icon, label, "", Some(Icon::ChevronRight), false);
+    let open = ctx
+        .data(|d| d.get_temp::<(Id, Pos2)>(side_id()))
+        .map(|(k, _)| k)
+        == Some(key);
+    if open {
+        ui.painter().rect_filled(
+            r.rect,
+            egui::CornerRadius::same(theme::size::RADIUS_SM),
+            theme::palette(ui).surface_sunken.gamma_multiply(0.6),
+        );
+    }
+    if (r.hovered() || r.clicked()) && !open {
+        let origin: Pos2 = ctx
+            .data(|d| d.get_temp(drawing_at_id()))
+            .unwrap_or_default();
+        // Its first row level with this one, past the menu's edge.
+        let at = origin + Vec2::new(r.rect.right() + 8.0, r.rect.top());
+        ctx.data_mut(|d| d.insert_temp(side_id(), (key, at)));
+        ctx.request_repaint();
+    }
+}
+
+/// The side menu `key`, while its item opened it.
+pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) {
+    let Some((open, at)) = ctx.data(|d| d.get_temp::<(Id, Pos2)>(side_id())) else {
+        return;
+    };
+    if open != key || !any_open(ctx) {
+        return;
+    }
+    let c = ctx.clone();
+    show(ctx, Slot::Submenu, key, at, width, |ui| {
+        ui.set_width(width - 12.0);
+        closable(&c, ui, add)
+    });
+}
+
+/// A separator between a menu's groups.
+pub fn separator(ui: &mut Ui) {
+    let p = theme::palette(ui);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 9.0), Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        egui::Stroke::new(1.0, p.border_subtle),
+    );
 }
 
 /// Hover text for `r` in a window of its own (it may reach over the page).
@@ -287,7 +665,7 @@ pub fn tip(r: Response, text: &str) -> Response {
         return r;
     };
     let at = to_screen(&ctx, p + Vec2::new(12.0, 18.0));
-    show(&ctx, r.id.with("tip"), at, 420.0, true, |ui| {
+    show(&ctx, Slot::Tip, r.id.with("tip"), at, 420.0, |ui| {
         ui.label(text);
     });
     r
@@ -302,14 +680,14 @@ pub fn status(ctx: &Context, page: Rect, link: &str) {
         .data(|d| d.get_temp::<Vec2>(size_id))
         .map_or(24.0, |s| s.y);
     let at = to_screen(ctx, egui::pos2(page.left(), page.bottom() - h));
-    show(
-        ctx,
-        Id::new("redrob-status"),
-        at,
-        page.width() * 0.6,
-        true,
-        |ui| {
-            ui.label(egui::RichText::new(text).size(12.0));
-        },
-    );
+    // Remembered by its text: another link opens measured, not in place
+    // at the last one's size.
+    let id = Id::new(("redrob-status", text.as_str()));
+    let size = ctx.data(|d| d.get_temp::<Vec2>(id.with("size")));
+    if let Some(s) = size {
+        ctx.data_mut(|d| d.insert_temp(size_id, s));
+    }
+    show(ctx, Slot::Status, id, at, page.width() * 0.6, |ui| {
+        ui.label(egui::RichText::new(text).size(12.0));
+    });
 }

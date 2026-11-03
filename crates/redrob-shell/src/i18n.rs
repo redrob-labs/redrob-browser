@@ -425,6 +425,15 @@ fn ko(en: &str) -> Option<&'static str> {
         "Issued through {0} more certificates" => "인증서 {0}개를 거쳐 발급됐어요",
         "Copy certificate" => "인증서 복사",
         "Copied the certificate (PEM)." => "인증서(PEM)를 복사했어요.",
+        "Import bookmarks and settings" => "북마크 및 설정 가져오기",
+        "Zoom" => "확대/축소",
+        "Zoom in" => "확대",
+        "Zoom out" => "축소",
+        "Full screen" => "전체 화면",
+        "Exit full screen" => "전체 화면 종료",
+        "Print..." => "인쇄...",
+        "Find..." => "찾기...",
+        "Exit" => "종료",
         _ => return None,
     })
 }

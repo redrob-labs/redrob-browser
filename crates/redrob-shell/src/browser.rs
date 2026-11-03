@@ -818,7 +818,9 @@ impl Browser {
         }
         self.shared.lend(w);
         crate::ime::before_pass(&ctx, focused);
+        let start = std::time::Instant::now();
         w.frame(ui);
+        crate::trace::frame(&ctx, start);
         crate::ime::after_pass(&ctx, focused);
         // The page has the keyboard: its window is the one in front (the
         // window itself then reads as unfocused).
@@ -1268,7 +1270,8 @@ impl eframe::App for App {
         crate::cef::shutdown();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        crate::trace::last_frame_cpu(ui.ctx(), frame.info().cpu_usage);
         let me = self.0.clone();
         lock(&self.0).root_pass(ui, &me);
     }

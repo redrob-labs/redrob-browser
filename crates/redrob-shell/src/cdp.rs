@@ -1182,10 +1182,15 @@ impl Engine {
 
 /// `REDROB_TRACE=1`: what the engine does with pages and the keyboard.
 pub fn trace(what: std::fmt::Arguments<'_>) {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *ON.get_or_init(|| std::env::var_os("REDROB_TRACE").is_some()) {
+    if tracing() {
         eprintln!("redrob-browser: {what}");
     }
+}
+
+/// Whether `REDROB_TRACE` is set.
+pub fn tracing() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("REDROB_TRACE").is_some())
 }
 
 fn run(window: WindowId, cmd: Command) {
