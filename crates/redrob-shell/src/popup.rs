@@ -467,6 +467,23 @@ impl Act {
     }
 }
 
+/// The pointer is over `r` and moving: only that opens or closes a side
+/// menu, so one the keyboard opened, or Escape closed, stays as it is
+/// under a pointer at rest.
+/// The pointer moved in this window this pass (entering it counts; egui's
+/// own `is_moving` needs two samples, so a jump onto a row reads as still).
+pub fn pointer_moved(ui: &Ui) -> bool {
+    ui.input(|i| {
+        i.events
+            .iter()
+            .any(|e| matches!(e, egui::Event::PointerMoved(_)))
+    })
+}
+
+fn moved_onto(ui: &Ui, r: &Response) -> bool {
+    r.hovered() && pointer_moved(ui)
+}
+
 /// Count a row of the menu being drawn and say whether the keyboard has it:
 /// (highlighted, Enter runs it, Right opens it).
 fn nav_row(ui: &Ui, r: &Response) -> (bool, bool, bool) {
@@ -477,7 +494,7 @@ fn nav_row(ui: &Ui, r: &Response) -> (bool, bool, bool) {
     grow(&mut n.index, d + 1);
     let index = n.drawn[d];
     n.drawn[d] += 1;
-    if r.hovered() && ui.input(|i| i.pointer.is_moving() || i.pointer.any_pressed()) {
+    if r.hovered() && (pointer_moved(ui) || ui.input(|i| i.pointer.any_pressed())) {
         n.keyboard = false;
         n.level = d;
         n.index[d] = Some(index);
@@ -794,7 +811,7 @@ fn row(
 /// Hovering it closes the side menus opened from its menu, as in Chrome.
 pub fn item(ui: &mut Ui, icon: impl Into<Glyph>, label: &str, shortcut: &str) -> Act {
     let (r, run, _) = row(ui, icon.into(), label, shortcut, None, false, true);
-    if r.hovered() {
+    if moved_onto(ui, &r) {
         close_side(ui.ctx());
     }
     Act { r, run }
@@ -836,7 +853,7 @@ pub fn note(ui: &mut Ui, icon: Option<Icon>, text: &str) {
 /// its end (the key that picks it).
 pub fn choice_with(ui: &mut Ui, label: &str, current: bool, shortcut: &str) -> Act {
     let (r, run, _) = row(ui, Glyph::None, label, shortcut, None, current, true);
-    if r.hovered() {
+    if moved_onto(ui, &r) {
         close_side(ui.ctx());
     }
     Act { r, run }
@@ -888,7 +905,7 @@ pub fn side_item(ui: &mut Ui, key: Id, icon: impl Into<Glyph>, label: &str) {
         );
     }
     let keyboard = run || right;
-    if (r.hovered() || r.clicked() || keyboard) && !open {
+    if (moved_onto(ui, &r) || r.clicked() || keyboard) && !open {
         let origin: Pos2 = ctx
             .data(|d| d.get_temp(drawing_at_id()))
             .unwrap_or_default();
@@ -922,13 +939,15 @@ pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) 
     let (_, mut at, left) = s[i];
     // Beside the menu, never over it: to its right, else to its left,
     // else on the side with more room, narrowed to fit (its text wraps).
+    // Its window is `width` plus the frame's 1 point border on each side.
+    const BORDER: f32 = 2.0;
     let mut width = width;
     if let Some(m) = ctx.input(|i| i.viewport().monitor_size) {
-        let right = (m.x - at.x).max(0.0);
-        let left_room = left.max(0.0);
+        let right = (m.x - at.x - BORDER).max(0.0);
+        let left_room = (left - BORDER).max(0.0);
         if width > right {
             if width <= left_room {
-                at.x = left - width;
+                at.x = left - width - BORDER;
             } else if left_room > right {
                 width = left_room;
                 at.x = 0.0;

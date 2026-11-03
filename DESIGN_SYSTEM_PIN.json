@@ -196,16 +196,8 @@
       "sha256": "e07823a0878032c8f345b2c600b41d5e8d9ef5e507748ba28d41cd545ff11628"
     },
     {
-      "file": "crates/redrob-shell/assets/redrob-ui/icons/monitor.svg",
-      "sha256": "30e1beb183207954b79821ec99cd8596439f4fd8c329687edb9fa47e1dd49d6b"
-    },
-    {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/save.svg",
       "sha256": "b4392e45d9dcbb778cecd4af95c16642ee34157777647f655117f020eee565c0"
-    },
-    {
-      "file": "crates/redrob-shell/assets/redrob-ui/icons/qr.svg",
-      "sha256": "78bec58c1d0bca1d99fef4566db0d3d56ea3462ca801572d25f80bacea197bda"
     },
     {
       "file": "crates/redrob-shell/assets/redrob-ui/icons/link.svg",

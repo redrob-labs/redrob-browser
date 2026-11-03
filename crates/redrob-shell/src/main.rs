@@ -636,6 +636,11 @@ impl Window {
                 self.focus_page = true;
             } else if t.url == NEW_TAB {
                 self.focus_address = true;
+            } else {
+                // One of our own pages: the window takes the keyboard back
+                // from the page that had it, which is no longer on screen,
+                // so the shortcuts keep working.
+                self.take_keyboard = true;
             }
         }
     }
@@ -2296,10 +2301,6 @@ impl Window {
             }
         });
         side_menu(&ctx, share, 280.0, |ui| {
-            if cmds.cast && item(ui, Some(Icon::Monitor), t("Cast..."), "").clicked() {
-                self.chrome_command(cef::handlers::chrome::id::ROUTE_MEDIA);
-                ui.close();
-            }
             if cmds.save
                 && item(
                     ui,
@@ -2312,19 +2313,18 @@ impl Window {
                 self.chrome_command(cef::handlers::chrome::id::SAVE_PAGE);
                 ui.close();
             }
-            if (cmds.cast || cmds.save) && web {
+            // Cast and the QR code are Chrome bubbles anchored to Chrome's own
+            // toolbar, which a page in this window does not have: they would
+            // open nothing, so they are not offered.
+            if cmds.save && web {
                 popup::separator(ui);
-            }
-            if cmds.qr && item(ui, Some(Icon::Qr), t("Create QR code"), "").clicked() {
-                self.chrome_command(cef::handlers::chrome::id::QRCODE_GENERATOR);
-                ui.close();
             }
             if web && item(ui, Some(Icon::Link), t("Copy link"), "").clicked() {
                 ui.ctx().copy_text(url.clone());
                 self.notice = Some(t("Link copied.").to_string());
                 ui.close();
             }
-            if !(web || cmds.cast || cmds.save || cmds.qr) {
+            if !(web || cmds.save) {
                 popup::note(ui, None, t("Nothing to share on this page."));
             }
         });
@@ -4068,7 +4068,7 @@ fn zoom_row(ui: &mut egui::Ui, percent: u32, fullscreen: bool, web: bool) -> Opt
     let p = *theme::palette(ui);
     let (rect, hover) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), popup::ROW), Sense::hover());
-    if hover.hovered() {
+    if hover.hovered() && popup::pointer_moved(ui) {
         popup::close_side(ui.ctx());
     }
     ui.painter().text(

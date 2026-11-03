@@ -146,9 +146,7 @@ pub enum Edit {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PageCommands {
     pub translate: bool,
-    pub cast: bool,
     pub save: bool,
-    pub qr: bool,
     pub task_manager: bool,
 }
 
