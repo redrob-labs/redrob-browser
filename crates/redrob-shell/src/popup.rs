@@ -254,7 +254,13 @@ fn park(ctx: &Context) {
             st.warm = 3;
         }
         let viewport = slot.viewport(ctx);
-        ctx.show_viewport_deferred(viewport, slot.builder().with_position(PARKED), |_, _| {});
+        let mut builder = slot.builder().with_position(PARKED);
+        if st.size.is_none() {
+            // Small until it shows something: a parked window still
+            // paints, and the first thing shown is measured anyway.
+            builder = builder.with_inner_size(Vec2::new(240.0, 120.0));
+        }
+        ctx.show_viewport_deferred(viewport, builder, |_, _| {});
         if st.warm > 0 {
             st.warm -= 1;
             ctx.request_repaint_of(viewport);
@@ -290,6 +296,10 @@ fn open_id() -> Id {
 }
 
 /// The open side menu of the open menu, and where it goes on screen.
+/// The open side menu's key, its top-left past the menu's right edge, and
+/// the menu's left edge (it opens there where the screen ends).
+type Side = (Id, Pos2, f32);
+
 fn side_id() -> Id {
     Id::new("redrob-open-side-menu")
 }
@@ -309,7 +319,7 @@ fn set_open(ctx: &Context, id: Option<Id>) {
     });
     ctx.data_mut(|d| {
         d.remove::<Id>(Id::new("redrob-open-submenu"));
-        d.remove::<(Id, Pos2)>(side_id());
+        d.remove::<Side>(side_id());
     });
 }
 
@@ -588,8 +598,8 @@ pub fn choice(ui: &mut Ui, label: &str, current: bool) -> Response {
 
 /// Close the open side menu (another row of its menu is hovered).
 pub fn close_side(ctx: &Context) {
-    if ctx.data(|d| d.get_temp::<(Id, Pos2)>(side_id())).is_some() {
-        ctx.data_mut(|d| d.remove::<(Id, Pos2)>(side_id()));
+    if ctx.data(|d| d.get_temp::<Side>(side_id())).is_some() {
+        ctx.data_mut(|d| d.remove::<Side>(side_id()));
         ctx.request_repaint();
     }
 }
@@ -601,10 +611,7 @@ pub fn close_side(ctx: &Context) {
 pub fn side_item(ui: &mut Ui, key: Id, icon: Option<Icon>, label: &str) {
     let ctx = ui.ctx().clone();
     let r = row(ui, icon, label, "", Some(Icon::ChevronRight), false);
-    let open = ctx
-        .data(|d| d.get_temp::<(Id, Pos2)>(side_id()))
-        .map(|(k, _)| k)
-        == Some(key);
+    let open = ctx.data(|d| d.get_temp::<Side>(side_id())).map(|(k, ..)| k) == Some(key);
     if open {
         ui.painter().rect_filled(
             r.rect,
@@ -618,18 +625,25 @@ pub fn side_item(ui: &mut Ui, key: Id, icon: Option<Icon>, label: &str) {
             .unwrap_or_default();
         // Its first row level with this one, past the menu's edge.
         let at = origin + Vec2::new(r.rect.right() + 8.0, r.rect.top());
-        ctx.data_mut(|d| d.insert_temp(side_id(), (key, at)));
+        let left = origin.x + r.rect.left() - 8.0;
+        ctx.data_mut(|d| d.insert_temp(side_id(), (key, at, left)));
         ctx.request_repaint();
     }
 }
 
 /// The side menu `key`, while its item opened it.
 pub fn side_menu(ctx: &Context, key: Id, width: f32, add: impl FnOnce(&mut Ui)) {
-    let Some((open, at)) = ctx.data(|d| d.get_temp::<(Id, Pos2)>(side_id())) else {
+    let Some((open, mut at, left)) = ctx.data(|d| d.get_temp::<Side>(side_id())) else {
         return;
     };
     if open != key || !any_open(ctx) {
         return;
+    }
+    if ctx
+        .input(|i| i.viewport().monitor_size)
+        .is_some_and(|m| at.x + width > m.x)
+    {
+        at.x = (left - width).max(0.0);
     }
     let c = ctx.clone();
     show(ctx, Slot::Submenu, key, at, width, |ui| {
